@@ -1,0 +1,10 @@
+site/
+__pycache__/
+*.pyc
+.env
+*.vbo
+*.mp4
+*.npz
+*.pkl
+*.pt
+kaggle_data/

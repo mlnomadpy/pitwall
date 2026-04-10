@@ -1,0 +1,57 @@
+site_name: Pitwall Sprint — Trustable AI Racing Coach
+site_description: Split-brain AI coaching for Sonoma Raceway, powered by Gemma 4 + Gemini 3 + Antigravity
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: deep orange
+    accent: amber
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+
+markdown_extensions:
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.details
+  - admonition
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Telemetry Pipeline: telemetry-pipeline.md
+  - Coaching Engine: coaching-engine.md
+  - Pedagogy: pedagogy.md
+  - Hardware: hardware.md
+  - UX: ux.md
+  - Feedback System: feedback-system.md
+  - ML Models: ml-models.md
+  - Model Methodology & Results: model-methodology.md
+  - Sprint Plan: sprint-plan.md
+  - ADR:
+      - Overview: adr/index.md
+      - "001: Confidence-Annotated Frame": adr/001-confidence-frame.md
+      - "002: Split-Brain with Arbiter": adr/002-split-brain-arbiter.md
+      - "003: Gemma 4 Edge LLM": adr/003-gemma-edge.md
+      - "004: Antigravity Store-and-Forward": adr/004-antigravity-pipeline.md
+      - "005: Pedagogical Vector Retrieval": adr/005-pedagogical-vectors.md
+      - "006: Sensor Fusion for Racelogic + OBDLink": adr/006-sensor-fusion.md
+      - "007: Event-Sourced Driver Profile": adr/007-event-sourced-profile.md
+      - "008: Rule Regression Testing": adr/008-rule-testing.md
+      - "009: Graceful Degradation": adr/009-graceful-degradation.md
