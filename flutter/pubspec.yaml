@@ -1,0 +1,34 @@
+name: pitwall
+description: AI Racing Coach — Pixel 10 Edge + Vertex AI warm path
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Charts for paddock dashboard
+  fl_chart: ^0.69.0
+
+  # Local preferences
+  shared_preferences: ^2.3.3
+
+  # JSON
+  json_annotation: ^4.9.0
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Google Fonts
+  google_fonts: ^6.2.1
+
+  # File picker (VBO replay file selection)
+  file_picker: ^8.1.2
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/tracks/
+    - assets/models/
