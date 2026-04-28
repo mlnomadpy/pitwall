@@ -39,6 +39,9 @@ from track_loader import (
     is_in_corner, is_past_apex, get_sector,
 )
 from audio_engine import create_audio_engine
+from coach_engine import (
+    CoachArbiter, build_context, make_coach,
+)
 
 # Try loading LSTM sonic model, fall back to v1
 try:
@@ -55,13 +58,25 @@ from sonic_model import compute_cues as compute_cues_v1
 class SessionManager:
     """Manages the telemetry session — replay or live."""
 
-    def __init__(self, track_path, model_path=None):
+    def __init__(
+        self,
+        track_path,
+        model_path=None,
+        *,
+        driver_level: str = "intermediate",
+        coach_kind: str = "auto",
+        coach_url: str = "http://127.0.0.1:8080",
+        coach_model: str = "local",
+        voice_enabled: bool = True,
+    ):
         self.track = load_track(track_path)
         self.audio = create_audio_engine()
+        self.voice_enabled = voice_enabled
         self.recording = False
         self.running = False
         self.current_frame = None
         self.current_cues = []
+        self.current_voice = ""
         self.frame_count = 0
         self.session_start = 0
         self.lap = 0
@@ -76,6 +91,17 @@ class SessionManager:
                 print(f"  LSTM Sonic Model v2 loaded")
             except Exception as e:
                 print(f"  LSTM load failed: {e}, using v1")
+
+        # Verbal coach (rally-style pace notes) + arbiter
+        self.driver_level = driver_level
+        self.coach = make_coach(
+            kind=coach_kind,
+            base_url=coach_url,
+            model=coach_model,
+            driver_level=driver_level,
+        )
+        self.arbiter = CoachArbiter(cooldown_s=3.0, stale_s=5.0)
+        print(f"  Coach: {self.coach.name} (driver={driver_level})")
 
     def start_replay(self, vbo_path, speed=1.0, on_frame=None):
         """Replay a VBO file."""
@@ -118,8 +144,38 @@ class SessionManager:
             self.current_cues = cues
             self.audio.set_cues(cues)
 
+            # Verbal coach: build context, propose, send through arbiter
+            voice_line = ""
+            try:
+                ctx = build_context(
+                    driver_level=self.driver_level,
+                    track=self.track,
+                    frame=f,
+                    next_corner=next_c,
+                    meters_to_entry=(
+                        distance_to_corner(self.track, f.distance, next_c)
+                        if next_c else 999.0
+                    ),
+                    in_corner_obj=corner,
+                    past_apex=is_past_apex(self.track, f.distance) is not None,
+                )
+                proposal = self.coach.propose(ctx)
+                on_straight = abs(f.g_lat) < 0.3 and corner is None
+                emitted = self.arbiter.submit(
+                    proposal, now=f.timestamp, on_straight=on_straight,
+                )
+                if emitted is not None:
+                    voice_line = emitted.text
+                    if self.voice_enabled:
+                        self.audio.speak(voice_line)
+            except Exception as e:
+                # Coach must never take down the pipeline
+                voice_line = f"(coach error: {e.__class__.__name__})"
+
+            self.current_voice = voice_line
+
             if on_frame:
-                on_frame(i, f, cues, corner, next_c)
+                on_frame(i, f, cues, corner, next_c, voice_line)
 
             # Timing
             if speed > 0 and i < len(frames) - 1:
@@ -144,7 +200,14 @@ def run_simple(args):
     print("=" * 60)
 
     model_path = os.path.join(os.path.dirname(__file__), "models", "lstm_v3.pt")
-    session = SessionManager(args.track, model_path)
+    session = SessionManager(
+        args.track, model_path,
+        driver_level=args.level,
+        coach_kind=args.coach,
+        coach_url=args.coach_url,
+        coach_model=args.coach_model,
+        voice_enabled=args.voice_enabled,
+    )
     print(f"Track: {session.track.name} ({session.track.track_length:.0f}m, {len(session.track.corners)} corners)")
 
     if args.replay:
@@ -152,7 +215,7 @@ def run_simple(args):
         print(f"Speed: {args.speed}x")
         print()
 
-        def on_frame(i, f, cues, corner, next_c):
+        def on_frame(i, f, cues, corner, next_c, voice=""):
             # Clear and redraw
             speed_kmh = f.speed * 3.6
             speed_mph = f.speed * 2.237
@@ -191,6 +254,8 @@ def run_simple(args):
                     lines.append(f"  {pcolor}{sym}\033[0m {c.layer:<16} {c.frequency:5.0f}Hz vol {c.volume:.2f}  \033[2m{c.reason[:50]}\033[0m")
             else:
                 lines.append(f"  \033[2m(silence)\033[0m")
+            if voice:
+                lines.append(f"  \033[96m📢\033[0m \033[1m{voice}\033[0m")
 
             sys.stdout.write("\033[2J\033[H" + "\n".join(lines) + "\n")
             sys.stdout.flush()
@@ -267,12 +332,20 @@ if HAS_TEXTUAL:
             ("r", "toggle_record", "Record"),
         ]
 
-        def __init__(self, track_path, replay_path=None, speed=1.0):
+        def __init__(self, track_path, replay_path=None, speed=1.0,
+                     level="intermediate", coach="auto",
+                     coach_url="http://127.0.0.1:8080", coach_model="local",
+                     voice_enabled=True):
             super().__init__()
             self.track_path = track_path
             self.replay_path = replay_path
             self.speed = speed
             self.session = None
+            self._level = level
+            self._coach = coach
+            self._coach_url = coach_url
+            self._coach_model = coach_model
+            self._voice_enabled = voice_enabled
 
         def compose(self) -> ComposeResult:
             yield Static("🏁 PITWALL", id="header_bar")
@@ -289,9 +362,16 @@ if HAS_TEXTUAL:
 
         def on_mount(self):
             model_path = os.path.join(os.path.dirname(__file__), "models", "lstm_v3.pt")
-            self.session = SessionManager(self.track_path, model_path)
+            self.session = SessionManager(
+                self.track_path, model_path,
+                driver_level=self._level,
+                coach_kind=self._coach,
+                coach_url=self._coach_url,
+                coach_model=self._coach_model,
+                voice_enabled=self._voice_enabled,
+            )
             self.query_one("#status_bar").update(
-                f"Ready | {self.session.track.name} | {len(self.session.track.corners)} corners"
+                f"Ready | {self.session.track.name} | {len(self.session.track.corners)} corners | coach={self.session.coach.name}"
             )
 
         def on_button_pressed(self, event: Button.Pressed):
@@ -310,7 +390,7 @@ if HAS_TEXTUAL:
                 self.call_from_thread(self.notify, "No replay file. Use --replay")
                 return
 
-            def on_frame(i, f, cues, corner, next_c):
+            def on_frame(i, f, cues, corner, next_c, voice=""):
                 speed_mph = f.speed * 2.237
                 speed_kmh = f.speed * 3.6
                 grip = min(f.combo_g / 2.29 * 100, 150)
@@ -341,6 +421,8 @@ if HAS_TEXTUAL:
                     )
                 else:
                     cue_text = "(silence)"
+                if voice:
+                    cue_text = f"📢  {voice}\n" + cue_text
 
                 self.call_from_thread(self.query_one("#cue_display").update, cue_text)
                 self.call_from_thread(
@@ -369,10 +451,27 @@ def main():
     parser = argparse.ArgumentParser(description="Pitwall Terminal App")
     parser.add_argument("--replay", help="VBO file to replay")
     parser.add_argument("--track", required=True, help="Track JSON file")
-    parser.add_argument("--speed", type=float, default=1.0, help="Playback speed")
+    parser.add_argument("--speed", type=float, default=1.0, help="Playback speed (0=as fast as possible)")
     parser.add_argument("--simple", action="store_true", help="Force simple mode (no textual)")
     parser.add_argument("--live", action="store_true", help="Live Bluetooth mode (not yet implemented)")
+    parser.add_argument("--level", default="intermediate",
+                        choices=["beginner", "intermediate", "pro"],
+                        help="Driver level — tunes coach phrasing")
+    parser.add_argument("--coach", default="auto",
+                        choices=["auto", "rule", "llamacpp", "ollama", "openai"],
+                        help="Coach engine. 'auto' tries llama.cpp then falls back to rule.")
+    parser.add_argument("--coach-url", default="http://127.0.0.1:8080",
+                        help="OpenAI-compatible base URL (llama.cpp llama-server default)")
+    parser.add_argument("--coach-model", default="local",
+                        help="Model name to send in the API request (any string for llama.cpp)")
+    parser.add_argument("--no-voice", action="store_true",
+                        help="Suppress TTS playback (still prints/displays voice lines). "
+                             "Auto-enabled when --speed != 1.0 to avoid swamping the audio daemon.")
+    parser.add_argument("--voice", action="store_true",
+                        help="Force TTS playback even at non-realtime speed (use with care).")
     args = parser.parse_args()
+    # Batch-speed runs default to no voice so we don't saturate coreaudiod
+    args.voice_enabled = bool(args.voice) or (not args.no_voice and args.speed == 1.0)
 
     if args.live:
         print("Live Bluetooth mode not yet implemented. Use --replay for now.")
@@ -383,7 +482,12 @@ def main():
             print("(textual not installed — using simple mode)")
         run_simple(args)
     else:
-        app = PitwallTUI(args.track, args.replay, args.speed)
+        app = PitwallTUI(
+            args.track, args.replay, args.speed,
+            level=args.level, coach=args.coach,
+            coach_url=args.coach_url, coach_model=args.coach_model,
+            voice_enabled=args.voice_enabled,
+        )
         app.run()
 
 

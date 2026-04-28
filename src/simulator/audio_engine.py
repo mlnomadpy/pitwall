@@ -1,13 +1,22 @@
 """
-Audio Engine — synthesizes tones from AudioCue objects.
+Audio Engine — synthesizes tones from AudioCue objects, plus voice TTS.
 
-Works on both laptop (for development) and Termux (for in-car).
-Uses sounddevice for cross-platform audio output.
+Works on laptop (for development), Termux (for in-car phone use), and
+plain Linux. Uses sounddevice for cross-platform tone output. Voice/TTS
+is routed per-platform:
+
+  - Termux (detected via /data/data/com.termux): subprocess termux-tts-speak
+  - macOS:                                       subprocess `say`
+  - Linux:                                       subprocess `espeak` if present
+  - else:                                        prints to stdout
 
 Falls back to silent mode if sounddevice is not available.
 """
 
-import math
+import os
+import shutil
+import subprocess
+import sys
 import threading
 import time
 from collections import deque
@@ -18,6 +27,51 @@ try:
     HAS_AUDIO = True
 except ImportError:
     HAS_AUDIO = False
+
+
+# ─── Platform detection ──────────────────────────────────────────────────────
+
+
+def _detect_platform() -> str:
+    if os.path.isdir("/data/data/com.termux") or os.environ.get("TERMUX_VERSION"):
+        return "termux"
+    if sys.platform == "darwin":
+        return "macos"
+    if sys.platform.startswith("linux"):
+        return "linux"
+    return "other"
+
+
+PLATFORM = _detect_platform()
+
+
+def _pick_tts():
+    """Return a callable speak(text) -> None for this platform, or None."""
+    if PLATFORM == "termux" and shutil.which("termux-tts-speak"):
+        def speak(text: str):
+            subprocess.Popen(
+                ["termux-tts-speak", text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        return speak
+    if PLATFORM == "macos" and shutil.which("say"):
+        def speak(text: str):
+            subprocess.Popen(
+                ["say", text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        return speak
+    if PLATFORM == "linux" and shutil.which("espeak"):
+        def speak(text: str):
+            subprocess.Popen(
+                ["espeak", text],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        return speak
+    return None
+
+
+_TTS = _pick_tts()
 
 
 class AudioEngine:
@@ -89,6 +143,21 @@ class AudioEngine:
         with self.lock:
             self.layers = {}
 
+    def speak(self, text: str):
+        """Speak a coaching line via the platform TTS. Non-blocking.
+        On platforms without a TTS, falls back to stdout so the demo path
+        still surfaces what would have been said.
+        """
+        if not text:
+            return
+        if _TTS is not None:
+            try:
+                _TTS(text)
+                return
+            except Exception:
+                pass
+        print(f"  \033[96m[voice]\033[0m {text}")
+
     def _audio_callback(self, outdata, frames, time_info, status):
         """Called by sounddevice to fill the audio buffer."""
         if not self.running:
@@ -155,10 +224,12 @@ class AudioEngine:
 
 
 class SilentAudioEngine:
-    """Fallback when sounddevice is not available. Logs cues to console."""
+    """Fallback when sounddevice is not available. Logs cues + voice to console.
+    Voice still routes through the platform TTS — only tones are silenced."""
 
     def start(self):
-        print("  Audio: silent mode (no sounddevice)")
+        tts = "TTS" if _TTS is not None else "stdout"
+        print(f"  Audio: silent tones (no sounddevice). Voice → {tts} on {PLATFORM}.")
 
     def stop(self):
         pass
@@ -168,6 +239,17 @@ class SilentAudioEngine:
 
     def silence(self):
         pass
+
+    def speak(self, text: str):
+        if not text:
+            return
+        if _TTS is not None:
+            try:
+                _TTS(text)
+                return
+            except Exception:
+                pass
+        print(f"  \033[96m[voice]\033[0m {text}")
 
 
 def create_audio_engine():
