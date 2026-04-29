@@ -1,5 +1,9 @@
 site_name: Pitwall Sprint — Trustable AI Racing Coach
+site_url: https://www.tahabouhsine.com/pitwall/
 site_description: Split-brain AI coaching for Sonoma Raceway, powered by Gemma 4 + Gemini 3 + Antigravity
+repo_url: https://github.com/mlnomadpy/pitwall
+repo_name: mlnomadpy/pitwall
+edit_uri: edit/master/docs/
 
 theme:
   name: material
@@ -49,6 +53,7 @@ nav:
   - Hardware: hardware.md
   - UX: ux.md
   - Feedback System: feedback-system.md
+  - Driver Profile Metrics: metrics.md
   - ML Models: ml-models.md
   - Model Methodology & Results: model-methodology.md
   - Sprint Plan: sprint-plan.md
