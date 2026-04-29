@@ -19,3 +19,7 @@ android/app/build/
 build/
 .gradle/
 bridge.log
+
+android/.idea/caches/
+android/.idea/workspace.xml
+android/.idea/tasks.xml
