@@ -29,6 +29,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 
@@ -49,6 +50,11 @@ class CoachContext:
     next_brake_peak_bar: float = 0.0
     next_apex_speed_kmh: float = 0.0
     next_elevation_change_m: float = 0.0
+    # Marker context — preferred over raw distance when present
+    next_brake_marker_label: str = ""    # e.g. "the bridge", "the bump"
+    next_apex_marker_label: str = ""     # e.g. "the K-wall bend"
+    next_corner_tip: str = ""            # one-line Bentley-style tip per corner
+    next_corner_nickname: str = ""       # e.g. "the Carousel", "Calamity Corner"
     # Current state
     speed_kmh: float = 0.0
     brake_pct: float = 0.0
@@ -174,13 +180,25 @@ class RuleCoach(CoachEngine):
         elif c.next_elevation_change_m >= 5:
             elev_hint = ", uphill"
 
+        # Use the corner's nickname when one exists ("the Carousel" beats "Turn 6")
+        corner_name = c.next_corner_nickname or c.next_corner_name
+        # Prefer the named brake marker when available ("brake at the bridge"
+        # beats "brake at 60m") — Sonoma intel doc finding.
+        brake_phrase = (
+            f"brake at {c.next_brake_marker_label}"
+            if c.next_brake_marker_label
+            else (f"brake {bz}" if bz > 0 else "")
+        )
+
         if self.driver_level == "beginner":
-            if 0 < m_in < 250 and c.next_corner_name:
+            if 0 < m_in < 250 and corner_name:
                 if c.bentley_concept == "downhill_brake":
-                    return f"{c.next_corner_name} ahead, brake early, it goes down"
+                    return f"{corner_name} ahead, brake early, it goes down"
                 if c.bentley_concept == "eob":
-                    return f"{c.next_corner_name} coming up, look into the corner"
-                return f"{c.next_corner_name} in {m_in} meters, brake smoothly"
+                    return f"{corner_name} coming up, look into the corner"
+                if c.next_brake_marker_label:
+                    return f"{corner_name} in {m_in} meters, {brake_phrase}"
+                return f"{corner_name} in {m_in} meters, brake smoothly"
             if c.bentley_concept == "hustle":
                 return "full throttle here"
             if c.bentley_concept == "entry_release":
@@ -188,17 +206,22 @@ class RuleCoach(CoachEngine):
             return ""
 
         if self.driver_level == "pro":
-            if 0 < m_in < 250 and c.next_corner_name:
-                return f"{c.next_corner_name} {m_in}m, BP {bz}m, apex {apex}"
+            if 0 < m_in < 250 and corner_name:
+                if c.next_brake_marker_label:
+                    return f"{corner_name} {m_in}m, {c.next_brake_marker_label}, apex {apex}"
+                return f"{corner_name} {m_in}m, BP {bz}m, apex {apex}"
             if c.bentley_concept == "hustle":
                 return "hustle"
             return ""
 
-        # intermediate (default)
-        if 0 < m_in < 250 and c.next_corner_name:
-            base = f"{m_in}, {d} {sev}".strip(", ")
-            if bz > 0:
-                base += f", brake {bz}"
+        # intermediate (default) — pace-note shorthand with optional landmark
+        if 0 < m_in < 250 and corner_name:
+            head = f"{m_in}, {d} {sev}".strip(", ")
+            base = head
+            if c.next_corner_nickname:
+                base = f"{m_in}, {c.next_corner_nickname}"
+            if brake_phrase:
+                base += f", {brake_phrase}"
             if c.bentley_concept == "late_apex":
                 base += ", late apex"
             elif c.bentley_concept == "eob":
@@ -214,55 +237,254 @@ class RuleCoach(CoachEngine):
         return ""
 
 
-# ─── llama.cpp / OpenAI-compatible HTTP coach ────────────────────────────────
+# ─── System prompts (single source of truth, used by every LLM coach) ───────
+#
+# Backend owns all prompt construction. Frontends should never assemble or
+# tune these — they call the bridge and render the resulting text. Adding
+# a new track or new driver level = edit here, no Kotlin/Flutter change.
+
+_BASE_SYSTEM_PROMPT = (
+    "You are a rally-style racing co-driver riding shotgun. Your job is "
+    "to call the next corner BEFORE the driver reaches it, not narrate "
+    "what they're doing now. Coaching is grounded in Ross Bentley's "
+    "Speed Secrets curriculum: smooth is fast, exit speed beats corner "
+    "speed, late apex, end-of-braking before begin-of-braking, look "
+    "where you want to go.\n\n"
+    "RULES:\n"
+    "- ONE line. No emoji. No quotes around the line.\n"
+    "- Reply with an EMPTY string when there is nothing useful to say.\n"
+    "- Prefer named landmarks over distances when one is given.\n"
+    "- Never overlap a previous message — if in doubt, stay silent.\n"
+    "- Safety overrides everything: if gLat > 1.5G or combo G > 2.0, "
+    "say only the safety word ('Lift!', 'Brake!', 'Easy!') and nothing else.\n"
+)
+
+_LEVEL_SYSTEM_PROMPT = {
+    "beginner": (
+        "DRIVER LEVEL: beginner. Use full short sentences, simple verbs, "
+        "8–12 words max. Say what to do, not why. Encouragement is fine "
+        "between corners. Examples: 'Brake at the bridge, then turn in.', "
+        "'Stay smooth here.', 'Wait for the corner to open.'"
+    ),
+    "intermediate": (
+        "DRIVER LEVEL: intermediate. Use rally-pace-note shorthand: "
+        "<distance> <direction> <severity> [, named landmark or technique hint] "
+        "[, hint about elevation/grip]. 6–12 words. Examples: "
+        "'185, left 6, brake at the bridge, uphill', "
+        "'128, the Carousel, brake at the slight crest, downhill', "
+        "'230, Calamity Corner, wait for the bump.'"
+    ),
+    "pro": (
+        "DRIVER LEVEL: pro. Terse: corner_id + meters + landmark or "
+        "delta. 3–7 words. Examples: 'T11 230m, the bump.', "
+        "'T6 80m, lift not brake.', 'BP +8m.'"
+    ),
+}
+
+_TRACK_LORE = {
+    "Sonoma Raceway": (
+        "TRACK CONTEXT: Sonoma Raceway, 4.06 km, 49 m elevation. "
+        "Reference vocabulary at Sonoma is environmental, not numeric. "
+        "Use these names when relevant: 'the bridge' (T2 brake), "
+        "'the K-wall bend' (T1 apex), 'the Carousel' (T6), "
+        "'the slight crest' (T6 brake), 'the 300 board' (T7 brake), "
+        "'the Toyota sign letters' (T10 visual), "
+        "'Calamity Corner' (T11 hairpin), "
+        "'the bump where the road widens left' (T11 brake — wait for "
+        "the car to settle), 'the third tire stack' (T11 apex). "
+        "\n"
+        "STRATEGY: T3 is a give-away (sacrifice for T3a/T4); "
+        "T5 is throwaway (preserve T6 entry); T6 punishes early throttle; "
+        "T10 is fastest — most drivers brake when they only need a lift; "
+        "T11 has no painted brake board — the bump is the reference. "
+        "\n"
+        "T-ROD VOICE (canonical pace-note phrasings, BMW M3 intermediate-driver "
+        "session at Sonoma): "
+        "'Distance is king' for long sweepers (T6, T7, T11 — cut the inside, "
+        "do not open up to carry mph). "
+        "'Be closer to the tire stacks' for T11. "
+        "'Open up nine, straight shot to ten.' "
+        "'Single apex, treat as double' for T7 (cut entry, rotate, hit "
+        "second apex). "
+        "'Just go 100' when the driver hesitates at 60% throttle "
+        "(60→100% is only ~20 ft-lbs of torque). "
+        "'Wait, you're not at the apex yet' to delay early throttle. "
+        "'Roll the brake to the apex' (peak then taper, not square-wave; "
+        "off-brake at maximum-grip mid-corner). "
+        "'Trust the curb, it catches you' (Sonoma's serrated berms are "
+        "banked in the driver's favour). "
+        "'Cool-down means same line, slower.' "
+        "M3-specific: boosted brake is feathery — focus on application "
+        "before adding more inputs."
+    ),
+}
 
 
-class LlamaCppCoach(CoachEngine):
-    """Talks to an OpenAI-compatible chat completions endpoint.
+def build_system_prompt(driver_level: str, track_name: str = "") -> str:
+    """Compose the full system prompt for any LLM coach.
 
-    Default base URL is the llama.cpp llama-server default
-    (`http://127.0.0.1:8080`). Same client works against Ollama on 11434,
-    OpenAI api.openai.com, Together, Groq, etc. — anything that speaks
-    OpenAI's /v1/chat/completions schema.
+    Single source of truth used by LlamaCppCoach, TfliteCoach, and any
+    future GeminiCoach. Frontends never call this — they call the bridge.
+    """
+    parts = [_BASE_SYSTEM_PROMPT.strip()]
+    parts.append(_LEVEL_SYSTEM_PROMPT.get(driver_level, _LEVEL_SYSTEM_PROMPT["intermediate"]).strip())
+    if track_name and track_name in _TRACK_LORE:
+        parts.append(_TRACK_LORE[track_name].strip())
+    return "\n\n".join(parts)
 
-    On any error (server not up, timeout, malformed response) the engine
-    returns None so the caller can fall back to RuleCoach.
+
+_USER_PROMPT_TEMPLATE = (
+    "UPCOMING: {corner} {direction} sev{severity} in {m_in} m, "
+    "brake_zone {bz} m peaking {bar} bar, apex {apex} km/h, elev {elev} m.\n"
+    "{landmark_hint}"
+    "NOW: {speed} km/h, brake {brake}%, throttle {thr}%, gLat {glat:+.2f}.\n"
+    "PEDAGOGY: {concept} — {tip}\n"
+    "{tip_hint}"
+    "Speak the pace note now."
+)
+
+
+def build_user_prompt(ctx) -> str:
+    """Compose the per-frame user prompt. Reuses every CoachContext field
+    including the marker labels populated by build_context().
+    """
+    landmark_hint = ""
+    if ctx.next_brake_marker_label:
+        landmark_hint = f"BRAKE LANDMARK: {ctx.next_brake_marker_label}\n"
+    elif ctx.next_apex_marker_label:
+        landmark_hint = f"APEX LANDMARK: {ctx.next_apex_marker_label}\n"
+    tip_hint = f"COACHING TIP: {ctx.next_corner_tip}\n" if ctx.next_corner_tip else ""
+
+    return _USER_PROMPT_TEMPLATE.format(
+        corner=ctx.next_corner_nickname or ctx.next_corner_name or "none",
+        direction=ctx.next_corner_direction or "-",
+        severity=ctx.next_corner_severity,
+        m_in=int(round(ctx.meters_to_entry)) if ctx.meters_to_entry < 999 else 999,
+        bz=int(round(ctx.next_brake_zone_m)),
+        bar=int(round(ctx.next_brake_peak_bar)),
+        apex=int(round(ctx.next_apex_speed_kmh)),
+        elev=int(round(ctx.next_elevation_change_m)),
+        speed=int(round(ctx.speed_kmh)),
+        brake=int(round(ctx.brake_pct)),
+        thr=int(round(ctx.throttle_pct)),
+        glat=ctx.g_lat,
+        concept=ctx.bentley_concept or "look_ahead",
+        tip=ctx.bentley_tip or "eyes far ahead",
+        landmark_hint=landmark_hint,
+        tip_hint=tip_hint,
+    )
+
+
+
+
+# ─── On-device LiteRT-LM coach — MediaPipe Genai LLM Inference ────────────────
+
+
+class LitertCoach(CoachEngine):
+    """Backend-owned on-device LLM inference via MediaPipe Genai's
+    `LlmInference` API. Targets the Gemma 4 LiteRT-LM `.task` artifact published
+    at `litert-community/gemma-4-E2B-it-litert-lm` on Hugging Face.
+
+    Why MediaPipe Genai (not tflite_runtime):
+      - Gemma 4 ships as a `.task` file (LiteRT-LM format), not a raw `.tflite`.
+        The `.task` bundle includes the model, tokenizer, KV-cache config, and
+        prompt template — all handled by the LlmInference API.
+      - On supported devices, the API picks the best backend (XNNPack on CPU,
+        ML Drift on GPU, Tensor TPU when available).
+      - One call: `llm.generate_response(prompt)` instead of a manual decode
+        loop. No tokenizer juggling, no tensor shape gymnastics.
+
+    On a Pixel running Termux:
+        pkg install python
+        pip install mediapipe
+        # Push the .task file to ~/storage/shared/Pitwall/models/
+        # (the canonical path is gemma-4-E2B-it.task)
+
+    If MediaPipe isn't available, the model file is missing, or any runtime
+    error occurs, this coach falls through to RuleCoach so the bridge stays
+    useful. Backend keeps a single source of truth for system instructions
+    via build_system_prompt / build_user_prompt per ADR-013.
     """
 
-    name = "llamacpp"
+    name = "litert"
+
+    DEFAULT_MODEL_PATHS = [
+        # Termux on Pixel — shared storage that both Kotlin and Python can read
+        "~/storage/shared/Pitwall/models/gemma-4-E2B-it.task",
+        # Repo-local fallback for dev machines
+        "models/gemma-4-E2B-it.task",
+    ]
 
     def __init__(
         self,
-        base_url: str = "http://127.0.0.1:8080",
-        model: str = "local",
+        model_path: str = "",
+        *,
         driver_level: str = "intermediate",
-        timeout_s: float = 1.0,
+        max_tokens: int = 32,
+        temperature: float = 0.4,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
         self.driver_level = driver_level
-        self.timeout_s = timeout_s
+        self.max_tokens = max_tokens
+        self.temperature = temperature
         self._fallback = RuleCoach(driver_level)
-        # Lazy import so the module loads on phones without `requests`
-        try:
-            import requests  # noqa: F401
-            self._has_requests = True
-        except ImportError:
-            self._has_requests = False
+        self._llm = None
+        self._init_error: Optional[str] = None
 
-    def health(self) -> bool:
-        if not self._has_requests:
-            return False
-        import requests
+        # All heavy imports are lazy + caught — LitertCoach must construct
+        # cleanly on machines without mediapipe so make_coach("auto") can
+        # probe + fall back without crashing the bridge.
         try:
-            r = requests.get(self.base_url + "/v1/models", timeout=self.timeout_s)
-            return r.status_code < 500
-        except Exception:
-            return False
+            self._init_runtime(model_path)
+        except Exception as e:
+            self._init_error = f"{type(e).__name__}: {e}"
+
+    # ---- runtime init -------------------------------------------------------
+
+    def _init_runtime(self, model_path: str):
+        try:
+            from mediapipe.tasks.python.genai import inference  # type: ignore
+        except ImportError as e:
+            raise RuntimeError(
+                f"mediapipe not installed ({e}). "
+                f"On Termux: pip install mediapipe"
+            )
+
+        path = self._resolve_model_path(model_path)
+        if path is None:
+            raise FileNotFoundError(
+                f"no Gemma 4 .task file found in {self.DEFAULT_MODEL_PATHS}"
+            )
+
+        opts = inference.LlmInferenceOptions(
+            model_path=str(path),
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_k=40,
+        )
+        self._llm = inference.LlmInference.create_from_options(opts)
+
+    def _resolve_model_path(self, model_path: str) -> Optional[Path]:
+        candidates = [model_path] if model_path else self.DEFAULT_MODEL_PATHS
+        for c in candidates:
+            if not c:
+                continue
+            p = Path(os.path.expanduser(c))
+            if p.exists():
+                return p
+        return None
+
+    # ---- public API ---------------------------------------------------------
+
+    def health(self) -> dict:
+        return {
+            "loaded":   self._llm is not None,
+            "error":    self._init_error or "",
+            "fallback": self._fallback.name,
+        }
 
     def propose(self, ctx: CoachContext) -> Optional[CoachingMessage]:
-        # Same gating as RuleCoach: don't even prompt the LLM if there's
-        # nothing within range and no concept worth voicing.
+        # Gating mirrors RuleCoach: skip the inference when there's nothing
+        # worth voicing. Saves TPU/CPU cycles when on a long straight.
         if not ctx.next_corner_name and ctx.bentley_concept in ("look_ahead", ""):
             return None
         if not (0 < ctx.meters_to_entry < 250 or ctx.bentley_concept in (
@@ -270,82 +492,47 @@ class LlamaCppCoach(CoachEngine):
         )):
             return None
 
-        if not self._has_requests:
+        # If runtime didn't load, behave exactly like RuleCoach
+        if self._llm is None:
             return self._fallback.propose(ctx)
 
-        import requests
-
-        prompt = self._build_prompt(ctx)
         try:
-            r = requests.post(
-                self.base_url + "/v1/chat/completions",
-                json={
-                    "model": self.model,
-                    "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "max_tokens": 32,
-                    "temperature": 0.4,
-                    "stream": False,
-                },
-                timeout=self.timeout_s,
-            )
-            if r.status_code != 200:
-                return self._fallback.propose(ctx)
-            data = r.json()
-            text = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-            if not text:
-                return None
-            # Trim multi-line responses to the first line
-            text = text.splitlines()[0].strip()
-            if not text:
-                return None
-            prio = 2 if ctx.bentley_concept == "entry_release" else 1
-            return CoachingMessage(
-                text=text,
-                priority=prio,
-                reason=f"llamacpp:{ctx.bentley_concept}",
-            )
+            text = self._infer(ctx)
         except Exception:
             return self._fallback.propose(ctx)
 
-    def _build_prompt(self, ctx: CoachContext) -> str:
-        return _USER_PROMPT_TEMPLATE.format(
-            level=self.driver_level,
-            track=ctx.track_name,
-            corner=ctx.next_corner_name or "none",
-            direction=ctx.next_corner_direction or "-",
-            severity=ctx.next_corner_severity,
-            m_in=int(round(ctx.meters_to_entry)) if ctx.meters_to_entry < 999 else 999,
-            bz=int(round(ctx.next_brake_zone_m)),
-            bar=int(round(ctx.next_brake_peak_bar)),
-            apex=int(round(ctx.next_apex_speed_kmh)),
-            elev=int(round(ctx.next_elevation_change_m)),
-            speed=int(round(ctx.speed_kmh)),
-            brake=int(round(ctx.brake_pct)),
-            thr=int(round(ctx.throttle_pct)),
-            glat=ctx.g_lat,
-            concept=ctx.bentley_concept or "look_ahead",
-            tip=ctx.bentley_tip or "eyes far ahead",
+        text = (text or "").strip().strip('"').strip("'")
+        if not text:
+            return None
+        text = text.splitlines()[0].strip()
+        if not text:
+            return None
+
+        prio = 2 if ctx.bentley_concept == "entry_release" else 1
+        return CoachingMessage(
+            text=text,
+            priority=prio,
+            reason=f"litert:{ctx.bentley_concept}",
         )
 
+    # ---- inference ----------------------------------------------------------
 
-_SYSTEM_PROMPT = (
-    "You are a rally co-driver. Reply with ONE short line in pace-note "
-    "shorthand, no more than 14 words, no emoji, no quotes. Reply with an "
-    "EMPTY string when nothing useful needs to be said."
-)
+    def _infer(self, ctx: CoachContext) -> str:
+        """One-shot generation via MediaPipe Genai. Combines the system and
+        user prompts into the Gemma chat template the .task file expects.
+        """
+        system_prompt = build_system_prompt(self.driver_level, ctx.track_name)
+        user_prompt = build_user_prompt(ctx)
+        full = (
+            f"<start_of_turn>system\n{system_prompt}<end_of_turn>\n"
+            f"<start_of_turn>user\n{user_prompt}<end_of_turn>\n"
+            f"<start_of_turn>model\n"
+        )
+        return self._llm.generate_response(full) or ""
 
 
-_USER_PROMPT_TEMPLATE = (
-    "DRIVER: {level} on {track}.\n"
-    "UPCOMING: {corner} {direction} sev{severity} in {m_in} m, "
-    "brake_zone {bz} m peaking {bar} bar, apex {apex} km/h, elev {elev} m.\n"
-    "NOW: {speed} km/h, brake {brake}%, throttle {thr}%, gLat {glat:+.2f}.\n"
-    "PEDAGOGY: {concept} — {tip}\n"
-    "Speak the pace note now."
-)
+# Legacy alias — keeps any older callers working until full rename lands
+TfliteCoach = LitertCoach
 
 
 # ─── Helpers for callers ──────────────────────────────────────────────────────
@@ -366,6 +553,25 @@ def build_context(
     Single helper used by both RuleCoach and LlamaCppCoach so the gating logic
     is identical regardless of which engine is active.
     """
+    # Marker lookup — only meaningful when there's an upcoming corner
+    next_brake_marker = ""
+    next_apex_marker = ""
+    next_tip = ""
+    next_nick = ""
+    if next_corner is not None:
+        next_tip = getattr(next_corner, "coaching_tip", "") or ""
+        nicks = getattr(next_corner, "nicknames", []) or []
+        next_nick = nicks[0] if nicks else ""
+        # Pick the closest brake_ref marker on this corner
+        markers = getattr(next_corner, "markers", []) or []
+        if markers:
+            brake_marks = [m for m in markers if m.kind == "brake_ref"]
+            apex_marks = [m for m in markers if m.kind == "apex_ref"]
+            if brake_marks:
+                next_brake_marker = brake_marks[0].label
+            if apex_marks:
+                next_apex_marker = apex_marks[0].label
+
     ctx = CoachContext(
         driver_level=driver_level,
         track_name=track.name,
@@ -377,6 +583,10 @@ def build_context(
         next_brake_peak_bar=float(next_corner.brake_pressure) if next_corner else 0.0,
         next_apex_speed_kmh=float(next_corner.apex_speed) * 3.6 if next_corner else 0.0,
         next_elevation_change_m=float(next_corner.elevation_change) if next_corner else 0.0,
+        next_brake_marker_label=next_brake_marker,
+        next_apex_marker_label=next_apex_marker,
+        next_corner_tip=next_tip,
+        next_corner_nickname=next_nick,
         speed_kmh=frame.speed * 3.6,
         brake_pct=min(frame.brake_pressure, 100.0),
         throttle_pct=float(frame.throttle),
@@ -394,24 +604,34 @@ def build_context(
 def make_coach(
     kind: str = "auto",
     *,
-    base_url: str = "http://127.0.0.1:8080",
-    model: str = "local",
     driver_level: str = "intermediate",
+    litert_model_path: str = "",
+    # Back-compat alias; older callers may pass `tflite_model_path=`
+    tflite_model_path: str = "",
 ) -> CoachEngine:
     """Factory.
 
-    kind="auto"     : try llama.cpp; if /v1/models doesn't respond, RuleCoach.
-    kind="llamacpp" : force llama.cpp (will still fall back per-call on errors).
-    kind="rule"     : force the templated coach.
+    kind="auto"     : try litert; fall back to rule if the model doesn't load.
+    kind="litert"   : force on-device LiteRT-LM via MediaPipe Genai —
+                      LitertCoach internally falls back to RuleCoach output
+                      if mediapipe isn't installed or the .task file is
+                      missing, so calling code can always rely on getting
+                      *something* back.
+    kind="rule"     : force the zero-dep templated coach.
     """
+    model_path = litert_model_path or tflite_model_path
     if kind == "rule":
         return RuleCoach(driver_level=driver_level)
-    if kind in ("llamacpp", "ollama", "openai"):
-        return LlamaCppCoach(base_url=base_url, model=model, driver_level=driver_level)
+    # "tflite" kept as a deprecated alias for one cycle
+    if kind in ("litert", "tflite"):
+        return LitertCoach(model_path=model_path, driver_level=driver_level)
     if kind == "auto":
-        candidate = LlamaCppCoach(base_url=base_url, model=model, driver_level=driver_level)
-        if candidate.health():
-            return candidate
+        try:
+            engine = LitertCoach(model_path=model_path, driver_level=driver_level)
+            if engine._llm is not None:
+                return engine
+        except Exception:
+            pass
         return RuleCoach(driver_level=driver_level)
     raise ValueError(f"unknown coach kind: {kind!r}")
 

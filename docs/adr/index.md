@@ -15,3 +15,8 @@ Decisions for the Pitwall Sprint, adapted from the [Pitwall open-source project]
 | [007](007-event-sourced-profile.md) | Event-Sourced Driver Profile | Accepted | From Pitwall ADR-023, unchanged |
 | [008](008-rule-testing.md) | Pedagogical Vector Regression Testing | Accepted | From Pitwall ADR-027, adapted for vectors |
 | [009](009-graceful-degradation.md) | Graceful Degradation Protocol | Accepted | From Pitwall ADR-028, adapted for single-device |
+| [010](010-http-bridge-warm-path.md) | HTTP Bridge as Warm-Path Tier 1 | Accepted | New 2026-04-28 — codifies `tools/pitwall_bridge.py` |
+| [011](011-named-marker-schema.md) | Named-Marker Schema for Track Coaching | Accepted | New 2026-04-28 — markers, nicknames, coaching tips |
+| [012](012-coach-engine-adapter.md) | Coach Engine Adapter (on-device LiteRT-LM) | Accepted | New 2026-04-28 — `RuleCoach` + `LitertCoach` |
+| [013](013-frontend-backend-boundary.md) | Frontend Visualizes, Backend Reasons | Accepted | New 2026-04-28 — backend owns LLM logic + system prompts |
+| [014](014-sonoma-as-the-product.md) | Sonoma is the Product | Accepted | New 2026-04-28 — three-mode coaching + analysis pipeline + visualisation bundles, all Sonoma-hardcoded |

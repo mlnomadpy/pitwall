@@ -2,6 +2,17 @@
 
 April 8 -- May 30, 2026. Engineering-first with a hard technical gate.
 
+!!! success "Delivered post-merge (2026-04-28)"
+    Several deliverables originally pegged to the architecture-gate (Apr 29) and integration phases landed early. The current state:
+
+    - **Bridge + Coach engine wired**: `tools/pitwall_bridge.py:/analyze` returns rally-style pace notes from `RuleCoach` + `LitertCoach`, persists them to DuckDB. See [`api.md`](api.md), [ADR-010](adr/010-http-bridge-warm-path.md).
+    - **On-device LLM committed**: Gemma 4 E2B via MediaPipe Genai (LiteRT-LM `.task` from `litert-community/gemma-4-E2B-it-litert-lm`). No cloud LLM tier. See [ADR-012](adr/012-coach-engine-adapter.md).
+    - **Frontend / backend boundary defined**: backend owns LLM logic + system prompts; frontend renders only. See [ADR-013](adr/013-frontend-backend-boundary.md).
+    - **Sonoma research integrated**: 16 named track markers across 8 corners, per-corner Bentley + T-Rod tips, T-Rod voice in the Sonoma system prompt. 42 % of pace notes per lap reference real landmarks. See [`markers.md`](markers.md), [`sonoma_track_intelligence.md`](sonoma_track_intelligence.md), [`trod_sonoma_session.md`](trod_sonoma_session.md).
+    - **Session management API**: `/session/start`, `/sessions`, `/session/<id>`, `/session/<id>/end` + `coaching_notes` table for off-track replay.
+
+    Items still on the original timeline below: field-test prep, regression suite, dry run.
+
 ---
 
 ## Timeline

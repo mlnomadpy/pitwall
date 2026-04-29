@@ -35,6 +35,10 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - API Reference: api.md
+  - Track Markers: markers.md
+  - Sonoma Track Intelligence: sonoma_track_intelligence.md
+  - "T-Rod Sonoma Session": trod_sonoma_session.md
   - Telemetry Pipeline: telemetry-pipeline.md
   - Coaching Engine: coaching-engine.md
   - Pedagogy: pedagogy.md
@@ -55,3 +59,8 @@ nav:
       - "007: Event-Sourced Driver Profile": adr/007-event-sourced-profile.md
       - "008: Rule Regression Testing": adr/008-rule-testing.md
       - "009: Graceful Degradation": adr/009-graceful-degradation.md
+      - "010: HTTP Bridge as Warm-Path Tier 1": adr/010-http-bridge-warm-path.md
+      - "011: Named-Marker Schema": adr/011-named-marker-schema.md
+      - "012: Coach Engine Adapter": adr/012-coach-engine-adapter.md
+      - "013: Frontend/Backend Boundary": adr/013-frontend-backend-boundary.md
+      - "014: Sonoma is the Product": adr/014-sonoma-as-the-product.md

@@ -1,5 +1,12 @@
 # System Architecture
 
+!!! info "Implementation status (2026-04-28)"
+    The architecture below is fully reflected in two parallel runtimes now in-tree:
+
+    - **`flutter/`** — Pixel 10 deployment target. Kotlin `MessageArbiter`, `SonicModel`, `GemmaEngine`, `AntigravityPipeline`, `SensorFusion`, `Filters`, `AudioEngine` + Flutter `on_track_screen` / `paddock_screen`.
+    - **`src/simulator/`** + **`tools/pitwall_bridge.py`** — Backend runtime (laptop dev / on-device Termux). The bridge runs a Flask HTTP server on :8765 with `/health /analyze /sessions /session/<id> /lap /laps` (DuckDB-backed) and is the **only warm path** — per [ADR-012](adr/012-coach-engine-adapter.md) the project committed to on-device coaching with no cloud LLM tier. The Flutter app falls through to a mock if the bridge is unreachable.
+    - The rally-style verbal coach (`src/simulator/coach_engine.py`) — `RuleCoach` + `LitertCoach` (LiteRT-LM via MediaPipe Genai, Gemma 4 E2B `.task`) — is wired into the bridge `/analyze` endpoint. Backend owns all LLM logic and system prompts per [ADR-013](adr/013-frontend-backend-boundary.md).
+
 ## Overview
 
 The system uses a **split-brain architecture** with two concurrent reasoning paths connected by the Antigravity telemetry pipeline, coordinated by a message arbiter. All compute runs on a single Pixel 10 device (edge) and Vertex AI (cloud).

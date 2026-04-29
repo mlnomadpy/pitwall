@@ -4,7 +4,7 @@
 
 This is the engineering documentation for the Trustable AI racing coach sprint (April--May 2026). The system coaches drivers in real time at Sonoma Raceway using Gemma 4 on-device for reflexive cues and Gemini 3.0 on Vertex AI for strategic reasoning, connected by the Antigravity telemetry pipeline.
 
-## Current Status (April 9, 2026)
+## Current Status (April 28, 2026)
 
 | Component | Status | Key Metric |
 |-----------|:------:|------------|
@@ -15,9 +15,14 @@ This is the engineering documentation for the Trustable AI racing coach sprint (
 | Sonic model v2 (LSTM-driven) | Done | Delta-based coaching cues tested on Sonoma replay |
 | Simulator | Done | Replays VBO with real track data + LSTM predictions |
 | Architecture docs + 9 ADRs | Done | Updated with real data from all 183 sessions |
-| Antigravity pipeline | Not started | Sprint deliverable |
-| Pixel 10 app | Not started | Sprint deliverable |
-| Field test at Sonoma | May 23 | — |
+| **Antigravity pipeline (Kotlin)** | **Done** | `flutter/.../pipeline/AntigravityPipeline.kt` — 7.5 s burst cadence, 3-tier warm-path priority |
+| **Flutter Pixel 10 app** | **Done** | `flutter/` — `MainActivity`, `PitwallService` foreground service, `ReplayService`, `GemmaEngine`, on-track + paddock screens |
+| **Python HTTP bridge** | **Done** | `tools/pitwall_bridge.py` :8765 — `/health /analyze /laps /lap`, DuckDB lap storage, wraps `sonic_model` |
+| **Synthetic VBO generator** | **Done** | `tools/generate_sample_vbo.py` — 3-lap Sonoma replay seed using real GPS coords |
+| **Rally-style coach engine (Python)** | **Done** | `src/simulator/coach_engine.py` — `RuleCoach` + `LitertCoach` (LiteRT-LM via MediaPipe Genai), Bentley pedagogy matcher, T-Rod Sonoma voice baked in. Wired into the bridge `/analyze` endpoint. |
+| Gemma 4 E2B LiteRT-LM hot-path model | Pending sideload | `gemma-4-E2B-it.task` to `~/storage/shared/Pitwall/models/` (from `litert-community/gemma-4-E2B-it-litert-lm` on HuggingFace) |
+| Gold Standard (AJ) reference lap | Pending | Lap-time ranker is WIP (S/F crossing detection bug on anonymized GPS) |
+| Field test at Sonoma | **May 23** | — |
 
 ---
 
@@ -78,7 +83,7 @@ This sprint takes Pitwall's architecture and adapts it for a specific production
 |----------------------|------------------------|
 | Commodity hardware ($40-230) | Pro hardware: Racelogic Mini + OBDLink MX + Pixel 10 |
 | Hot path: hardcoded rules engine | Hot path: **Gemma 4 LLM on Pixel 10 TPU** (real reasoning at <50ms) |
-| Cold path: Gemini API via SSE | Warm path: **Gemini 3.0 on Vertex AI** via Antigravity pipeline |
+| Cold path: Gemini API via SSE | Warm path: **on-device coach (LitertCoach) via Pitwall HTTP bridge** |
 | SSE + UDP streaming | **Antigravity store-and-forward** (guaranteed delivery) |
 | Generic coaching rules | **Ross Bentley Pedagogical Vector Retrieval** (structured driving curriculum) |
 | Driver's personal best as baseline | **Gold Standard: AJ's pro lap + T-Rod's human coaching audio** |
