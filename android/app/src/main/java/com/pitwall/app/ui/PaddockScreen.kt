@@ -13,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -251,15 +252,35 @@ private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline
     }
     val speedSnapshot = speeds.toList()
 
-    Box(Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-        if (speedSnapshot.size < 2) {
-            Text("Collecting data…", color = PitwallColors.TextDim, fontSize = 13.sp)
-        } else {
-            val rawMax = speedSnapshot.maxOrNull()?.coerceAtLeast(50f) ?: 200f
-            // Snap max speed to next 20 for a cleaner Y-axis (e.g. 105 -> 120)
-            val maxSpeed = ((rawMax / 20).toInt() + 1) * 20f
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("SPEED TRACE", color = PitwallColors.TextDim, fontSize = 12.sp, letterSpacing = 2.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(PitwallColors.SpeedBlue, androidx.compose.foundation.shape.CircleShape))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Current Driver", color = PitwallColors.TextPrimary, fontSize = 10.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Dotted line representation
+                    Box(Modifier.width(16.dp).height(2.dp).drawBehind {
+                        drawLine(PitwallColors.GripYellow, Offset(0f, size.height/2f), Offset(size.width, size.height/2f), strokeWidth = size.height, pathEffect = PathEffect.dashPathEffect(floatArrayOf(5f, 5f)))
+                    })
+                    Spacer(Modifier.width(4.dp))
+                    Text("Benchmark", color = PitwallColors.TextPrimary, fontSize = 10.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            if (speedSnapshot.size < 2) {
+                Text("Collecting data…", color = PitwallColors.TextDim, fontSize = 13.sp)
+            } else {
+                val rawMax = speedSnapshot.maxOrNull()?.coerceAtLeast(50f) ?: 200f
+                // Snap max speed to next 20 for a cleaner Y-axis (e.g. 105 -> 120)
+                val maxSpeed = ((rawMax / 20).toInt() + 1) * 20f
 
-            Row(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxSize()) {
                 // Y-axis labels (Speed km/h)
                 Column(
                     Modifier.fillMaxHeight().width(32.dp).padding(bottom = 24.dp),
@@ -338,6 +359,7 @@ private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline
             }
         }
     }
+}
 }
 
 // ── CORNERS ───────────────────────────────────────────────────────────────────
