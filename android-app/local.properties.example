@@ -1,0 +1,8 @@
+# Copy to local.properties (not committed). Adjust paths for your machine.
+sdk.dir=/Users/yourname/Library/Android/sdk
+# Optional — Maps SDK for Android (from Google Cloud Console)
+# MAPS_API_KEY=AIza...
+# Optional — override default http://10.0.2.2:8765
+# PITWALL_API_BASE_URL=http://10.0.2.2:8765/
+# Optional — hosted pre-brief for WebView (app appends ?focus=...&track=sonoma)
+# WEB_BRIEF_BASE_URL=https://your-host/brief
