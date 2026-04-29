@@ -103,6 +103,40 @@ The main coaching endpoint. Receives a telemetry burst from `AntigravityPipeline
 
 If the request includes `session_id` and the pace note is non-empty, the bridge writes a row to the `coaching_notes` DuckDB table so `GET /session/<id>` can replay the coaching timeline.
 
+### Session import (bulk historical data)
+
+#### `POST /session/import`
+
+Parse a `.vbo` file from disk, create a `sessions` row, persist every frame into the `telemetry` table — one call to ingest a full historical session into the backend. Use this when loading an existing recording (e.g. forza dataset, prior session reviewed offline).
+
+```jsonc
+// Request
+{
+  "vbo_path":     "/path/to/lap.vbo",
+  "driver":       "Taha",            // optional, defaults to ""
+  "driver_level": "intermediate",     // optional, default
+  "session_id":   "my-custom-id",     // optional, auto-generated otherwise
+  "note":         "Sunday testing"    // optional
+}
+
+// Response — 200 OK
+{
+  "session_id": "sonoma-raceway-20260428-201503",
+  "n_frames":   8273,
+  "duration_s": 1387.2,
+  "distance_m": 95234.1,
+  "vbo_source": "Sonoma Intermediate - 1_47.5.vbo"
+}
+```
+
+**Status codes:**
+- `200` — ingested successfully.
+- `400` — `vbo_path` missing/invalid or no frames parsed.
+- `409` — the requested `session_id` already has frames (idempotent guard). Use a different `session_id` or delete first.
+- `503` — DuckDB unavailable.
+
+The bulk equivalent for a directory of VBOs is `tools/bulk_import_sonoma_vbos.py`, which calls this same path internally per file.
+
 ### Session management
 
 #### `POST /session/start`

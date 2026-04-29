@@ -165,9 +165,33 @@ TRACK_NOTES = {
 }
 
 
+def _sample_reference_line(reference_line: list, distance_m: float) -> tuple[float, float]:
+    """Linear-interp lat/lon at this track-distance from the reference_line trace.
+    Returns (0.0, 0.0) if the trace is empty."""
+    if not reference_line:
+        return 0.0, 0.0
+    track_len = max(p["distance"] for p in reference_line)
+    d = distance_m % track_len if track_len else distance_m
+    # Find the two surrounding samples
+    for i in range(len(reference_line) - 1):
+        a = reference_line[i]
+        b = reference_line[i + 1]
+        if a["distance"] <= d <= b["distance"]:
+            span = b["distance"] - a["distance"]
+            t = (d - a["distance"]) / span if span > 0 else 0
+            return (
+                round(a["lat"] + t * (b["lat"] - a["lat"]), 6),
+                round(a["lon"] + t * (b["lon"] - a["lon"]), 6),
+            )
+    last = reference_line[-1]
+    return last["lat"], last["lon"]
+
+
 def enrich(track: dict) -> dict:
     """Apply the canonical enrichment to an in-memory track dict."""
     track["intel_notes"] = TRACK_NOTES
+
+    reference_line = track.get("reference_line", [])
 
     for corner in track.get("corners", []):
         name = corner.get("name", "")
@@ -185,9 +209,12 @@ def enrich(track: dict) -> dict:
             dist = entry_d - m["at_offset_m_from_entry"]
             if track_len:
                 dist = dist % track_len
+            lat, lon = _sample_reference_line(reference_line, dist)
             materialised_markers.append({
                 **m,
                 "distance": round(dist, 1),
+                "lat": lat,
+                "lon": lon,
                 "corner": name,
             })
 

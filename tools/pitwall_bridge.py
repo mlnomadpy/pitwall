@@ -22,6 +22,7 @@ Emulator tunnel (once per adb session):
 """
 
 import argparse
+import json
 import os
 import sys
 import threading
@@ -68,6 +69,19 @@ except ImportError as e:
     print(f"⚠  coach_engine not available ({e})")
 
 try:
+    import sonoma                                               # noqa: F401
+    from session_analyzer import analyze_session
+    from driver_profile import (
+        ensure_schema as ensure_driver_schema, append_session_events,
+        compute_profile,
+    )
+    HAS_ANALYZER = True
+    print("✓  session_analyzer + driver_profile loaded")
+except ImportError as e:
+    HAS_ANALYZER = False
+    print(f"⚠  session_analyzer not available ({e}) — debrief disabled")
+
+try:
     import duckdb
     HAS_DUCKDB = True
 except ImportError:
@@ -101,9 +115,80 @@ def get_db():
             max_combo_g   DOUBLE,
             coast_pct     DOUBLE,
             recorded_at   TIMESTAMP DEFAULT now()
-        )
+        );
+        CREATE SEQUENCE IF NOT EXISTS notes_id_seq;
+        CREATE TABLE IF NOT EXISTS coaching_notes (
+            id            INTEGER PRIMARY KEY DEFAULT nextval('notes_id_seq'),
+            session_id    VARCHAR,
+            burst_id      INTEGER,
+            distance_m    DOUBLE,
+            text          VARCHAR,
+            source        VARCHAR,
+            recorded_at   TIMESTAMP DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS telemetry (
+            session_id   VARCHAR,
+            frame_idx    INTEGER,
+            timestamp    DOUBLE,
+            distance_m   DOUBLE,
+            speed_ms     DOUBLE,
+            g_lat        DOUBLE,
+            g_long       DOUBLE,
+            combo_g      DOUBLE,
+            brake_bar    DOUBLE,
+            throttle_pct DOUBLE,
+            steering_deg DOUBLE,
+            rpm          DOUBLE,
+            lat          DOUBLE,
+            lon          DOUBLE
+        );
+        CREATE INDEX IF NOT EXISTS idx_telemetry_session
+            ON telemetry(session_id, frame_idx);
+        CREATE TABLE IF NOT EXISTS video_frames (
+            session_id    VARCHAR,
+            timestamp     DOUBLE,    -- epoch seconds, canonical clock
+            avitime_ms    BIGINT,    -- VBO avitime when synced from Racelogic
+            file_path     VARCHAR,   -- on-disk MP4 (chunked, e.g. ~10s segments)
+            file_offset_s DOUBLE,    -- seconds into file_path
+            width         INTEGER,
+            height        INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_video_frames_session_t
+            ON video_frames(session_id, timestamp);
     """)
     return conn
+
+
+# ── Frame helpers — DuckDB rows ↔ TelemetryFrame ─────────────────────────────
+
+def _frames_to_rows(session_id: str, frames) -> list:
+    """Map a list of TelemetryFrame objects to DuckDB row tuples."""
+    return [
+        (
+            session_id, i, f.timestamp,
+            getattr(f, "distance", 0.0),
+            f.speed, f.g_lat, f.g_long, f.combo_g,
+            f.brake_pressure, f.throttle, f.steering, f.rpm,
+            getattr(f, "lat", 0.0), getattr(f, "lon", 0.0),
+        )
+        for i, f in enumerate(frames)
+    ]
+
+
+def _rows_to_frames(rows):
+    """Reconstruct frame-shaped objects (SimpleNamespace) from DuckDB rows."""
+    from types import SimpleNamespace
+    out = []
+    for r in rows:
+        (sid, idx, ts, dist, spd, gl, gL, cg,
+         brk, thr, st, rpm, lat, lon) = r
+        out.append(SimpleNamespace(
+            timestamp=ts, distance=dist, speed=spd,
+            g_lat=gl, g_long=gL, combo_g=cg,
+            brake_pressure=brk, throttle=thr, steering=st, rpm=rpm,
+            lat=lat, lon=lon,
+        ))
+    return out
 
 
 # ── Coaching engine ────────────────────────────────────────────────────────────
@@ -554,6 +639,591 @@ def session_reset():
         count = len(_session_bursts)
         _session_bursts.clear()
     return jsonify({"cleared_bursts": count, "status": "ok"})
+
+
+# ── Per-frame telemetry ingestion ─────────────────────────────────────────────
+
+@app.route("/session/<sid>/frames", methods=["POST"])
+def session_frames(sid: str):
+    """Append a batch of telemetry frames for a session.
+
+    Body shape:
+        {"frames": [{"timestamp": ..., "distance": ..., "speed": ...,
+                     "g_lat": ..., "g_long": ..., "combo_g": ...,
+                     "brake_pressure": ..., "throttle": ..., "steering": ...,
+                     "rpm": ..., "lat": ..., "lon": ...}, ...]}
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    data = request.get_json(force=True, silent=True) or {}
+    raw_frames = data.get("frames") or []
+    if not raw_frames:
+        return jsonify({"saved": False, "error": "no frames"}), 400
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"saved": False, "error": "duckdb not available"}), 503
+        # Determine the next frame_idx for this session
+        existing = conn.execute(
+            "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
+            [sid],
+        ).fetchone()[0]
+        next_idx = (existing if existing is not None else -1) + 1
+
+        rows = []
+        for j, f in enumerate(raw_frames):
+            rows.append((
+                sid, next_idx + j,
+                float(f.get("timestamp", 0)),
+                float(f.get("distance", 0)),
+                float(f.get("speed", 0)),
+                float(f.get("g_lat", 0)),
+                float(f.get("g_long", 0)),
+                float(f.get("combo_g", 0)),
+                float(f.get("brake_pressure", 0)),
+                float(f.get("throttle", 0)),
+                float(f.get("steering", 0)),
+                float(f.get("rpm", 0)),
+                float(f.get("lat", 0)),
+                float(f.get("lon", 0)),
+            ))
+        conn.executemany(
+            "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        conn.close()
+    return jsonify({"saved": True, "session_id": sid, "n_appended": len(raw_frames)})
+
+
+# ── Video frame metadata ingestion ───────────────────────────────────────────
+
+@app.route("/session/<sid>/video_frames", methods=["POST"])
+def session_video_frames(sid: str):
+    """Append video-frame metadata for a session. Body:
+        {"frames": [{"timestamp": ..., "avitime_ms": ...,
+                     "file_path": "...", "file_offset_s": ...,
+                     "width": ..., "height": ...}, ...]}
+
+    Video bytes stay on disk; this endpoint only records the index. Callers
+    use this in tandem with /session/<id>/frames to enable
+    timestamp-aligned replay + ffmpeg-seek into the chunked MP4.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    data = request.get_json(force=True, silent=True) or {}
+    raws = data.get("frames") or []
+    if not raws:
+        return jsonify({"saved": False, "error": "no frames"}), 400
+    rows = [
+        (
+            sid,
+            float(f.get("timestamp", 0)),
+            int(f.get("avitime_ms", 0)),
+            str(f.get("file_path", "")),
+            float(f.get("file_offset_s", 0)),
+            int(f.get("width", 0)),
+            int(f.get("height", 0)),
+        )
+        for f in raws
+    ]
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"saved": False, "error": "duckdb not available"}), 503
+        conn.executemany(
+            "INSERT INTO video_frames VALUES (?,?,?,?,?,?,?)",
+            rows,
+        )
+        conn.close()
+    return jsonify({"saved": True, "session_id": sid, "n_appended": len(raws)})
+
+
+@app.route("/session/<sid>/sync", methods=["GET"])
+def session_sync(sid: str):
+    """Return time-aligned (telemetry + video) rows for a session window.
+
+    Query params:
+        from   (epoch seconds, optional)
+        to     (epoch seconds, optional)
+        window_s (default 0.05) — match telemetry to video within ± this
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    t_from = float(request.args.get("from", 0))
+    t_to = float(request.args.get("to", 0))
+    win = float(request.args.get("window_s", 0.05))
+    where_t = ""
+    params = [sid, win]
+    if t_to > 0:
+        where_t = "AND t.timestamp BETWEEN ? AND ?"
+        params.extend([t_from, t_to])
+    sql = (
+        "SELECT t.frame_idx, t.timestamp, t.distance_m, t.speed_ms, "
+        "       t.brake_bar, t.throttle_pct, t.g_lat, t.g_long, "
+        "       v.file_path, v.file_offset_s "
+        "FROM telemetry t "
+        "LEFT JOIN video_frames v "
+        "  ON v.session_id = t.session_id "
+        "  AND v.timestamp BETWEEN t.timestamp - ? AND t.timestamp + ? "
+        f"WHERE t.session_id = ? {where_t} "
+        "ORDER BY t.frame_idx"
+    )
+    params = [win, win, sid] + ([t_from, t_to] if t_to > 0 else [])
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        rows = conn.execute(sql, params).fetchall()
+        cols = [d[0] for d in conn.description]
+        conn.close()
+    return jsonify({
+        "session_id": sid,
+        "rows": [dict(zip(cols, r)) for r in rows],
+        "count": len(rows),
+    })
+
+
+@app.route("/session/import", methods=["POST"])
+def session_import():
+    """Import an entire VBO file into a new session in DuckDB.
+
+    Body: {"vbo_path": "/abs/path/to/file.vbo",
+           "driver": "...",
+           "driver_level": "intermediate",
+           "session_id": (optional, auto-generated if omitted)}
+
+    Parses the VBO, creates a `sessions` row, persists every frame to the
+    `telemetry` table. Returns {session_id, n_frames, duration_s, distance_m}.
+    Idempotent on session_id: if the session already has frames, returns 409.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    data = request.get_json(force=True, silent=True) or {}
+    vbo = data.get("vbo_path")
+    if not vbo or not os.path.exists(vbo):
+        return jsonify({"error": f"vbo_path missing or not found: {vbo!r}"}), 400
+
+    sid = data.get("session_id") or _new_session_id(_track.name if _track else None)
+    driver = data.get("driver", "")
+    level = data.get("driver_level", "intermediate")
+    note = data.get("note", f"Imported from {os.path.basename(vbo)}")
+
+    try:
+        from vbo_parser import parse_vbo
+        meta, frames = parse_vbo(vbo)
+        if not frames:
+            return jsonify({"error": f"no frames parsed from {vbo}"}), 400
+    except Exception as e:
+        return jsonify({"error": f"parse_vbo failed: {e}"}), 500
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        # Reject if this session already has frames
+        existing = conn.execute(
+            "SELECT count(*) FROM telemetry WHERE session_id = ?",
+            [sid],
+        ).fetchone()[0]
+        if existing > 0:
+            conn.close()
+            return jsonify({
+                "error": f"session {sid} already has {existing} frames",
+                "session_id": sid,
+            }), 409
+
+        # Create the session row (UPSERT-style)
+        conn.execute(
+            "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [sid, driver, level,
+             _track.name if _track else "Sonoma Raceway",
+             meta.device_type or "", note],
+        )
+        rows = _frames_to_rows(sid, frames)
+        conn.executemany(
+            "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows,
+        )
+        conn.close()
+
+    duration_s = frames[-1].timestamp - frames[0].timestamp
+    distance_m = frames[-1].distance - frames[0].distance
+    return jsonify({
+        "session_id": sid,
+        "n_frames":   len(frames),
+        "duration_s": round(duration_s, 2),
+        "distance_m": round(distance_m, 1),
+        "vbo_source": os.path.basename(vbo),
+    })
+
+
+def _load_session_frames(sid: str):
+    """Read all frames for a session from the telemetry table, ordered."""
+    if not HAS_DUCKDB:
+        return []
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return []
+        rows = conn.execute(
+            "SELECT * FROM telemetry WHERE session_id = ? ORDER BY frame_idx",
+            [sid],
+        ).fetchall()
+        conn.close()
+    return _rows_to_frames(rows)
+
+
+# ── Session analysis (post-debrief, scorecard, highlights, map) ─────────────
+
+# Bridge keeps a small cache of analysed sessions so /scorecard, /highlights,
+# /map, /clips, /trace can all read from the same bundle without re-running
+# the analyser.
+_session_bundles: dict[str, dict] = {}
+_BUNDLES_LOCK = threading.Lock()
+
+
+def _analyse_session_id(sid: str) -> dict:
+    """Run the analyser for a session if we haven't already, cache the bundle."""
+    if not HAS_ANALYZER:
+        return {"error": "session_analyzer not available", "session_id": sid}
+
+    with _BUNDLES_LOCK:
+        cached = _session_bundles.get(sid)
+        if cached is not None:
+            return cached
+
+    # Reconstruct frames from the recorded VBO (if a path was stored on
+    # session_start) OR from a runtime-buffered list (future). For the
+    # current bridge we only persist coaching_notes — the frames come
+    # from the caller as a `vbo_path` query param when running the analyser.
+    return {
+        "error": "no frame source for this session — POST /coach/debrief with vbo_path",
+        "session_id": sid,
+    }
+
+
+@app.route("/coach/debrief", methods=["POST"])
+def coach_debrief():
+    """Run the post-session analyser and return the full visualisation bundle.
+
+    Body:
+        {"session_id": "...", "vbo_path": "/abs/path/to/lap.vbo"}
+
+    `vbo_path` is mandatory — the bridge doesn't yet persist per-frame
+    telemetry (coming in a follow-up; see ADR-014 future endpoints).
+    """
+    if not HAS_ANALYZER:
+        return jsonify({"error": "session_analyzer not available"}), 503
+
+    data = request.get_json(force=True, silent=True) or {}
+    sid = data.get("session_id") or _new_session_id(_track.name if _track else None)
+    vbo = data.get("vbo_path")
+    driver_id = data.get("driver_id", "")
+    persist_to_profile = data.get("persist_to_profile", True)
+
+    frames = []
+    if vbo and os.path.exists(vbo):
+        try:
+            from vbo_parser import parse_vbo
+            _, frames = parse_vbo(vbo)
+            if not frames:
+                return jsonify({"error": f"no frames in {vbo}"}), 400
+        except Exception as e:
+            return jsonify({"error": f"parse_vbo failed: {e}"}), 500
+    else:
+        # No VBO → load from per-frame DuckDB persistence
+        frames = _load_session_frames(sid)
+        if not frames:
+            return jsonify({
+                "error": "no telemetry for session — push frames via "
+                         "POST /session/<id>/frames or pass vbo_path",
+                "session_id": sid,
+            }), 400
+
+    bundle = analyze_session(
+        session_id=sid,
+        frames=frames,
+        coach=_coach if HAS_COACH else None,
+        driver_level=getattr(_coach, "driver_level", "intermediate") if _coach else "intermediate",
+    )
+
+    with _BUNDLES_LOCK:
+        _session_bundles[sid] = bundle
+
+    # Persist scorecard events to the driver profile so /coach/brief
+    # can read longitudinal trends on the next session
+    if persist_to_profile and driver_id and HAS_DUCKDB:
+        try:
+            with _db_lock:
+                conn = get_db()
+                if conn is not None:
+                    ensure_driver_schema(conn)
+                    append_session_events(
+                        conn, driver_id, sid, bundle.get("scorecard") or {},
+                    )
+                    conn.close()
+        except Exception:
+            pass
+
+    return jsonify(bundle)
+
+
+def _section(sid: str, key: str):
+    bundle = _session_bundles.get(sid)
+    if bundle is None:
+        return (jsonify({"error": "session not analysed; POST /coach/debrief first",
+                         "session_id": sid}), 404)
+    return (jsonify({"session_id": sid, key: bundle.get(key)}), 200)
+
+
+@app.route("/session/<sid>/scorecard", methods=["GET"])
+def session_scorecard(sid: str):
+    return _section(sid, "scorecard")
+
+
+@app.route("/session/<sid>/highlights", methods=["GET"])
+def session_highlights(sid: str):
+    return _section(sid, "highlights")
+
+
+@app.route("/session/<sid>/stats", methods=["GET"])
+def session_stats(sid: str):
+    return _section(sid, "stats")
+
+
+@app.route("/session/<sid>/friction_circle", methods=["GET"])
+def session_friction(sid: str):
+    return _section(sid, "friction")
+
+
+@app.route("/session/<sid>/hustle_map", methods=["GET"])
+def session_hustle(sid: str):
+    return _section(sid, "hustle_map")
+
+
+@app.route("/session/<sid>/eob", methods=["GET"])
+def session_eob(sid: str):
+    return _section(sid, "eob")
+
+
+@app.route("/session/<sid>/incidents", methods=["GET"])
+def session_incidents(sid: str):
+    return _section(sid, "incidents")
+
+
+@app.route("/session/<sid>/map", methods=["GET"])
+def session_map(sid: str):
+    """Map overlay bundle: lap polylines + per-corner color + marker pins.
+    Pulls from `data/tracks/sonoma.json` (markers w/ lat/lon) and the
+    per-corner grade colors from the scorecard."""
+    bundle = _session_bundles.get(sid)
+    if bundle is None:
+        return jsonify({"error": "session not analysed first",
+                        "session_id": sid}), 404
+    if _track is None:
+        return jsonify({"error": "track not loaded"}), 503
+
+    sc = bundle.get("scorecard") or {}
+    grade_color = {"A+": "#1b5e20", "A": "#43a047", "B": "#7cb342",
+                   "C": "#fdd835", "D": "#fb8c00", "F": "#e53935"}
+    per_corner_color = {
+        c["corner"]: grade_color.get(c.get("grade"), "#9e9e9e")
+        for c in sc.get("corners", [])
+    }
+
+    pins = []
+    try:
+        # Read marker info straight from the canonical track JSON
+        track_path = os.path.join(SIM_DIR, "..", "..", "data", "tracks", "sonoma.json")
+        track_path = os.path.abspath(track_path)
+        with open(track_path) as f:
+            data = json.load(f)
+        for m in data.get("markers", []):
+            pins.append({
+                "id": m.get("id"),
+                "label": m.get("label"),
+                "kind": m.get("kind"),
+                "corner": m.get("corner"),
+                "lat": m.get("lat"),
+                "lon": m.get("lon"),
+                "distance_m": m.get("distance"),
+            })
+    except Exception:
+        pass
+
+    danger = []
+    for d in getattr(sonoma, "DANGER_ZONES", ()):
+        danger.append({
+            "id": d.id, "start_m": d.start_m, "end_m": d.end_m,
+            "description": d.description, "severity": d.severity,
+        })
+
+    return jsonify({
+        "session_id":       sid,
+        "track":            _track.name,
+        "per_corner_color": per_corner_color,
+        "marker_pins":      pins,
+        "danger_zones":     danger,
+        # `lap_polylines` would carry GeoJSON of the actual recorded lap;
+        # not yet built — needs per-frame persistence (ADR-014 followup).
+        "lap_polylines":    {},
+    })
+
+
+@app.route("/session/<sid>/clips", methods=["GET"])
+def session_clips(sid: str):
+    """ffmpeg-ready cut points — derived from highlights' video_in/out fields."""
+    bundle = _session_bundles.get(sid)
+    if bundle is None:
+        return jsonify({"error": "session not analysed first"}), 404
+    clips = [
+        {
+            "id":       f"h{i}",
+            "title":    h.get("title", ""),
+            "in_s":     h.get("video_in_s", 0),
+            "out_s":    h.get("video_out_s", 0),
+            "category": h.get("category", ""),
+            "severity": h.get("severity", ""),
+            "lap":      h.get("lap", 0),
+        }
+        for i, h in enumerate(bundle.get("highlights") or [])
+    ]
+    return jsonify({"session_id": sid, "clips": clips, "count": len(clips)})
+
+
+# ── Pre-brief + driver profile ───────────────────────────────────────────────
+
+@app.route("/coach/brief", methods=["GET"])
+def coach_brief():
+    """Pre-session focus plan. Reads driver profile + today's weather + selected markers.
+
+    Query params:
+        driver       (str)  required
+        date         (ISO8601, default today)
+        focus        (comma-list of corner names)
+        goal         (str, default "personal best lap")
+        hour_local   (int, default current local hour)
+    """
+    if not HAS_COACH:
+        return jsonify({"error": "coach_engine not available"}), 503
+    driver_id = request.args.get("driver", "")
+    today = request.args.get("date") or datetime.utcnow().date().isoformat()
+    focus_csv = request.args.get("focus", "")
+    goal = request.args.get("goal", "personal best lap")
+    try:
+        hour_local = int(request.args.get("hour_local", datetime.now().hour))
+    except ValueError:
+        hour_local = 12
+
+    markers_selected = [s.strip() for s in focus_csv.split(",") if s.strip()]
+    weather_phase = sonoma.weather_phase_for_hour(hour_local)
+
+    profile = {}
+    if HAS_ANALYZER and HAS_DUCKDB and driver_id:
+        try:
+            with _db_lock:
+                conn = get_db()
+                if conn is not None:
+                    profile = compute_profile(conn, driver_id)
+                    conn.close()
+        except Exception:
+            profile = {}
+
+    danger_today = [
+        f"{d.id}: {d.description}"
+        for d in sonoma.DANGER_ZONES
+        if (weather_phase.id == "morning_fog" and d.severity in ("high", "medium"))
+        or d.severity == "high"
+    ]
+
+    if hasattr(_coach, "brief"):
+        narrative, focus = _coach.brief(
+            driver_id=driver_id,
+            today_iso=today,
+            weather_phase=weather_phase.id,
+            surface_state=weather_phase.surface_state,
+            markers_selected=markers_selected,
+            weakest_recent_corner=profile.get("weakest_recent_corner"),
+            biggest_recent_improvement=profile.get("biggest_improvement"),
+            danger_zones_today=danger_today,
+            goal=goal,
+        )
+    else:
+        narrative, focus = "", markers_selected[:3]
+
+    return jsonify({
+        "driver_id":               driver_id,
+        "date":                    today,
+        "weather_phase":           weather_phase.id,
+        "surface_state":           weather_phase.surface_state,
+        "weather_note":            weather_phase.coaching_note,
+        "weakest_recent_corner":   profile.get("weakest_recent_corner"),
+        "biggest_recent_improvement": profile.get("biggest_improvement"),
+        "danger_zones_today":      danger_today,
+        "narrative_md":            narrative,
+        "focus":                   focus,
+    })
+
+
+@app.route("/driver/<driver_id>/profile", methods=["GET"])
+def driver_profile_route(driver_id: str):
+    if not HAS_ANALYZER or not HAS_DUCKDB:
+        return jsonify({"error": "driver profile unavailable"}), 503
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        try:
+            profile = compute_profile(conn, driver_id)
+        finally:
+            conn.close()
+    return jsonify(profile)
+
+
+# ── Markers, danger zones, weather (pure-data endpoints for the frontend) ───
+
+@app.route("/track/markers", methods=["GET"])
+def track_markers():
+    """All Sonoma markers (id, kind, label, distance, lat, lon, corner)."""
+    track_path = os.path.abspath(os.path.join(
+        SIM_DIR, "..", "..", "data", "tracks", "sonoma.json",
+    ))
+    try:
+        with open(track_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"track": data.get("name", "Sonoma Raceway"),
+                    "markers": data.get("markers", [])})
+
+
+@app.route("/track/danger_zones", methods=["GET"])
+def track_danger_zones():
+    return jsonify({
+        "track": "Sonoma Raceway",
+        "danger_zones": [
+            {"id": d.id, "start_m": d.start_m, "end_m": d.end_m,
+             "description": d.description, "severity": d.severity}
+            for d in sonoma.DANGER_ZONES
+        ],
+    })
+
+
+@app.route("/track/weather", methods=["GET"])
+def track_weather():
+    try:
+        hour_local = int(request.args.get("hour_local", datetime.now().hour))
+    except ValueError:
+        hour_local = 12
+    ph = sonoma.weather_phase_for_hour(hour_local)
+    return jsonify({
+        "hour_local":     hour_local,
+        "phase":          ph.id,
+        "surface_state":  ph.surface_state,
+        "coaching_note":  ph.coaching_note,
+    })
 
 
 @app.route("/laps", methods=["GET"])

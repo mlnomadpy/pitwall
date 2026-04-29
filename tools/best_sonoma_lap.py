@@ -1,9 +1,12 @@
 """
 Rank Sonoma VBO sessions by best lap time.
 
-Walks a directory of .vbo files, filters to those whose GPS centroid is
-within range of Sonoma's start/finish, detects S/F crossings to compute
-per-lap times, and prints a ranked table by fastest lap.
+Detection method: project each frame's GPS position onto the line through
+the start/finish point, perpendicular to `start_finish.heading`. A lap
+crossing is a sign-change of the projected (signed) distance from positive
+to negative (or vice-versa, depending on travel direction). Robust to the
+fact that the dataset's S/F point is offset 30–40 m from the actual
+crossing line.
 
 Usage:
     python3 tools/best_sonoma_lap.py /path/to/vbo/dir
@@ -35,45 +38,68 @@ def haversine_m(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float
     return 2 * EARTH_R * math.asin(math.sqrt(h))
 
 
-def best_and_all_laps(
-    frames,
-    sf_lat: float,
-    sf_lon: float,
-    radius_m: float = 25.0,
-    cooldown_s: float = 30.0,
-    min_lap_s: float = 60.0,
-    max_lap_s: float = 300.0,
-) -> list[float]:
-    """Return all lap times (seconds) detected by S/F crossings.
+def latlon_to_local_xy(lat: float, lon: float, ref_lat: float, ref_lon: float) -> tuple[float, float]:
+    """Equirectangular projection → metres in a local east-north frame."""
+    dlat = math.radians(lat - ref_lat)
+    dlon = math.radians(lon - ref_lon)
+    x = EARTH_R * dlon * math.cos(math.radians(ref_lat))
+    y = EARTH_R * dlat
+    return x, y
 
-    A crossing fires when frame distance-to-SF transitions from outside
-    `radius_m` to inside it. `cooldown_s` blocks double-triggers; laps
-    outside [min_lap_s, max_lap_s] are dropped as outliers.
+
+def signed_perp_distance_to_sf_line(lat: float, lon: float,
+                                     sf_lat: float, sf_lon: float,
+                                     sf_heading_deg: float) -> float:
+    """Signed perpendicular distance to the S/F line.
+
+    The S/F line is perpendicular to the heading direction. Sign is
+    positive when the frame is "ahead" of the S/F point along the heading,
+    negative when "behind". Lap crossings are sign changes from negative
+    → positive.
     """
-    laps: list[float] = []
-    inside = False
-    last_cross_t: float | None = None
-    last_t = None
+    x, y = latlon_to_local_xy(lat, lon, sf_lat, sf_lon)
+    h_rad = math.radians(sf_heading_deg)
+    # Heading is measured from north, clockwise. Forward unit vector:
+    fx = math.sin(h_rad)
+    fy = math.cos(h_rad)
+    return x * fx + y * fy
+
+
+def detect_laps(frames, sf_lat: float, sf_lon: float, sf_heading_deg: float,
+                near_radius_m: float = 80.0,
+                cooldown_s: float = 30.0,
+                min_lap_s: float = 60.0,
+                max_lap_s: float = 300.0) -> list[float]:
+    """Return list of lap times. Crossing fires when the signed perpendicular
+    distance to the S/F line transitions from negative to positive AND the
+    frame is within `near_radius_m` of the S/F point."""
+    crossings: list[float] = []
+    last_signed = None
+    last_cross_t = None
 
     for f in frames:
-        if not f.lat and not f.lon:
+        if not (f.lat or f.lon):
             continue
-        d = haversine_m(f.lat, f.lon, sf_lat, sf_lon)
-        was_inside = inside
-        inside = d < radius_m
+        d_to_sf = haversine_m(f.lat, f.lon, sf_lat, sf_lon)
+        if d_to_sf > near_radius_m * 3:
+            last_signed = None
+            continue
 
-        if inside and not was_inside:
+        signed = signed_perp_distance_to_sf_line(f.lat, f.lon, sf_lat, sf_lon, sf_heading_deg)
+
+        if last_signed is not None and last_signed < 0 <= signed and d_to_sf < near_radius_m:
             t = f.timestamp
-            if last_cross_t is not None:
-                gap = t - last_cross_t
-                if gap >= cooldown_s:
-                    if min_lap_s <= gap <= max_lap_s:
-                        laps.append(gap)
-                    last_cross_t = t
-            else:
+            if last_cross_t is None or t - last_cross_t >= cooldown_s:
+                crossings.append(t)
                 last_cross_t = t
-        last_t = f.timestamp
 
+        last_signed = signed
+
+    laps = []
+    for a, b in zip(crossings[:-1], crossings[1:]):
+        gap = b - a
+        if min_lap_s <= gap <= max_lap_s:
+            laps.append(gap)
     return laps
 
 
@@ -107,8 +133,10 @@ def main():
     track = json.loads(Path(args.track).read_text())
     sf = track["start_finish"]
     sf_lat, sf_lon = float(sf["lat"]), float(sf["lon"])
+    sf_heading = float(sf.get("heading", 0))
     track_name = track.get("name", "track")
-    print(f"Track: {track_name}  S/F=({sf_lat:.5f}, {sf_lon:.5f})  expected length={track.get('track_length_m','?')}m")
+    print(f"Track: {track_name}  S/F=({sf_lat:.5f}, {sf_lon:.5f})  heading={sf_heading:.1f}°  "
+          f"expected length={track.get('track_length_m','?')}m")
 
     vbo_dir = Path(args.vbo_dir).expanduser()
     vbos = sorted(vbo_dir.glob("*.vbo"))
@@ -128,7 +156,8 @@ def main():
         cdist_km = haversine_m(c_lat, c_lon, sf_lat, sf_lon) / 1000.0
         if cdist_km > args.centroid_radius_km:
             continue
-        laps = best_and_all_laps(frames, sf_lat, sf_lon)
+
+        laps = detect_laps(frames, sf_lat, sf_lon, sf_heading)
         if not laps:
             continue
         rows.append({

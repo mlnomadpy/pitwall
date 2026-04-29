@@ -25,12 +25,20 @@ file stays a pure "given context, produce zero or one CoachingMessage".
 
 from __future__ import annotations
 
+import enum
 import json
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+
+class CoachMode(enum.Enum):
+    """Three operational modes per ADR-014 — same engine, different prompts."""
+    DURING_DRIVE = "during_drive"   # one-line pace note per burst (existing)
+    PRE_BRIEF    = "pre_brief"      # pre-session focus plan paragraph
+    POST_SESSION = "post_session"   # full session debrief narrative
 
 
 # ─── Data types ───────────────────────────────────────────────────────────────
@@ -320,17 +328,161 @@ _TRACK_LORE = {
 }
 
 
-def build_system_prompt(driver_level: str, track_name: str = "") -> str:
+_PRE_BRIEF_SYSTEM_PROMPT = (
+    "You are a professional race coach giving a PRE-SESSION BRIEF before "
+    "the driver heads out. The driver is at Sonoma Raceway in a BMW M3, "
+    "intermediate level. Goal of the brief: focus the driver's attention on "
+    "their three chosen corners + today's specific conditions + one safety "
+    "reminder. Keep it warm but tight — drivers are putting a helmet on, not "
+    "studying. Use named landmarks ('the bridge', 'the bump', 'the Toyota "
+    "sign letters'). Use canonical T-Rod phrasings where they fit. End with "
+    "the literal token <FOCUS> followed by a JSON list of exactly 3 short "
+    "actionable focus items. Total ~150 words."
+)
+
+
+_POST_SESSION_SYSTEM_PROMPT = (
+    "You are a professional race engineer giving a POST-SESSION DEBRIEF. "
+    "The driver just finished a session at Sonoma Raceway in a BMW M3, "
+    "intermediate level. The user message contains structured session data: "
+    "scorecard with per-corner A-F grades, time-loss decomposition per "
+    "corner, top highlight moments, stat cards, slip-angle band, EoB "
+    "summary, consistency, and incidents. Use this data — DO NOT invent "
+    "events that aren't in the data. Speak in T-Rod's canonical voice "
+    "where it fits ('Distance is king', 'Just go 100', 'Wait, you're not "
+    "at the apex yet', 'Roll the brake to the apex'). Reference named "
+    "Sonoma landmarks. Structure: 1) one-paragraph headline assessment, "
+    "2) one paragraph per highlight (≤3 of them, lap N, what happened, "
+    "what to do next time), 3) one paragraph identifying the single "
+    "biggest lap-time-leverage opportunity (typically T10 or T11), 4) "
+    "three focus items for next session formatted as a JSON list after "
+    "the literal token <NEXT_FOCUS>. Total ~300 words."
+)
+
+
+_SYSTEM_PROMPTS_BY_MODE = {
+    CoachMode.DURING_DRIVE: _BASE_SYSTEM_PROMPT,
+    CoachMode.PRE_BRIEF:    _PRE_BRIEF_SYSTEM_PROMPT,
+    CoachMode.POST_SESSION: _POST_SESSION_SYSTEM_PROMPT,
+}
+
+
+def build_system_prompt(driver_level: str, track_name: str = "",
+                        mode: CoachMode = CoachMode.DURING_DRIVE) -> str:
     """Compose the full system prompt for any LLM coach.
 
-    Single source of truth used by LlamaCppCoach, TfliteCoach, and any
-    future GeminiCoach. Frontends never call this — they call the bridge.
+    Single source of truth used by LitertCoach (and any future cloud coach).
+    Frontends never call this — they call the bridge.
     """
-    parts = [_BASE_SYSTEM_PROMPT.strip()]
-    parts.append(_LEVEL_SYSTEM_PROMPT.get(driver_level, _LEVEL_SYSTEM_PROMPT["intermediate"]).strip())
+    base = _SYSTEM_PROMPTS_BY_MODE.get(mode, _BASE_SYSTEM_PROMPT)
+    parts = [base.strip()]
+    if mode == CoachMode.DURING_DRIVE:
+        parts.append(
+            _LEVEL_SYSTEM_PROMPT.get(
+                driver_level, _LEVEL_SYSTEM_PROMPT["intermediate"]
+            ).strip()
+        )
     if track_name and track_name in _TRACK_LORE:
         parts.append(_TRACK_LORE[track_name].strip())
     return "\n\n".join(parts)
+
+
+def build_pre_brief_user_prompt(
+    driver_id: str,
+    today_iso: str,
+    weather_phase: str,
+    surface_state: str,
+    markers_selected: list[str],
+    weakest_recent_corner: Optional[str],
+    biggest_recent_improvement: Optional[dict],
+    danger_zones_today: list[str],
+    goal: str = "personal best lap",
+) -> str:
+    """User prompt for PRE_BRIEF mode."""
+    parts = [
+        f"DRIVER: {driver_id}",
+        f"DATE: {today_iso}",
+        f"WEATHER PHASE: {weather_phase} ({surface_state})",
+        f"GOAL: {goal}",
+        f"FOCUS CORNERS THIS SESSION: {', '.join(markers_selected) or '(driver did not pick)'}",
+    ]
+    if weakest_recent_corner:
+        parts.append(f"WEAKEST RECENT CORNER: {weakest_recent_corner}")
+    if biggest_recent_improvement:
+        parts.append(
+            f"BIGGEST RECENT IMPROVEMENT: "
+            f"{biggest_recent_improvement.get('corner')} "
+            f"(score Δ {biggest_recent_improvement.get('delta_score', 0):+.2f})"
+        )
+    if danger_zones_today:
+        parts.append(f"DANGER ZONES TO WATCH: {'; '.join(danger_zones_today)}")
+    parts.append("Brief the driver now.")
+    return "\n".join(parts)
+
+
+def build_post_session_user_prompt(bundle: dict) -> str:
+    """User prompt for POST_SESSION mode — feeds the analyzer bundle to the LLM.
+
+    Keeps the prompt compact: scorecard + top highlights + stats + the
+    handful of analytics the coach needs to talk about. Skips full friction
+    samples / hustle map (those are for the frontend, not the LLM).
+    """
+    sc = bundle.get("scorecard") or {}
+    hs = bundle.get("highlights") or []
+    stats = bundle.get("stats") or {}
+    eob = bundle.get("eob") or {}
+    sb = bundle.get("slip_band") or {}
+    cons = bundle.get("consistency") or {}
+
+    # Compact scorecard
+    scorecard_lines = []
+    for c in sc.get("corners", []):
+        attrs = c.get("time_loss_attribution") or []
+        biggest = (max(attrs, key=lambda a: a["seconds_lost"]) if attrs else None)
+        scorecard_lines.append(
+            f"  {c['corner']:<8} grade={c['grade']:<2} "
+            f"Δt={c['delta_time_s']:+.2f}s "
+            f"apex={c['apex_delta_kmh']:+.1f}kmh "
+            f"exit={c['exit_delta_kmh']:+.1f}kmh "
+            f"BP={c['brake_point_delta_m']:+.1f}m"
+            + (f" cause={biggest['cause']}({biggest['seconds_lost']:.2f}s)"
+               if biggest else "")
+        )
+
+    highlight_lines = []
+    for h in hs[:5]:
+        highlight_lines.append(
+            f"  [{h['severity']}] {h['title']} — {h['narrative_seed']}"
+        )
+
+    parts = [
+        f"SESSION: {sc.get('session_id', '?')}",
+        f"LAPS: {sc.get('n_laps', 0)} — best {sc.get('best_lap_s', 0):.2f}s "
+        f"vs gold {sc.get('gold_lap_s', 0):.2f}s "
+        f"(Δ {sc.get('best_lap_s', 0) - sc.get('gold_lap_s', 0):+.2f}s)",
+        f"SESSION GRADE: {sc.get('session_grade', '?')} "
+        f"({sc.get('weighted_total_pct', 0):.1%})",
+        "",
+        "SCORECARD (best pass per corner):",
+        *(scorecard_lines or ["  (no scorecard available)"]),
+        "",
+        "TOP HIGHLIGHTS:",
+        *(highlight_lines or ["  (no highlights detected)"]),
+        "",
+        f"STATS: top {stats.get('top_speed_kmh', '?')} km/h, "
+        f"max {stats.get('max_combo_g', '?')} G, "
+        f"max brake {stats.get('max_brake_bar', '?')} bar, "
+        f"longest 100% throttle {stats.get('longest_full_throttle_s', '?')} s",
+        f"SLIP-ANGLE BAND: {sb.get('dominant_band', '?')} — "
+        f"{sb.get('interpretation', '')}",
+        f"EOB: avg nothing-time {eob.get('average_nothing_time_s', 0):.2f}s, "
+        f"worst at {eob.get('worst_corner', '—')}",
+        f"CONSISTENCY: lap std {cons.get('lap_time_std', 0):.2f}s; "
+        f"most variable corner: {(cons.get('most_variable_corner') or {}).get('corner', '—')}",
+        "",
+        "Generate the debrief now per the system instructions.",
+    ]
+    return "\n".join(parts)
 
 
 _USER_PROMPT_TEMPLATE = (
@@ -523,12 +675,125 @@ class LitertCoach(CoachEngine):
         """
         system_prompt = build_system_prompt(self.driver_level, ctx.track_name)
         user_prompt = build_user_prompt(ctx)
+        return self._generate(system_prompt, user_prompt)
+
+    def _generate(self, system_prompt: str, user_prompt: str) -> str:
+        """Lower-level: generate from already-built system+user prompts."""
+        if self._llm is None:
+            return ""
         full = (
             f"<start_of_turn>system\n{system_prompt}<end_of_turn>\n"
             f"<start_of_turn>user\n{user_prompt}<end_of_turn>\n"
             f"<start_of_turn>model\n"
         )
         return self._llm.generate_response(full) or ""
+
+    # ---- multi-mode entry points (PRE_BRIEF + POST_SESSION) ----------------
+
+    def brief(self, *, driver_id: str, today_iso: str, weather_phase: str,
+              surface_state: str, markers_selected: list[str],
+              weakest_recent_corner: Optional[str] = None,
+              biggest_recent_improvement: Optional[dict] = None,
+              danger_zones_today: Optional[list[str]] = None,
+              goal: str = "personal best lap",
+              driver_level: Optional[str] = None) -> tuple[str, list[str]]:
+        """PRE_BRIEF mode. Returns (narrative_md, focus_list)."""
+        level = driver_level or self.driver_level
+        track = "Sonoma Raceway"
+        sys_p = build_system_prompt(level, track, mode=CoachMode.PRE_BRIEF)
+        usr_p = build_pre_brief_user_prompt(
+            driver_id=driver_id, today_iso=today_iso,
+            weather_phase=weather_phase, surface_state=surface_state,
+            markers_selected=markers_selected,
+            weakest_recent_corner=weakest_recent_corner,
+            biggest_recent_improvement=biggest_recent_improvement,
+            danger_zones_today=danger_zones_today or [],
+            goal=goal,
+        )
+        if self._llm is None:
+            # No LLM — fall back to a templated brief
+            return _templated_pre_brief(
+                driver_id=driver_id, weather_phase=weather_phase,
+                surface_state=surface_state, markers_selected=markers_selected,
+                weakest_recent_corner=weakest_recent_corner,
+                danger_zones_today=danger_zones_today or [],
+            )
+        try:
+            text = self._generate(sys_p, usr_p)
+            return _split_brief_narrative_and_focus(text)
+        except Exception:
+            return _templated_pre_brief(
+                driver_id=driver_id, weather_phase=weather_phase,
+                surface_state=surface_state, markers_selected=markers_selected,
+                weakest_recent_corner=weakest_recent_corner,
+                danger_zones_today=danger_zones_today or [],
+            )
+
+    def debrief(self, bundle: dict,
+                *, driver_level: Optional[str] = None) -> tuple[str, list[str]]:
+        """POST_SESSION mode. Returns (narrative_md, next_focus_list)."""
+        level = driver_level or self.driver_level
+        track = bundle.get("track", "Sonoma Raceway")
+        sys_p = build_system_prompt(level, track, mode=CoachMode.POST_SESSION)
+        usr_p = build_post_session_user_prompt(bundle)
+        if self._llm is None:
+            return "", []   # caller falls through to templated narrative
+        try:
+            text = self._generate(sys_p, usr_p)
+            return _split_debrief_narrative_and_focus(text)
+        except Exception:
+            return "", []
+
+
+# ─── Templated fallbacks (used when no LLM is loaded) ────────────────────────
+
+
+def _templated_pre_brief(*, driver_id: str, weather_phase: str,
+                          surface_state: str, markers_selected: list[str],
+                          weakest_recent_corner: Optional[str],
+                          danger_zones_today: list[str]) -> tuple[str, list[str]]:
+    parts = [
+        f"# Pre-session brief — {driver_id} at Sonoma",
+        f"_{weather_phase} — {surface_state}._",
+    ]
+    if markers_selected:
+        parts.append(f"**Today's focus:** {', '.join(markers_selected)}.")
+    if weakest_recent_corner:
+        parts.append(f"Your weakest recent corner has been **{weakest_recent_corner}** — "
+                     f"give it special attention.")
+    if danger_zones_today:
+        parts.append("**Danger zones today:**")
+        for d in danger_zones_today:
+            parts.append(f"- {d}")
+    parts.append("Have a great session.")
+    focus = list(markers_selected[:3]) if markers_selected else []
+    return "\n\n".join(parts), focus
+
+
+def _split_brief_narrative_and_focus(text: str) -> tuple[str, list[str]]:
+    """Parse the <FOCUS>[...] tail off a PRE_BRIEF response."""
+    if "<FOCUS>" in text:
+        head, _, tail = text.partition("<FOCUS>")
+        try:
+            focus = json.loads(tail.strip())
+            if isinstance(focus, list):
+                return head.strip(), [str(x) for x in focus[:3]]
+        except Exception:
+            pass
+    return text.strip(), []
+
+
+def _split_debrief_narrative_and_focus(text: str) -> tuple[str, list[str]]:
+    """Parse the <NEXT_FOCUS>[...] tail off a POST_SESSION response."""
+    if "<NEXT_FOCUS>" in text:
+        head, _, tail = text.partition("<NEXT_FOCUS>")
+        try:
+            focus = json.loads(tail.strip())
+            if isinstance(focus, list):
+                return head.strip(), [str(x) for x in focus[:3]]
+        except Exception:
+            pass
+    return text.strip(), []
 
 
 # Legacy alias — keeps any older callers working until full rename lands
