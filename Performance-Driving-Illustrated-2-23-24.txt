@@ -1,0 +1,310 @@
+PERFORMANCE DRIVING ILLUSTRATED by Ross Bentley
+CONTENTS 
+1 
+Important Stuff ................................................................................. 2 
+Introduction ..................................................................................... 3 
+Getting Started ................................................................................. 7 
+Vehicle Dynamics ............................................................................ 17 
+Cornering .......................................................................................... 25 
+The Mental Game ............................................................................ 31 
+Putting It All Together ..................................................................... 43
+Final Thoughts ................................................................................. 
+IMPORTANT STUFF
+You know that motorsport of any kind is dangerous. Therefore, I provide my  advice for you to use in the way you choose. I can't be held responsible for  anything that might happen as a result. You're a grown-up - you're responsible  for yourself – and by reading on, you are accepting that responsibility. 
+All of the material in this document is mine. In other words, it's copyrighted,  and therefore you cannot share it, forward it, reprint it, publish it, or quote  from it without my permission. That might sound a bit harsh, but understand,  I'm pretty liberal with allowing people to use my content...as long as they ask  first. I’m committed to supporting and enforcing all that copyright stuff. So,  send me an email at ross@speedsecrets.com and let me know what you're  looking for, if you want to share any or all of what’s in this eBook. 
+Having said that, I love helping you perform better – I enjoy sharing what I’ve  been fortunate to learn through experience, study, and observation. With that  in mind, please help me get this eBook in the hands of more drivers. Please  recommend to other drivers that they download their own copy. It’s free! All  people need to do is download it themselves (i.e., don’t send them your copy).  Thank you. 
+Ross Bentley 
+Copyright 2015 Ross Bentley. All rights reserved. A Speed Secrets Publication.  Version 1.0, 2-15-16 
+SpeedSecrets.com 
+1 
+INTRODUCTION
+Over the years, I've used many illustrations to get my point across when  teaching performance driving. These illustrations have mostly been on the  white boards I've used in classrooms, but I've also created them for my Speed  Secrets books. Recently, I've taken to using my iPad to quickly sketch them out  for a driver I'm coaching. And many times I've wished that I'd saved these quick  sketches because, for many drivers, a picture is worth a thousand words. 
+This eBook is a collection of these illustrations. Some stand on their own and  don’t require much explanation. Other illustrations need a little more context,  so I've written some words to accompany them (but less than a thousand per  picture!). If you want more detailed explanation of an illustration, well, you’re  going to need to check out my Ultimate Speed Secrets book. 
+By no means is this an absolute complete compilation of every bit of information  that you need to drive quickly, consistently, and safely around race tracks. If you  want more, you’ll need to go elsewhere (obviously, I recommend my Ultimate  Speed Secrets book, my Speed Secrets Weekly e-newsletter, and especially my  eCourses). What is included here are the illustrations and information that I’ve  found myself going back to over and over again through the years. There must  be a reason for that – it’s because this is the most important stuff. 
+My hope is that these illustrations will trigger thought and provide some extra  clarity around a driving technique or concept. Ultimately, they're meant to  provide you with more understanding, and be a refresher or reminder of key  concepts and information. 
+Enjoy, and have fun! 
+2 
+GETTING STARTED 
+Steering Wheel
+Hold the steering wheel at 9 & 3 o’clock. Simple as that. You should be able  to drive almost all corners on all tracks without moving your hands from this  position. The less you turn the steering wheel, the smoother and faster you’ll  be. The less you move your hands on the steering wheel, the smoother you’ll  be. Therefore, the less you move your hands, the faster you’ll be able to drive. 
+
+3 
+GETTING STARTED
+Here, I illustrate the steps, the  process, of heel & toe downshifting.  This technique’s purpose is to allow  you to brake fully, while “blipping”  the throttle (your right foot operating  both the brake and gas pedals  simultaneously), so your downshifts  are smooth (not upsetting the  balance of the car). You’ll never be as  good as you can be until you master  heel & toe downshifting. And even if  you drive a car with a semi-automatic  or automatic transmission, you  should still understand the why and  how behind heel & toe. 
+4 
+GETTING STARTED
+Vision 
+Look ahead, as far as you can. Look where you want to go, and not where  you don’t want to go. Turn your head and look around corners. Finally, think  through corners as you look through them.  
+
+5 
+GETTING STARTED 
+Here’s another way of looking at what to do with your vision: constantly scan  and look further ahead. This is a smooth process, not one done in steps.
+
+6 
+VEHICLE DYNAMICS 
+Weight Transfer & Traction 
+Assuming that a car has equal weight  distribution front to rear, each tire has  about the same amount of traction  when it’s moving a constant speed. The  car is balanced. 
+When a tire has more load or weight  placed on it, it gains traction. Imagine  pushing down on a rubber eraser and  pushing it along a piece of paper for an  example of how this works. Conversely,  when a tire becomes less loaded, its  traction is reduced. 
+When you brake, weight transfers  forward, putting more load on the front  tires, and giving them more traction  than the rears (which have reduced  traction because they've had load taken  off them).  
+When you accelerate, weight transfers  to the rear tires, and they now have  more traction than the front tires do.
+7 
+VEHICLE DYNAMICS
+Weight transfer also occurs when going  
+around corners. Weight transfers to  
+the tires on the outside of the turn,  
+causing them to have more traction  
+than the inside tires. As the outside  
+tires have more load put on them, they  
+gain traction; as the inside tires have  
+load taken off them, they lose traction. 
+But here's the big thing: As this graph  
+indicates, the more load on a tire does  
+not result in a corresponding increase in  
+traction. It’s not a linear relationship –  
+they gain grip, but not at the same rate  
+as the load increases.  
+When you look at it from the  
+perspective of all four tires on your car,  
+the tires that gain more grip from the  
+extra load don't gain as much as the un 
+weighted tires lose. So, just when you  
+need the traction the most - when going  
+around a corner, for example - you  
+actually have less traction. This has to  
+do with the physics of how rubber tires  
+interact and grip the track surface 
+- and is beyond the scope of this ebook.  
+8 
+VEHICLE DYNAMICS 
+Traction Unit Number 
+To illustrate this concept to help you  
+better understand it, I created this  
+model of how tires, load, and traction  
+work. I call it the Traction Unit Number,  
+and it works like this (as shown in the  
+illustration to the right): If you could  
+measure the amount of traction each  
+tire has when the car is balanced and  
+traveling at constant speed down a  
+straightaway, you would see that each  
+tire has 10 "units of traction" (again,  
+this is a model, a concept, and not something that you can actually measure  like this). But as you turn through a right-hand corner, weight transfers to  the outside, or left side tires. They gain grip, resulting in, let's say, 15 units  of traction. But the inside tires have lost traction, resulting in only 3 units of  traction each. Overall, when the car is cornering, it has 36 units of traction  (3+3+15+15=36), instead of the original 40. 
+Every time you brake, turn the steering wheel, or accelerate, you cause some  amount of weight transfer, resulting in less traction than when the car was  in a steady state and perfectly balanced. But the smoother you brake, turn,  and accelerate, the less weight transfer you cause, meaning you have more  traction to work with. That is why smooth is fast!
+9 
+VEHICLE DYNAMICS
+Handling Characteristics: 
+You hear the terms understeer and oversteer all the time, right? But what do  they mean? 
+Understeer: 
+When the front tires have less traction than the rears do, the car tends to  push or plow relatively straight ahead, rather than turning as much as you'd  want it to. That's understeer. This is caused by either the car's setup, or you  have caused the understeer by transferring too much weight to the rear.  Therefore, the fronts don't have enough traction to change the direction of  the car as much as you'd like. No matter what, look where you want to go. 
+
+10 
+VEHICLE DYNAMICS
+Controlling Understeer: 
+Transfer weight to the front tires by easing your foot off the throttle. If  you're not accelerating, it would make sense to brake to transfer weight  forward, wouldn't it? That can work sometimes, but if the front tires  are already beyond their limit of traction, then asking them to do some  braking may actually make things worse. If you do brake, it better be  very gentle and light. 
+Be patient. Sometimes you just need to wait for the weight transfer  from easing off the throttle to take effect, and for the car to have  slowed enough for the front tires to grip the track enough to turn the  car the way you want. 
+Straighten the steering slightly. Yes, right when you feel you're going to  plow off the edge of the track, you need to actually straighten the wheel  and steer that way - just a little. See, the front tires are at an angle that  they can't grip the track with - they're turned too much for the amount  of traction they have. So the best thing to do is to unwind the steering  just a little, to bring the front tires back to an angle that allows them to  grip the track. This takes discipline and practice, because it goes against  your sense of self-preservation. 
+To summarize, look where you want to go, ease up on the throttle, and  unwind the steering wheel slightly to manage understeer. 
+11 
+VEHICLE DYNAMICS 
+Oversteer: 
+When the rear tires have less traction  
+than the front tires do, the rear of the  
+car will slide more, causing the car to  
+turn - or steer - more than you wanted.  
+Therefore, it has oversteered. 
+Controlling Oversteer: 
+Look and steer where you want  
+to go. This will cause you to  
+"counter steer," or "steer into  
+the skid." Essentially, you want to "open your hands" and unwind the  wheel to allow the car to take a larger radius. Where you look is where  you'll steer, so simply look where you want to go and you'll steer there. 
+Often, you can transfer weight to the rear tires, giving them more  traction, by gently accelerating. You'll need to be smooth with this  because too much speed for the traction level of the rear tires is what  caused the oversteer in the first place. Accelerating too much, or too  aggressively, will increase your speed and make things worse. 
+If the oversteer is caused by being too hard on the throttle, causing  "power oversteer" (this can only be done in a rear wheel drive car), you'll  need to gently ease off the throttle. If you lift too quickly, you'll transfer  more weight to the front, making the oversteer worse.
+12 
+VEHICLE DYNAMICS 
+There are times when you want a small amount of oversteer. For  example, in a tight corner (a hairpin turn), you need the car to change  direction a lot - you need to get it to turn a lot, or rotate. Using weight  transfer to the front as you turn into a corner will help the car rotate, or  oversteer a little (just enough). 
+Oversteer can be caused by either the driver, or the car's setup. If you  don't manage the weight transfer properly, the car will oversteer. Or the  combination of suspension setup, aerodynamic downforce balance, and  tires can also lead to your car oversteering. It's important to learn how  to identify each one, so you can "fix" the problem (and not something  that you think is the problem). 
+To summarize, look and steer where you want to go. Gently and  smoothly modulate the throttle (to either transfer weight to the rear, or  reduce the amount of power to the rear wheels) to manage oversteer.
+13 
+VEHICLE DYNAMICS 
+A tire’s slip angle can be viewed as the  
+difference between the direction the tire  
+is pointing and the direction the car is  
+heading. When driving at the limit, there  
+is a certain amount of slip. And almost  
+ironically, tires generate more traction  
+when there is some amount of slip (see  
+the next illustration – Slip Angle vs.  
+Traction graph). 
+This graph compares traction/grip (on the Y-axis), to a tire’s slip angle (along  the X-axis). As you can see, as a tire’s slip angle increases, it actually gains  traction until it plateaus, and then falls off.
+
+14 
+VEHICLE DYNAMICS 
+This Slip Angle vs. Traction graph shows 4 different drivers: The driver who  spends most of the time in the far left band is driving at less than the limit.  The one driving in the far right band is over-driving the car, spending too much  time with the tires beyond their limit (note that this doesn’t necessarily mean  spinning or crashing – it can just be too much sliding through the corners). The  two bands in the middle would result in the same speed around the track be cause they spend the same amount of time in the peak traction zone, but the  middle-left band driver would be faster over time. Why? He’s putting less wear  and tear on the tires.
+
+15 
+VEHICLE DYNAMICS 
+There’s a lot going on in this illustration: on the left is a “Traction Circle”  diagram, in the middle is a car being driven through a corner, and on the  right are the corresponding actions – what the driver and car are doing. All  are related. This is what driving the limit is all about, so take time to fully  understand what’s going on here. 
+
+There is a relationship, or interplay, between the steering wheel and the  throttle and brake pedals. You’re constantly trading off braking for cornering,  cornering for braking, acceleration for cornering, and cornering for acceleration.
+
+16 
+CORNERING 
+Every corner can be described by three  reference points: the Turn-in, Apex, and  Exit (sometimes called “Track-out”). At  its simplest, keep two goals in mind:  Straighten the corner out as much as  possible, and drive it in such a way that  it allows you to begin accelerating early  (the speed on the straight after the  corner is usually more important than  the speed you drive through the turn). 
+Here’s what the three reference points  look like in a hairpin corner. It also  shows how you want to use all the  track, entering from the outside edge of  the track (at the Turn-in point), to the  inside at the Apex, and then back to the  outside edge at the Exit. 
+As you can see from this illustration,  if you turn in early, you’ll clip an early  apex, and ultimately “run out of  track” at the exit. Your Turn-in point  is critical, so having a good reference  point for it is key.
+17 
+CORNERING 
+This illustration really captures the benefits of a “late apex” (or “Ideal Line”):  1) It allows later braking, since you’re going to turn in later; 2) You spend less  overall time in the corner, and that means more time spent accelerating; 3) It  means you can start accelerating earlier; and 4) It allows you to see, or “peek”  around the corner better (not really indicated here, but it’s an important  benefit).
+18 
+CORNERING 
+Here’s another look at the reason  for a later apex line. The dotted line  demonstrates the geometrically-largest  radius – which is the fastest way to drive  through the corner in isolation – but as  you can see, you spend practically all of  the 300 feet cornering. Until you begin  unwinding/straightening the steering  wheel, you can’t start to accelerate. By  turning in and apexing later, it allows  you to accelerate earlier, meaning you’ll  be faster on the following straightaway.  As the speed trace diagram shows, you  will be a little slower at the beginning of  the corner, but you’ll more than make  up for it later in the corner and down the  straightaway. This is why the late apex  line is referred to as the “Ideal line.” 
+If you have a corner with very little  straightaway after it (like Turn 6 at  Road Atlanta), your focus should be on  carrying as much speed into it, and not  worry so much about exit speed. There  are very few corners like Turn 6, so don’t  get carried away with this!
+19 
+CORNERING 
+Here’s how you would approach and drive a series of corners, like Esses. The  lesson here is that you’ll have to compromise at least one corner to maximize  your exit out of the final corner. In other words, your priority should be how  quickly you get out of these corners. 
+
+Here, I’m illustrating how NOT to do it. This driver is “crabbing” into the  corner, pulling the car away from the edge of the track before the Turn-in  point, reducing the radius of the corner – meaning the car will not be able  to carry as much speed through the corner.
+
+20 
+CORNERING 
+Here are three more errors illustrated  
+to help you learn from them. In the top  
+illustration, the driver has turned in too  
+early (before the Turn-in point), resulting  
+in an early Apex. The driver would have  
+to delay beginning to accelerate to avoid  
+driving off the track. 
+In the second illustration, the driver  
+has turned in too late, now having a  
+late Apex. While safer than the previous  
+mistake, the amount the driver would  
+have to slow down would be impossible  
+to make up for – the driver would be slow  
+down the straightaway. The key indicator  
+here is that there is room between the  
+car and the edge of the track at the Exit –  
+there is no need to use all the track. Next  
+lap, the driver should aim to turn in at  
+the right point and clip the ideal Apex. 
+In the third illustration, the driver turned  
+in at the right place – at the Turn-in point  
+– but he turned too abruptly, too sharp,  
+resulting in an early Apex. Ultimately,  
+it ends up very similar to the first  
+illustration above – delayed acceleration  
+to avoid running out of track at the Exit.
+21 
+CORNERING 
+Here’s a comparison of two lines through a hairpin turn, one with a fairly  standard late Turn-in and Apex, the one on the right with a more exaggerated  “late apex” line. Which is best? That depends on track conditions, how the car  handles, and the car’s acceleration capabilities. If it was raining, the second  option might be better, providing a straighter line to accelerate on. If the car  had little power, the momentum one could carry through the corner with the  first option might be better.The lesson here is that you need to experiment  with the lines you drive to find the ideal compromise.
+22 
+CORNERING 
+Not using all the track width is a big no-no, and even being one foot away from  the edge of the track as you enter a corner can have a big negative impact - it  reduces the radius of the turn more than you might imagine. You paid to use  the track – use it all!
+
+23 
+CORNERING 
+The differences in the line you drive can be subtle, as this illustration  demonstrates. The corner on the left is a slightly tighter radius than the one  on the right, so it requires a later Turn-in and Apex line. However, both of  these illustrations are showing early Turn-ins – both would benefit from a  later Turn-in and Apex to maximize straightaway speed.
+24 
+THE MENTAL GAME 
+Learning theory tells us there are four stages to mastering an activity:  Unconscious Incompetence (you don’t know what you don’t know); Conscious  Incompetence (you know what you don’t know); Conscious Competence (you  know what you’re doing, but you’re having to think about it); Unconscious  Competence (you no longer have to think about it – you just do it). I’ve added  a 5th stage that I think describes what “being in the zone” is: Unconscious  Competence with Conscious Awareness (you don’t have to think about the  mechanics of doing something, but your conscious mind is fully aware of  everything going on, and is thinking about how to do things even better).
+25 
+THE MENTAL GAME 
+People talk about the “learning curve,” as if we actually learn on this smooth  path. But we don’t. Instead, we learn in steps: We make progress, plateau for a  while, make another step of learning, plateau, and so on. That is, unless we get  frustrated when on these plateaus, resulting in a digression in learning. The  lesson here? Be patient if you’re on a plateau, as there is a burst of learning  after every one.
+26 
+THE MENTAL GAME 
+As you drive, information is taken in through your senses, processed by your  brain where it tells your body what to do (brake, turn the steering wheel,  squeeze the throttle, turn your head to look through a corner, etc.) – the  output – and then you react to those actions. This loop/process happens over  and over, thousands of times per second, and as you improve, it happens  faster and more efficiently.
+27 
+THE MENTAL GAME 
+On track, you’re picking up information through your visual, kinesthetic  (touch, balance, sensing g-forces pushing against your body), and auditory  senses. The better the quality of this information, the better you’ll drive.
+28 
+THE MENTAL GAME 
+Here are two views of the same section of the track, and what two different  drivers pick up with their senses (in this example, visually). The driver in the top  scene sees more; the driver in the lower scene misses what the driver at the  top sees. Which driver do you think is faster? Which driver do you want to be?
+
+29 
+THE MENTAL GAME 
+If you take time to focus solely on taking in more sensory input – visual,  kinesthetic, and auditory – you’ll be giving your brain better quality information  to work with. Better quality information results in a better output, a better  performance. When you specifically and deliberately spend time on the track  to focus on these senses, one at a time, you’re doing what I call Sensory Input  Sessions. The results are very powerful.
+
+30 
+PUTTING IT ALL TOGETHER 
+Putting together what I illustrated in the Vehicle Dynamics and Cornering  sections, here we see the Ideal Line and what you’re doing when driving it.
+31 
+PUTTING IT ALL TOGETHER
+Here’s an illustration of Trail Braking. You can think of trail braking as simply  “trailing” (slowly releasing) your foot off the brake as you turn into a corner,  trading braking force for cornering force. You can see how there’s a trade-off  of braking for steering angle. This keeps the tires at their maximum traction  levels, and can help you change the direction of your car into the corner by  keeping weight loaded on the front tires. 
+
+32 
+PUTTING IT ALL TOGETHER
+There’s no absolute right or wrong way to turn into a corner, or even just  one perfect line through it. It depends on many factors: the type of car and  how it handles, track conditions, driving style, and the shape of the corner.  This illustration should get you thinking about how a later Turn-in requires a  sharper turn of the steering; an earlier Turn-in makes for a more gentle turn  of the wheel. Which is best? You have to experiment with both to find out.  
+
+33 
+PUTTING IT ALL TOGETHER
+Here, I’m illustrating a trace of the throttle position (as we’d find with a data  acquisition system), and comparing two drivers. In the upper graph, you can  see the driver slowly releasing the throttle; that will cost speed compared  to the driver in the lower graph. It may seem like there would be very little  difference, but in reality, it can make a significant difference. 
+
+34 
+PUTTING IT ALL TOGETHER
+I use this illustration to show the  benefits of left-foot-braking (Driver  B in the lower graph) over right-foot braking (Driver A, in the upper graph).  The dark, solid line is brake pedal  pressure, and the light/double line is  throttle position. Because there is a  finite amount of time that it takes to  lift the right foot from the throttle and  move it over to the brake pedal, Driver  A must lift at Point “a,” whereas Driver  B is able to lift his right foot from the  throttle at the exact same time (Point  “b”) as he begins braking with his left  foot. Also note that Driver B is able  to overlap braking and acceleration  a little bit (you can overdo this, so be  careful with it). Not all cars can be  left-foot braked, and I’m not saying all  drivers should, even if they can, but it’s  something to consider. 
+35 
+PUTTING IT ALL TOGETHER
+When I talk about “hustling” a car, I mean looking for opportunities to get to  100% full throttle, if even for a fraction of a second. In this illustration, it’s at  Point “b,” in between two corners. Many drivers will do as Driver A has here,  and give it partial throttle. In the back of their mind, they’re thinking, “Well,  
+I’m going to have to lift again for the next corner, so there’s no point in giving  it full throttle here.” That’s at a subconscious level, and the driver is probably  unaware they’re doing it (that’s why a data acquisition system can be so  valuable). Look for “hustle” areas. 
+36 
+PUTTING IT ALL TOGETHER
+Driving over Apex curbs allows you to straighten the corner out, increasing its  radius, meaning you can carry more speed through it. Of course, not all curbs  and cars are created equal. Some curbs are meant to be driven over, and some  not; some cars soak up curbs, and others don’t. Experiment. 
+37 
+PUTTING IT ALL TOGETHER
+This illustrates what I call the “Change  in Speed” problem. Driver A slows  the car to 78 MPH on the entry to  the corner, while Driver B enters at  80 MPH. Let’s assume 80 is the limit.  Even though 78 MPH is below the limit,  it’s close to it. As Driver A enters the  corner, he senses that the tires are not  quite at their limits, so he accelerates  to get the car to its limit. This causes  the car to either understeer due to  the rearward weight transfer, or some  power-on oversteer. Either way, the  driver interprets this as he’s driving the  limit, and so he continues to enter at  78. In the meantime, Driver B carries  80 MPH into the corner, smoothly  transitions to acceleration at the right  time, and begins accelerating from a  higher speed. I don’t need to tell you  which driver is faster. 
+38 
+PUTTING IT ALL TOGETHER
+Most drivers focus on the Begin-of 
+Braking point – that reference point on  
+the straightaway approaching a corner  
+that tells him where to start braking.  
+The best drivers, though, focus more  
+on the End-of-Braking (E-o-B) point,  
+where they finish braking and their  
+foot has come completely off the pedal.  
+This does three things: First, it forces  
+you to look into the corner, which is  
+always a good thing. Second, it results  
+in a smoother brake release, therefore  
+balancing the car better, and meaning  
+you’re able to carry more speed through  
+and out of the corner. Ultimately, it will  
+result in less “nothing” time in between  
+your brake release and start of applying  
+the throttle. And finally, by looking into  
+the corner, to the E-o-B point, you’re  
+likely to brake slightly later, but be  
+more calm and relaxed when doing so,  
+because you know where you’re going. 
+39 
+PUTTING IT ALL TOGETHER
+Okay, you’ve made a big mistake (or the  brakes are failing in your car), and you’re  carrying way too much speed into a  corner. Rather than riding it out and likely  spinning or crashing off the track, adjust  your line to lengthen the amount of time  you have to slow the car down by using  the “Recovery line.” 
+When passing another car, a goal should  be to get back on the Ideal Line as soon  as you can. If you’re out-braking another  car on the inside into a corner, preferably  you’ll merge back on the line by the Apex,  and focus on accelerating out of the  corner from there. 
+This illustration also demonstrates  “presenting” yourself to the driver you’re  passing. In this case, the driver on the  inside is well up, and even a little beyond,  being alongside the other car. There’s no  doubt who controls the corner. 
+40 
+PUTTING IT ALL TOGETHER
+When you first start learning to drive on the track, your first focus is on fol lowing the right line. As you begin working on going faster, you should target  your corner exit speed, then your corner entry speed. As you put those togeth er, your mid-corner speed will naturally pick up. It’s at this point that the one  change you made to improve your exit speed, for example, will impact your  line, and that will change your corner entry speed, and so on. It’s this constant  learning and fine-tuning that makes this sport so challenging and fun! 
+
+41 
+PUTTING IT ALL TOGETHER 
+To consistently drive at the limit, you’re going to need to go beyond it every  now and then. Your goal, though, is to go over it just a little, as illustrated by  Driver #3’s progress. Driver #2 is going over it (and under it) too much; Driver  #1 never reaches it.
+42 
+FINAL THOUGHTS 
+Once again, the purpose of the illustrations in this eBook is not to explain every  detail. The purpose is to make you think, and to provide quick reminders and  refreshers. Between sessions at the track, or the night before a day at the track,  flip through this eBook – think and refresh.  
+If you’d like to make suggestions for future updates, or you have questions, please  email me at ross@speedsecrets.com.  
+I definitely have more to share on other topics, though:  
+• SpeedSecrets.com is the home to the Ask Ross page (hundreds of Q&As;  you can submit your own questions to me to answer), free track maps,  online webinars, Virtual Track Walk videos, a variety of free eBooks,  information about my presentations/seminars and coaching services, and  other resources to help you be an even better driver. 
+• You can never learn too much. One of the best ways I know how to stay  on top of your driving game is to subscribe to my weekly driving tips,  opinions & stories at RossBentley.Substack.com. It’s “entertaining  education, conveniently delivered.”  
+• Of course, follow and contribute to my social media accounts: o Instagram: @RossBentley 
+o Facebook: DriverCoach 
+o YouTube: SpeedSecrets1 
+• One of the most valuable tools for you may be SpeedSecrets.ai. Think of it  as ChatGPT for drivers, with one exception: it only pulls from vetted, proven content, and not from all sorts of random information posted on  the internet. Just ask it a question, and it’s like having me sitting next to  you, giving you an answer – and even some coaching. 
+• Whether you use a simulator to improve your real-world track driving, or  you’re a sim racer, sign up for my Sim Racer Academy. You’ll find a huge library of information, coaching tips, and practice drills to take your sim  driving to the next level.
+43 
+FINAL THOUGHTS 
+There are two themes that I’ve lived my driving and coaching life by, and they’ve  done me well:  
+1. There’s always more: I can always learn more, and improve as a driver. You  can always learn more, and improve as a driver. That’s what makes this  sport so much fun.  
+2. Be The Source: With Speed Secrets, I strive to be the most complete  source of information and training for performance and race drivers, for  beginners to elite-level pros, from free tips and advice to one-on-one  coaching.  
+I hope I’m able to continue to help you learn more about, and enjoy, performance  driving.  
+Have fun!  
+Ross Bentley
+44 

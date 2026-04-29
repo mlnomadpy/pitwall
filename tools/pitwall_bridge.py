@@ -25,7 +25,23 @@ import argparse
 import os
 import sys
 import threading
+import json
 from datetime import datetime
+try:
+    from google import genai
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
+
+# Load .env file
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.exists(env_path):
+    with open(env_path) as f:
+        for line in f:
+            if line.strip() and not line.startswith("#"):
+                key, val = line.strip().split("=", 1)
+                os.environ[key.strip()] = val.strip().strip('"\'')
+
 from flask import Flask, request, jsonify
 
 # ── Add src/simulator to path so we can import the real coaching engine ────────
@@ -360,13 +376,118 @@ def _score_insights(bursts: list) -> list:
     return insights[:3]
 
 
+def _gemini_insights(bursts: list, lap: int = None) -> list:
+    if not bursts: return []
+    if not HAS_GENAI or not os.environ.get("GEMINI_API_KEY"):
+        return _score_insights(bursts)
+    
+    base_dir = os.path.dirname(__file__)
+    repo_dir = os.path.abspath(os.path.join(base_dir, ".."))
+    
+    try:
+        with open(os.path.join(repo_dir, "transcript.txt"), "r") as f:
+            transcript = f.read()
+    except Exception:
+        transcript = ""
+        
+    try:
+        with open(os.path.join(repo_dir, "Performance-Driving-Illustrated-2-23-24.txt"), "r") as f:
+            pedagogy = f.read()[:5000]
+    except Exception:
+        pedagogy = ""
+
+    gold_standard = """
+    Sonoma Raceway Gold Standard (Turn, Speed, Gear):
+    Turn 1: Entry 111 km/h, Apex 113 km/h, Exit 117 km/h, Gear 2
+    Turn 3: Entry 104 km/h, Apex 87 km/h, Exit 102 km/h, Gear 4
+    Turn 6: Entry 92 km/h, Apex 77 km/h, Exit 105 km/h, Gear 5
+    Turn 9: Entry 121 km/h, Apex 116 km/h, Exit 132 km/h, Gear 3
+    Turn 10: Entry 106 km/h, Apex 73 km/h, Exit 108 km/h, Gear 6
+    Turn 11: Entry 88 km/h, Apex 64 km/h, Exit 95 km/h, Gear 5
+    """
+    driver_level = bursts[0].get("driver_level", "intermediate") if bursts else "intermediate"
+
+    prompt = f"""
+    You are an expert racing coach. Provide exactly 3 actionable racing insights for a {driver_level} driver who just completed{' lap ' + str(lap) if lap is not None else ' a lap'} at Sonoma Raceway.
+    Compare their telemetry with the Gold Standard lap. Use the coaching pedagogy provided. Adjust the tone, terminology, and complexity of your feedback to suit a {driver_level} driver.
+
+    ## Pedagogy
+    {pedagogy}
+    
+    ## Transcript
+    {transcript}
+
+    ## Gold Standard
+    {gold_standard}
+
+    ## Driver Lap Telemetry
+    """
+    
+    for i, b in enumerate(bursts):
+        prompt += f"Burst {i+1}:\n"
+        prompt += f"- Corners Visited: {b.get('corners_visited', [])}\n"
+        prompt += f"- Avg Speed: {b.get('avg_speed_kmh', 0):.0f} km/h\n"
+        prompt += f"- Max Combo G: {b.get('max_combo_g', 0):.2f} G\n"
+        prompt += f"- Coasting Frames: {b.get('coast_frames', 0)} / {b.get('frame_count', 1)}\n"
+        prompt += f"- Trail Braking Frames: {b.get('trail_brake_frames', 0)}\n\n"
+
+    prompt += """
+    Output ONLY a valid JSON array of 3 objects with exactly this structure:
+    [
+      {
+        "id": "insight_id_like_brake_late",
+        "title": "Short Title (max 4 words)",
+        "detail": "Actionable coaching advice. Mention specific corners.",
+        "corners": ["Turn 3"],
+        "metric_label": "Short label (e.g. Avg Speed)",
+        "metric_value": "Value (e.g. 104 km/h)",
+        "effort": 1,
+        "est_gain_s": 0.5
+      }
+    ]
+    effort should be 1, 2, or 3.
+    est_gain_s should be a float.
+    Make the advice sound professional, encouraging, and highly specific to the corners.
+    """
+
+    client = genai.Client()
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        
+        text = response.text
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+            
+        data = json.loads(text.strip())
+        
+        for i, item in enumerate(data):
+            item["rank"] = i + 1
+            
+        insights = data[:3]
+        print(f"\\n🏁 Gemini Insights Generated Successfully:\\n{json.dumps(insights, indent=2)}\\n")
+        return insights
+    except Exception as e:
+        print(f"Gemini generation failed: {e}")
+        return _score_insights(bursts)
+
 @app.route("/insights", methods=["GET"])
 def get_insights():
     """Return top-3 prioritised driver insights from the current session bursts."""
+    lap_param = request.args.get("lap")
+    lap = int(lap_param) if lap_param else None
+
     with _burst_lock:
         bursts_snapshot = list(_session_bursts)
 
-    insights = _score_insights(bursts_snapshot)
+    if lap is not None:
+        bursts_snapshot = [b for b in bursts_snapshot if b.get("lap") == lap]
+
+    insights = _gemini_insights(bursts_snapshot, lap=lap)
     return jsonify({
         "insights":       insights,
         "session_bursts": len(bursts_snapshot),

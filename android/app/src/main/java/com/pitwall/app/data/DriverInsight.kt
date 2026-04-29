@@ -17,6 +17,7 @@ data class DriverInsight(
     val effort: Int,                // 1 easy · 2 medium · 3 hard
     val estGainS: Float,            // estimated lap-time gain in seconds
     val evidenceBursts: Int,        // number of telemetry bursts supporting this finding
+    val lap: Int = 0,               // the lap this insight was generated for
 ) {
     /** Severity colour bucket — drives the metric chip colour in the UI. */
     val severity: Severity get() = when (id) {

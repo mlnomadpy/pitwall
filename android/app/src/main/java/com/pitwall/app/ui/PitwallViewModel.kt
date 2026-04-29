@@ -105,6 +105,9 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         lapsJob = viewModelScope.launch {
             svc.laps.collect { list ->
                 _ui.update { it.copy(laps = list) }
+                if (_ui.value.mode == AppMode.PADDOCK) {
+                    fetchPendingInsights()
+                }
             }
         }
     }
@@ -138,13 +141,11 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
 
     fun enterPaddock() {
         _ui.update { it.copy(mode = AppMode.PADDOCK) }
-        fetchInsights()          // immediate fetch on entry
-        startInsightsPolling()   // then poll every 30s
+        fetchPendingInsights()
         refreshCornerStats()
     }
 
     fun returnToTrack() {
-        stopInsightsPolling()
         _ui.update { it.copy(mode = AppMode.ON_TRACK) }
     }
 
@@ -210,38 +211,48 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
             Build.HARDWARE == "ranchu"
     }
 
-    // ── Insights — fetch + 30-second auto-poll ──────────────────────────────
+    // ── Insights — fetch per lap ────────────────────────────────────────────
 
-    fun fetchInsights() {
+    private val fetchedLaps = mutableSetOf<Int>()
+
+    fun fetchPendingInsights() {
+        val completedLaps = _ui.value.laps.map { it.lap }
+        val toFetch = completedLaps.filter { it !in fetchedLaps }
+        if (toFetch.isEmpty()) return
+
         viewModelScope.launch {
             _ui.update { it.copy(insightsLoading = true, insightsError = false) }
-            val json = bridgeClient.getInsightsJson()
-            if (json == null) {
-                _ui.update { it.copy(insightsLoading = false, insightsError = true) }
-                return@launch
+            val newInsights = mutableListOf<DriverInsight>()
+            var anyError = false
+
+            for (lap in toFetch) {
+                val json = bridgeClient.getInsightsJson(lap)
+                if (json == null) {
+                    anyError = true
+                    continue
+                }
+                val parsed = parseInsights(json, lap)
+                if (parsed.isNotEmpty()) {
+                    newInsights.addAll(parsed)
+                    fetchedLaps.add(lap)
+                }
             }
-            val insights = parseInsights(json)
-            _ui.update { it.copy(insights = insights, insightsLoading = false, insightsError = false) }
+
+            if (newInsights.isNotEmpty()) {
+                _ui.update { state -> 
+                    state.copy(
+                        insights = state.insights + newInsights,
+                        insightsLoading = false,
+                        insightsError = anyError
+                    )
+                }
+            } else {
+                _ui.update { it.copy(insightsLoading = false, insightsError = anyError) }
+            }
         }
     }
 
-    private fun startInsightsPolling() {
-        stopInsightsPolling()
-        insightsPollingJob = viewModelScope.launch {
-            while (true) {
-                delay(30_000L)
-                if (_ui.value.mode == AppMode.PADDOCK) fetchInsights()
-                else break
-            }
-        }
-    }
-
-    private fun stopInsightsPolling() {
-        insightsPollingJob?.cancel()
-        insightsPollingJob = null
-    }
-
-    private fun parseInsights(json: String): List<DriverInsight> = try {
+    private fun parseInsights(json: String, lap: Int): List<DriverInsight> = try {
         val root = org.json.JSONObject(json)
         val arr  = root.getJSONArray("insights")
         (0 until arr.length()).map { i ->
@@ -261,6 +272,7 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
                 effort         = o.optInt("effort", 2),
                 estGainS       = o.optDouble("est_gain_s", 0.0).toFloat(),
                 evidenceBursts = o.optInt("evidence_bursts", 0),
+                lap            = lap,
             )
         }
     } catch (e: Exception) {
@@ -314,6 +326,5 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
         telemetryJob?.cancel()
         coachingJob?.cancel()
-        insightsPollingJob?.cancel()
     }
 }

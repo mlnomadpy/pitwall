@@ -191,9 +191,15 @@ private fun InsightsTab(
         } else if (insights.isEmpty()) {
             Text("No insights generated yet. Complete more laps.", color = PitwallColors.TextDim, fontSize = 14.sp)
         } else {
-            insights.sortedBy { it.rank }.take(3).forEach { insight ->
-                InsightCard(insight)
+            val grouped = insights.groupBy { it.lap }.toSortedMap(compareByDescending { it })
+            grouped.forEach { (lap, lapInsights) ->
+                Text("LAP $lap", color = PitwallColors.GripGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Spacer(Modifier.height(12.dp))
+                lapInsights.sortedBy { it.rank }.forEach { insight ->
+                    InsightCard(insight)
+                    Spacer(Modifier.height(12.dp))
+                }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }

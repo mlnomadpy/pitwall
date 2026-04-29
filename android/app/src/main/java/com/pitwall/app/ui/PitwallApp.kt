@@ -31,7 +31,7 @@ fun PitwallApp(viewModel: PitwallViewModel) {
                 cornerStats  = state.cornerStats,
                 trackOutline = state.trackOutline,
                 onReturnToTrack = { viewModel.returnToTrack() },
-                onRefreshInsights = { viewModel.fetchInsights() },
+                onRefreshInsights = { viewModel.fetchPendingInsights() },
             )
         }
     }

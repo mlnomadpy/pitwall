@@ -18,15 +18,19 @@ private const val TAG = "BridgeClient"
 class BridgeClient(private val baseUrl: String = "http://127.0.0.1:8765") {
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
         .build()
 
     /** POST telemetry burst JSON to /analyze. Returns coaching text or null. */
     suspend fun analyze(burstJson: String): String? = withContext(Dispatchers.IO) {
         try {
             val body = burstJson.toRequestBody("application/json".toMediaType())
-            val req = Request.Builder().url("$baseUrl/analyze").post(body).build()
+            val req = Request.Builder()
+                .url("$baseUrl/analyze")
+                .header("Connection", "close")
+                .post(body)
+                .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@withContext null
                 val payload = resp.body?.string() ?: return@withContext null
@@ -40,9 +44,14 @@ class BridgeClient(private val baseUrl: String = "http://127.0.0.1:8765") {
     }
 
     /** GET /insights — returns raw JSON string or null. */
-    suspend fun getInsightsJson(): String? = withContext(Dispatchers.IO) {
+    suspend fun getInsightsJson(lap: Int? = null): String? = withContext(Dispatchers.IO) {
         try {
-            val req = Request.Builder().url("$baseUrl/insights").get().build()
+            val url = if (lap != null) "$baseUrl/insights?lap=$lap" else "$baseUrl/insights"
+            val req = Request.Builder()
+                .url(url)
+                .header("Connection", "close")
+                .get()
+                .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) null else resp.body?.string()?.takeIf { it.isNotBlank() }
             }
@@ -52,7 +61,11 @@ class BridgeClient(private val baseUrl: String = "http://127.0.0.1:8765") {
     /** GET /health — returns true if bridge is reachable. */
     suspend fun isReachable(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val req = Request.Builder().url("$baseUrl/health").get().build()
+            val req = Request.Builder()
+                .url("$baseUrl/health")
+                .header("Connection", "close")
+                .get()
+                .build()
             http.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
     }
