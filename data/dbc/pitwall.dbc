@@ -1,0 +1,108 @@
+VERSION "pitwall.dbc 1.0 — synthetic CAN database for development + testing"
+
+NS_ :
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: ECU GPS DASH
+
+BO_ 256 PitwallMotion: 8 GPS
+ SG_ speed_ms : 0|16@1+ (0.01,0) [0|650] "m/s" ECU,DASH
+ SG_ g_lat : 16|16@1- (0.001,0) [-32|32] "g" ECU,DASH
+ SG_ g_long : 32|16@1- (0.001,0) [-32|32] "g" ECU,DASH
+ SG_ combo_g : 48|16@1+ (0.001,0) [0|65] "g" ECU,DASH
+
+BO_ 257 PitwallPosition: 8 GPS
+ SG_ lat : 0|32@1- (1e-7,0) [-90|90] "deg" ECU,DASH
+ SG_ lon : 32|32@1- (1e-7,0) [-180|180] "deg" ECU,DASH
+
+BO_ 258 PitwallDistance: 4 GPS
+ SG_ distance_m : 0|32@1+ (0.01,0) [0|42949672] "m" ECU,DASH
+
+BO_ 320 PitwallDriverInputs: 8 ECU
+ SG_ throttle_pct : 0|16@1+ (0.01,0) [0|100] "%" DASH
+ SG_ brake_bar : 16|16@1+ (0.01,0) [0|600] "bar" DASH
+ SG_ steering_deg : 32|16@1- (0.1,0) [-3276|3276] "deg" DASH
+ SG_ rpm : 48|16@1+ (1,0) [0|20000] "rpm" DASH
+
+BO_ 321 PitwallDriveline: 8 ECU
+ SG_ gear : 0|8@1+ (1,-1) [-1|8] "" DASH
+ SG_ clutch_pos_pct : 8|16@1+ (0.01,0) [0|100] "%" DASH
+ SG_ wheel_speed_fl_kmh : 24|16@1+ (0.01,0) [0|650] "kmh" DASH
+ SG_ wheel_speed_fr_kmh : 40|16@1+ (0.01,0) [0|650] "kmh" DASH
+
+BO_ 322 PitwallWheelSpeedRear: 8 ECU
+ SG_ wheel_speed_rl_kmh : 0|16@1+ (0.01,0) [0|650] "kmh" DASH
+ SG_ wheel_speed_rr_kmh : 16|16@1+ (0.01,0) [0|650] "kmh" DASH
+
+BO_ 384 PitwallPowertrain: 8 ECU
+ SG_ oil_temp_c : 0|16@1- (0.1,0) [-40|200] "C" DASH
+ SG_ coolant_temp_c : 16|16@1- (0.1,0) [-40|200] "C" DASH
+ SG_ oil_pressure_kpa : 32|16@1+ (1,0) [0|1000] "kPa" DASH
+ SG_ fuel_level_pct : 48|16@1+ (0.01,0) [0|100] "%" DASH
+
+BO_ 385 PitwallAirIntake: 8 ECU
+ SG_ intake_air_temp_c : 0|16@1- (0.1,0) [-40|150] "C" DASH
+ SG_ maf_gps : 16|16@1+ (0.01,0) [0|650] "g/s" DASH
+ SG_ map_kpa : 32|16@1+ (0.01,0) [0|650] "kPa" DASH
+ SG_ afr_lambda : 48|16@1+ (0.001,0) [0|65] "ratio" DASH
+
+BO_ 448 PitwallTpms: 8 ECU
+ SG_ tpms_fl_kpa : 0|16@1+ (0.1,0) [0|6500] "kPa" DASH
+ SG_ tpms_fr_kpa : 16|16@1+ (0.1,0) [0|6500] "kPa" DASH
+ SG_ tpms_rl_kpa : 32|16@1+ (0.1,0) [0|6500] "kPa" DASH
+ SG_ tpms_rr_kpa : 48|16@1+ (0.1,0) [0|6500] "kPa" DASH
+
+CM_ "Pitwall synthetic CAN database. Used for: (a) the simulator (encodes recorded VBO frames into CAN frames over a virtual bus), (b) the test suite (round-trip via interface=virtual), (c) production over slcan/USB-CAN when paired with a vehicle DBC. Real-vehicle DBCs are added as additional databases; cantools loads multiple DBCs per bus.";
+CM_ BO_ 256 "Motion fields — derived from GPS+IMU fusion at 10–50 Hz on the production bus.";
+CM_ BO_ 257 "Position — lat/lon at 10 Hz. Scaled by 1e-7 to fit signed 32-bit.";
+CM_ BO_ 258 "Cumulative session distance in metres. Resets per session.";
+CM_ BO_ 320 "Driver inputs — throttle / brake / steering / RPM. Source of trail-brake + hustle detection.";
+CM_ BO_ 321 "Driveline state — gear / clutch / front wheel speeds. Powers clutch_balance coach rule.";
+CM_ BO_ 322 "Rear wheel speeds — separated message for bandwidth.";
+CM_ BO_ 384 "Powertrain temps + pressures + fuel.";
+CM_ BO_ 385 "Air intake + AFR — useful for tune diagnostics post-session.";
+CM_ BO_ 448 "TPMS at 1 Hz — flagged not-useful by min_useful_hz=5 by default.";
+CM_ SG_ 256 speed_ms "Vehicle speed (m/s). Wide-table canonical.";
+CM_ SG_ 256 g_lat "Lateral acceleration (g, signed). Wide-table canonical.";
+CM_ SG_ 256 g_long "Longitudinal acceleration (g, signed). Wide-table canonical.";
+CM_ SG_ 256 combo_g "Combined-G magnitude (g). Wide-table canonical.";
+CM_ SG_ 257 lat "Latitude (decimal deg). Wide-table canonical.";
+CM_ SG_ 257 lon "Longitude (decimal deg). Wide-table canonical.";
+CM_ SG_ 258 distance_m "Cumulative distance (m). Wide-table canonical.";
+CM_ SG_ 320 throttle_pct "Throttle position (0–100%). Wide-table canonical.";
+CM_ SG_ 320 brake_bar "Brake pressure (bar). Wide-table canonical.";
+CM_ SG_ 320 steering_deg "Steering angle (deg, signed). Wide-table canonical.";
+CM_ SG_ 320 rpm "Engine RPM. Wide-table canonical.";
+CM_ SG_ 321 gear "Current gear. -1 = reverse, 0 = neutral, 1..7 = forward.";
+CM_ SG_ 321 clutch_pos_pct "Clutch position (0 = released, 100 = fully depressed).";
+CM_ SG_ 384 oil_temp_c "Oil temperature (°C). Drives oil_temp_warning_t11 coach rule.";
+CM_ SG_ 384 coolant_temp_c "Coolant temperature (°C).";

@@ -20,4 +20,5 @@ Decisions for the Pitwall Sprint, adapted from the [Pitwall open-source project]
 | [012](012-coach-engine-adapter.md) | Coach Engine Adapter (on-device LiteRT-LM) | Accepted | New 2026-04-28 — `RuleCoach` + `LitertCoach` |
 | [013](013-frontend-backend-boundary.md) | Frontend Visualizes, Backend Reasons | Accepted | New 2026-04-28 — backend owns LLM logic + system prompts |
 | [014](014-sonoma-as-the-product.md) | Sonoma is the Product | Accepted | New 2026-04-28 — three-mode coaching + analysis pipeline + visualisation bundles, all Sonoma-hardcoded |
-| [015](015-universal-telemetry-sink.md) | Universal Telemetry Sink + Capability Model | Proposed | New 2026-04-29 — tall signal store + registry + capability-aware coaches/widgets for any car / any data feed |
+| [015](015-universal-telemetry-sink.md) | Universal Telemetry Sink + Capability Model | Accepted | New 2026-04-29 — tall signal store + registry + capability-aware coaches/widgets for any car / any data feed |
+| [016](016-can-bus-ingest-and-frontend-pivot.md) | USB-CAN Ingest + Vue PWA Frontend | Accepted | New 2026-04-29 — kills BLE + native Flutter app; everything non-presentation goes in pitwall, frontend becomes a Vue PWA |

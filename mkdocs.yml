@@ -30,11 +30,18 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.details
+  - pymdownx.arithmatex:
+      generic: true
   - admonition
   - tables
   - attr_list
   - toc:
       permalink: true
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://polyfill.io/v3/polyfill.min.js?features=es6
+  - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
 
 nav:
   - Home: index.md
@@ -74,3 +81,4 @@ nav:
       - "013: Frontend/Backend Boundary": adr/013-frontend-backend-boundary.md
       - "014: Sonoma is the Product": adr/014-sonoma-as-the-product.md
       - "015: Universal Telemetry Sink": adr/015-universal-telemetry-sink.md
+      - "016: USB-CAN Ingest + Vue PWA Frontend": adr/016-can-bus-ingest-and-frontend-pivot.md
