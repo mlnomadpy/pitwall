@@ -59,6 +59,10 @@ mkdocs serve -a 127.0.0.1:8889
 - Python 3.10+ (for the local coaching bridge)
 - `adb` on your PATH: add `~/Library/Android/sdk/platform-tools` to `~/.zshrc`
 
+### Jetpack “Paddock” app (optional)
+
+A standalone **native** client lives in [`android-app/`](android-app/README.md): Compose, **Google Maps**, **WebView** pre-brief, and the bridge `/health` check. Use it for Sonoma map UX and Pixel-only flows alongside the Flutter build.
+
 ### 1 — Run the Flutter App
 
 ```bash
