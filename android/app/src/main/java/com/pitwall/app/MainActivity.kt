@@ -62,6 +62,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Probe Bluetooth bonded devices (or emulator pass-through) so SetupScreen
+        // can display real hardware status before the session starts.
+        viewModel.refreshHardwareStatus(this)
+
         setContent {
             PitwallApp(viewModel)
         }

@@ -1,6 +1,10 @@
 package com.pitwall.app.ui
 
+import android.annotation.SuppressLint
 import android.app.Application
+import android.bluetooth.BluetoothManager
+import android.content.Context
+import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pitwall.app.data.CoachingMessage
@@ -18,6 +22,19 @@ import kotlinx.coroutines.launch
 
 enum class AppMode { SETUP, ON_TRACK, PADDOCK }
 
+/**
+ * Represents the connection status of a single hardware peripheral.
+ *
+ * @param displayName   Human-readable label shown in SetupScreen.
+ * @param connected     True if the device is bonded/reachable (or we are on an emulator).
+ * @param isEmulator    True when running on an AVD — status is synthetic, not real BT state.
+ */
+data class HardwareStatus(
+    val displayName: String,
+    val connected: Boolean,
+    val isEmulator: Boolean = false,
+)
+
 data class PitwallUiState(
     val mode: AppMode = AppMode.SETUP,
     val telemetry: TelemetryFrame? = null,
@@ -25,6 +42,8 @@ data class PitwallUiState(
     val driverLevel: String = "intermediate",
     val isStarting: Boolean = false,
     val slowSinceMs: Long? = null,
+    /** Empty until [PitwallViewModel.refreshHardwareStatus] is called. */
+    val hardwareStatus: List<HardwareStatus> = emptyList(),
 )
 
 /**
@@ -99,6 +118,66 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
     fun enterPaddock() = _ui.update { it.copy(mode = AppMode.PADDOCK) }
     fun returnToTrack() = _ui.update { it.copy(mode = AppMode.ON_TRACK) }
     fun setDriverLevel(level: String) = _ui.update { it.copy(driverLevel = level) }
+
+    /**
+     * Probes real Bluetooth bonded-device state and pushes [HardwareStatus] entries
+     * into [PitwallUiState.hardwareStatus].
+     *
+     * On an Android emulator (detected via [Build.FINGERPRINT]) all devices are
+     * reported as connected so the emulator-only workflow is unaffected.
+     *
+     * On a real device each expected peripheral is matched against bonded devices by
+     * a case-insensitive prefix of its display name.  Missing devices do NOT block
+     * session start — the SetupScreen shows a warning banner instead.
+     *
+     * Requires BLUETOOTH_CONNECT permission (already declared in AndroidManifest).
+     */
+    @SuppressLint("MissingPermission")
+    fun refreshHardwareStatus(context: Context) {
+        val onEmulator = isEmulator()
+
+        val expected = listOf(
+            "Racelogic Mini" to "racelogic",
+            "OBDLink MX"     to "obdlink",
+            "Pixel Earbuds"  to "pixel buds",
+        )
+
+        val statuses: List<HardwareStatus> = if (onEmulator) {
+            // Emulator: no real BT adapter — pass-through all as connected
+            expected.map { (name, _) ->
+                HardwareStatus(displayName = name, connected = true, isEmulator = true)
+            }
+        } else {
+            val bondedNames: Set<String> = try {
+                val btManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager?
+                btManager?.adapter?.bondedDevices
+                    ?.mapTo(mutableSetOf()) { it.name.orEmpty().lowercase() }
+                    ?: emptySet()
+            } catch (e: SecurityException) {
+                // BLUETOOTH_CONNECT not yet granted — treat all as unknown/missing
+                emptySet()
+            }
+
+            expected.map { (name, prefix) ->
+                val found = bondedNames.any { it.contains(prefix) }
+                HardwareStatus(displayName = name, connected = found, isEmulator = false)
+            }
+        }
+
+        _ui.update { it.copy(hardwareStatus = statuses) }
+    }
+
+    /** Returns true when running inside an Android emulator (AVD / Genymotion). */
+    private fun isEmulator(): Boolean {
+        val fp = Build.FINGERPRINT.lowercase()
+        return fp.contains("generic") ||
+            fp.contains("emulator") ||
+            fp.contains("sdk_gphone") ||
+            Build.MODEL.contains("Emulator") ||
+            Build.MODEL.contains("Android SDK built for x86") ||
+            Build.HARDWARE == "goldfish" ||
+            Build.HARDWARE == "ranchu"
+    }
 
     // ── Auto-transition ───────────────────────────────────────────────────────
 

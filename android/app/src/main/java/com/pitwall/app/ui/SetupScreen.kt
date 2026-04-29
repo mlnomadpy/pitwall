@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -110,14 +111,55 @@ fun SetupScreen(
 
             Spacer(Modifier.height(28.dp))
 
-            // ── Hardware Status (only real sensors) ───────────────────────────
+            // ── Hardware Status ────────────────────────────────────────────────
             SectionLabel("HARDWARE")
             Spacer(Modifier.height(8.dp))
-            listOf(
-                "Racelogic Mini" to true,
-                "OBDLink MX"     to true,
-                "Pixel Earbuds"  to true,
-            ).forEach { (name, ok) -> StatusRow(name, ok) }
+
+            if (uiState.hardwareStatus.isEmpty()) {
+                // Not yet probed (very brief window on startup)
+                Text(
+                    "Scanning…",
+                    color = PitwallColors.TextDim,
+                    fontSize = 12.sp,
+                )
+            } else {
+                uiState.hardwareStatus.forEach { hw ->
+                    StatusRow(label = hw.displayName, connected = hw.connected)
+                }
+
+                // On a real device, warn if any peripheral is missing.
+                // Missing devices are not a hard block — the relevant data
+                // stream will simply be absent from the session.
+                val anyMissing = uiState.hardwareStatus.any { !it.connected && !it.isEmulator }
+                if (anyMissing) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                color = Color(0xFFFFAA00).copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(8.dp),
+                            )
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFFFAA00),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            "One or more devices not paired. " +
+                                "You can still start — missing streams will be absent.",
+                            color = Color(0xFFFFAA00),
+                            fontSize = 11.sp,
+                            lineHeight = 16.sp,
+                        )
+                    }
+                }
+            }
 
             Spacer(Modifier.height(28.dp))
 
