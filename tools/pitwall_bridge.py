@@ -113,8 +113,9 @@ def get_db():
         return None
     conn = duckdb.connect(DB_PATH)
     conn.execute("""
+        CREATE SEQUENCE IF NOT EXISTS laps_id_seq;
         CREATE TABLE IF NOT EXISTS laps (
-            id            INTEGER PRIMARY KEY,
+            id            INTEGER PRIMARY KEY DEFAULT nextval('laps_id_seq'),
             session_id    VARCHAR,
             lap_number    INTEGER,
             lap_time_s    DOUBLE,
@@ -163,8 +164,604 @@ def get_db():
         );
         CREATE INDEX IF NOT EXISTS idx_video_frames_session_t
             ON video_frames(session_id, timestamp);
+
+        -- ADR-015: Universal Telemetry Sink (Phase 1 — schema + registry) ──
+        CREATE SEQUENCE IF NOT EXISTS signal_registry_id_seq;
+        CREATE TABLE IF NOT EXISTS signal_registry (
+            signal_id     INTEGER PRIMARY KEY DEFAULT nextval('signal_registry_id_seq'),
+            name          VARCHAR UNIQUE NOT NULL,
+            units         VARCHAR,
+            semantics     VARCHAR,
+            "group"       VARCHAR,
+            expected_hz   DOUBLE,
+            min_useful_hz DOUBLE,
+            discovery     VARCHAR,
+            obd2_pid      VARCHAR,
+            discovered_at TIMESTAMP DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS telemetry_signals (
+            session_id  VARCHAR NOT NULL,
+            signal_id   INTEGER NOT NULL,
+            t           DOUBLE  NOT NULL,
+            value       DOUBLE  NOT NULL,
+            PRIMARY KEY (session_id, signal_id, t)
+        );
+        CREATE INDEX IF NOT EXISTS idx_signals_sess_sig_t
+            ON telemetry_signals (session_id, signal_id, t);
+        CREATE TABLE IF NOT EXISTS session_capabilities (
+            session_id  VARCHAR NOT NULL,
+            signal_id   INTEGER NOT NULL,
+            n_samples   INTEGER NOT NULL,
+            mean_hz     DOUBLE  NOT NULL,
+            t_start     DOUBLE  NOT NULL,
+            t_end       DOUBLE  NOT NULL,
+            PRIMARY KEY (session_id, signal_id)
+        );
+
+        -- Phase-6: lightweight sessions catalog. Auto-upserted on ingest.
+        -- Powers /driver/<id>/evolution; otherwise optional metadata.
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id    VARCHAR PRIMARY KEY,
+            driver        VARCHAR,
+            driver_level  VARCHAR,
+            track         VARCHAR,
+            car           VARCHAR,
+            started_at    TIMESTAMP DEFAULT now(),
+            ended_at      TIMESTAMP,
+            note          VARCHAR
+        );
     """)
     return conn
+
+
+# ── ADR-015: Signal registry seeding ───────────────────────────────────────────
+
+REGISTRY_SEED_PATH = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "data", "registry", "obd2_pids.json",
+))
+
+
+def seed_signal_registry() -> int:
+    """Idempotently seed signal_registry from data/registry/obd2_pids.json.
+
+    Returns the number of rows inserted (0 on subsequent calls — INSERT OR
+    IGNORE preserves any unit-stamping a human did on previously-discovered
+    signals).
+    """
+    if not HAS_DUCKDB or not os.path.exists(REGISTRY_SEED_PATH):
+        return 0
+    with open(REGISTRY_SEED_PATH) as fh:
+        seed = json.load(fh)
+    rows = seed.get("signals", [])
+    inserted = 0
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return 0
+        for s in rows:
+            try:
+                conn.execute(
+                    """INSERT INTO signal_registry
+                       (name, units, semantics, "group", expected_hz,
+                        min_useful_hz, discovery, obd2_pid)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (name) DO NOTHING""",
+                    [s["name"], s.get("units"), s.get("semantics"),
+                     s.get("group"), s.get("expected_hz"),
+                     s.get("min_useful_hz"), s.get("discovery"),
+                     s.get("obd2_pid")],
+                )
+                inserted += 1
+            except Exception:
+                pass
+        conn.close()
+    return inserted
+
+
+# Wide-table columns that double as registry signals — used by capability
+# computation to advertise canonical fields without round-tripping through
+# the tall store.
+_WIDE_SIGNAL_NAMES = (
+    "distance_m", "speed_ms", "g_lat", "g_long", "combo_g",
+    "brake_bar", "throttle_pct", "steering_deg", "rpm", "lat", "lon",
+)
+
+
+def _resolve_signal_id(conn, name: str) -> int:
+    """Look up signal_id by name; auto-register a novel signal as 'discovered'.
+
+    Discovered signals get units=NULL — the coach treats them as logged but
+    not coachable until a human stamps the units in the registry.
+    """
+    row = conn.execute(
+        "SELECT signal_id FROM signal_registry WHERE name = ?", [name],
+    ).fetchone()
+    if row is not None:
+        return row[0]
+    conn.execute(
+        """INSERT INTO signal_registry (name, units, discovery)
+           VALUES (?, NULL, 'discovered')""",
+        [name],
+    )
+    return conn.execute(
+        "SELECT signal_id FROM signal_registry WHERE name = ?", [name],
+    ).fetchone()[0]
+
+
+def _compute_capabilities(sid: str) -> int:
+    """Aggregate (signal_id, n_samples, mean_hz, t_start, t_end) per session.
+
+    Reads from BOTH the wide telemetry table (for canonical fields) and
+    telemetry_signals (for everything else) and rewrites session_capabilities
+    for the session. Returns the number of capability rows written.
+    """
+    if not HAS_DUCKDB:
+        return 0
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return 0
+
+        conn.execute("DELETE FROM session_capabilities WHERE session_id = ?", [sid])
+
+        rows_written = 0
+
+        # 1. Wide-table canonical fields — every present session has all 11.
+        n, t_start, t_end = conn.execute(
+            "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) "
+            "FROM telemetry WHERE session_id = ?",
+            [sid],
+        ).fetchone()
+        if n and n > 0 and t_start is not None and t_end is not None:
+            duration = max(t_end - t_start, 1e-6)
+            mean_hz = n / duration
+            placeholders = ",".join(["?"] * len(_WIDE_SIGNAL_NAMES))
+            sigs = conn.execute(
+                f"SELECT signal_id FROM signal_registry WHERE name IN ({placeholders})",
+                list(_WIDE_SIGNAL_NAMES),
+            ).fetchall()
+            for (sig_id,) in sigs:
+                conn.execute(
+                    "INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)",
+                    [sid, sig_id, n, mean_hz, t_start, t_end],
+                )
+                rows_written += 1
+
+        # 2. Tall store — variable rate per signal; tall wins on overlap.
+        tall = conn.execute(
+            """SELECT signal_id, COUNT(*), MIN(t), MAX(t)
+               FROM telemetry_signals
+               WHERE session_id = ?
+               GROUP BY signal_id""",
+            [sid],
+        ).fetchall()
+        for sig_id, ns, ts, te in tall:
+            duration = max((te - ts), 1e-6)
+            hz = ns / duration
+            conn.execute(
+                """INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT (session_id, signal_id) DO UPDATE SET
+                       n_samples = excluded.n_samples,
+                       mean_hz   = excluded.mean_hz,
+                       t_start   = excluded.t_start,
+                       t_end     = excluded.t_end""",
+                [sid, sig_id, ns, hz, ts, te],
+            )
+            rows_written += 1
+
+        conn.close()
+    return rows_written
+
+
+# ── ADR-015 Phase 3: synchroniser helpers ──────────────────────────────────
+
+def _read_signal(conn, sid: str, name: str,
+                 t_from=None, t_to=None) -> list:
+    """Return sorted [(t, value), ...] for a signal in either store.
+
+    Resolves wide-table canonicals (speed_ms, brake_bar, …) directly off
+    the wide column; everything else routes through telemetry_signals.
+    Returns [] if the signal is unknown or has no samples for this session.
+    """
+    if name in _WIDE_SIGNAL_NAMES:
+        sql = (f"SELECT timestamp, {name} FROM telemetry "
+               "WHERE session_id = ?")
+        params: list = [sid]
+        if t_from is not None:
+            sql += " AND timestamp >= ?"
+            params.append(t_from)
+        if t_to is not None:
+            sql += " AND timestamp <= ?"
+            params.append(t_to)
+        sql += " ORDER BY timestamp"
+        return [(float(t), float(v)) for t, v in conn.execute(sql, params).fetchall()
+                if t is not None and v is not None]
+    row = conn.execute(
+        "SELECT signal_id FROM signal_registry WHERE name = ?", [name],
+    ).fetchone()
+    if row is None:
+        return []
+    sig_id = row[0]
+    sql = ("SELECT t, value FROM telemetry_signals "
+           "WHERE session_id = ? AND signal_id = ?")
+    params = [sid, sig_id]
+    if t_from is not None:
+        sql += " AND t >= ?"
+        params.append(t_from)
+    if t_to is not None:
+        sql += " AND t <= ?"
+        params.append(t_to)
+    sql += " ORDER BY t"
+    return [(float(t), float(v)) for t, v in conn.execute(sql, params).fetchall()]
+
+
+def _interp_hold(axis_ts: list, samples: list) -> list:
+    """ASOF: for each axis_t, return v of last (t,v) with t ≤ axis_t; else None."""
+    if not samples:
+        return [None] * len(axis_ts)
+    out = []
+    j = 0
+    n = len(samples)
+    for at in axis_ts:
+        while j < n and samples[j][0] <= at:
+            j += 1
+        out.append(None if j == 0 else samples[j - 1][1])
+    return out
+
+
+def _interp_lerp(axis_ts: list, samples: list) -> list:
+    """Linear interp between bracketing samples; None outside the sample range."""
+    if not samples:
+        return [None] * len(axis_ts)
+    out = []
+    n = len(samples)
+    j = 0
+    for at in axis_ts:
+        while j < n and samples[j][0] < at:
+            j += 1
+        if j == 0:
+            out.append(samples[0][1] if samples[0][0] == at else None)
+        elif j == n:
+            out.append(samples[-1][1] if samples[-1][0] == at else None)
+        else:
+            t0, v0 = samples[j - 1]
+            t1, v1 = samples[j]
+            out.append(v0 if t1 == t0 else v0 + (v1 - v0) * (at - t0) / (t1 - t0))
+    return out
+
+
+def _interp(axis_ts: list, samples: list, kind: str) -> list:
+    return _interp_lerp(axis_ts, samples) if kind == "lerp" else _interp_hold(axis_ts, samples)
+
+
+# ── Phase-6: lap detection + sector splitting + session helpers ─────────────
+
+_LAP_MIN_S = 60.0
+_LAP_MAX_S = 300.0
+
+
+def _session_has_telemetry(sid: str) -> bool:
+    if not HAS_DUCKDB:
+        return False
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return False
+        n = conn.execute(
+            "SELECT COUNT(*) FROM telemetry WHERE session_id = ?", [sid],
+        ).fetchone()[0]
+        conn.close()
+    return bool(n)
+
+
+def _ensure_session_row(sid: str, *, driver=None, driver_level=None,
+                        track=None, car=None, note=None):
+    """Idempotently upsert a sessions row. Called on every ingest path."""
+    if not HAS_DUCKDB:
+        return
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return
+        existing = conn.execute(
+            "SELECT driver, driver_level, track, car, note "
+            "FROM sessions WHERE session_id = ?", [sid],
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [sid, driver, driver_level, track, car, note],
+            )
+        else:
+            cur = dict(zip(
+                ["driver", "driver_level", "track", "car", "note"], existing,
+            ))
+            merged = {
+                "driver":       driver       if driver       is not None else cur["driver"],
+                "driver_level": driver_level if driver_level is not None else cur["driver_level"],
+                "track":        track        if track        is not None else cur["track"],
+                "car":          car          if car          is not None else cur["car"],
+                "note":         note         if note         is not None else cur["note"],
+            }
+            conn.execute(
+                """UPDATE sessions SET driver = ?, driver_level = ?,
+                                       track = ?, car = ?, note = ?
+                   WHERE session_id = ?""",
+                [merged["driver"], merged["driver_level"], merged["track"],
+                 merged["car"], merged["note"], sid],
+            )
+        conn.close()
+
+
+def _detect_laps(sid: str) -> list:
+    """Detect complete laps from the wide telemetry table.
+
+    Two strategies, tried in order:
+      1. Distance wraparound — `distance_m` resets toward 0 after passing
+         the track length. Works for synthetic per-lap data.
+      2. GPS perpendicular S/F crossing — uses the loaded track's
+         start_finish lat/lon/heading. Works for cumulative-distance data
+         (real Racelogic VBO output).
+
+    Lap times outside [60, 300] s are rejected as parser noise.
+    """
+    if not HAS_DUCKDB:
+        return []
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return []
+        rows = conn.execute(
+            "SELECT timestamp, distance_m, lat, lon "
+            "FROM telemetry WHERE session_id = ? "
+            "ORDER BY frame_idx",
+            [sid],
+        ).fetchall()
+        conn.close()
+    if len(rows) < 10:
+        return []
+
+    # Three strategies, picked by data shape:
+    # 1. Cumulative distance (Racelogic VBO): distance_m grows past
+    #    track_length without wrapping — detect lap boundaries at multiples
+    #    of track_length.
+    # 2. Distance wraparound: distance_m resets toward 0 each lap (synthetic
+    #    per-lap data).
+    # 3. GPS perpendicular S/F crossing — fallback when neither distance
+    #    pattern is present.
+    final_d = next((r[1] for r in reversed(rows) if r[1] is not None), 0.0) or 0.0
+    track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
+    if final_d > track_len * 1.5:
+        laps = _laps_via_cumulative_distance(rows, track_len)
+    else:
+        laps = _laps_via_distance_wrap(rows)
+    if not laps:
+        laps = _laps_via_gps_crossing(rows)
+
+    accepted: list = []
+    for l in laps:
+        if _LAP_MIN_S <= l["lap_time_s"] <= _LAP_MAX_S:
+            accepted.append({**l, "lap_number": len(accepted) + 1})
+    return accepted
+
+
+def _laps_via_cumulative_distance(rows: list, track_len: float) -> list:
+    """Lap boundary = `floor(distance_m / track_len)` increments.
+
+    Real Racelogic VBOs report distance as a monotonically increasing
+    cumulative sum from session start. Each time this crosses a new
+    multiple of track_length, the car has completed one full lap.
+
+    Discards the pre-first-boundary segment as the out-lap.
+    """
+    laps: list = []
+    start_idx = None
+    for i in range(1, len(rows)):
+        prev_d = rows[i - 1][1]
+        curr_d = rows[i][1]
+        if prev_d is None or curr_d is None:
+            continue
+        if int(curr_d // track_len) > int(prev_d // track_len):
+            if start_idx is not None:
+                t_start = rows[start_idx][0]
+                laps.append({
+                    "lap_number":  0,
+                    "t_start":     t_start,
+                    "t_end":       rows[i][0],
+                    "lap_time_s":  rows[i][0] - t_start,
+                    "frame_start": start_idx,
+                    "frame_end":   i,
+                })
+            start_idx = i
+    return laps
+
+
+def _laps_via_distance_wrap(rows: list) -> list:
+    """Lap = run between two distance_m wraparound points (drop > L/2)."""
+    track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
+    threshold = track_len / 2
+    laps: list = []
+    start_idx = 0
+    for i in range(1, len(rows)):
+        prev_d = rows[i - 1][1] or 0.0
+        curr_d = rows[i][1] or 0.0
+        if (prev_d - curr_d) > threshold:
+            t_start = rows[start_idx][0]
+            t_end   = rows[i - 1][0]
+            laps.append({
+                "lap_number":  0,
+                "t_start":     t_start,
+                "t_end":       t_end,
+                "lap_time_s":  t_end - t_start,
+                "frame_start": start_idx,
+                "frame_end":   i - 1,
+            })
+            start_idx = i
+    return laps
+
+
+def _laps_via_gps_crossing(rows: list) -> list:
+    """Negative→positive sign-change of perpendicular distance to S/F line."""
+    import math
+
+    track_path = os.path.abspath(os.path.join(
+        SIM_DIR, "..", "..", "data", "tracks", "sonoma.json",
+    ))
+    sf_lat = sonoma.SF_LAT
+    sf_lon = sonoma.SF_LON
+    sf_hdg = sonoma.SF_HEADING_DEG
+    try:
+        with open(track_path) as fh:
+            tdata = json.load(fh)
+        sf = tdata.get("start_finish") or {}
+        sf_lat = float(sf.get("lat", sf_lat))
+        sf_lon = float(sf.get("lon", sf_lon))
+        sf_hdg = float(sf.get("heading", sf_hdg))
+    except Exception:
+        pass
+
+    R = 111320.0
+    cos_lat = math.cos(math.radians(sf_lat))
+    theta = math.radians(sf_hdg)
+    sin_t, cos_t = math.sin(theta), math.cos(theta)
+
+    # Radial tolerance: at 200 km/h the car covers ~5.5 m per 10 Hz frame, and
+    # the racing line through S/F differs lap-to-lap. 50 m gates out
+    # crossings of the *infinite* perpendicular line that happen far from
+    # the physical S/F marker (e.g. the back-straight is roughly parallel
+    # but ~600 m from S/F, well outside this radius).
+    RADIAL_TOL_M = 50.0
+
+    # Only count complete crossing-to-crossing intervals. The pre-first-
+    # crossing segment is the out-lap (warmup from pit) and the post-last-
+    # crossing segment is the in-lap (cool-down to pit) — both are *not*
+    # complete timed laps and must be discarded.
+    laps: list = []
+    start_idx = None      # None until first crossing
+    prev_signed = None
+    for i, (t, _d, lat, lon) in enumerate(rows):
+        if lat is None or lon is None:
+            continue
+        x = (lon - sf_lon) * cos_lat * R
+        y = (lat - sf_lat) * R
+        signed = -x * sin_t + y * cos_t
+        radial = math.hypot(x, y)
+        if prev_signed is not None and prev_signed < 0 <= signed and radial < RADIAL_TOL_M:
+            if start_idx is not None:
+                t_start = rows[start_idx][0]
+                laps.append({
+                    "lap_number":  0,
+                    "t_start":     t_start,
+                    "t_end":       t,
+                    "lap_time_s":  t - t_start,
+                    "frame_start": start_idx,
+                    "frame_end":   i,
+                })
+            start_idx = i
+        prev_signed = signed
+    return laps
+
+
+def _lap_sectors(sid: str, lap: dict) -> list:
+    """Slice one lap into sonoma.SECTORS sub-spans by distance threshold."""
+    if not HAS_DUCKDB:
+        return []
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return []
+        rows = conn.execute(
+            "SELECT timestamp, distance_m FROM telemetry "
+            "WHERE session_id = ? AND timestamp >= ? AND timestamp <= ? "
+            "ORDER BY timestamp",
+            [sid, lap["t_start"], lap["t_end"]],
+        ).fetchall()
+        conn.close()
+    if not rows:
+        return []
+
+    base_d = rows[0][1] or 0.0
+    track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
+
+    def lap_progress(d):
+        if d is None:
+            return None
+        delta = d - base_d
+        if delta < -track_len / 2:
+            delta += track_len
+        return delta
+
+    out: list = []
+    for sec in sonoma.SECTORS:
+        t_enter = None
+        t_exit = None
+        for t, d in rows:
+            p = lap_progress(d)
+            if p is None:
+                continue
+            if t_enter is None and p >= sec.start_m:
+                t_enter = t
+            if t_exit is None and p >= sec.end_m:
+                t_exit = t
+                break
+        if t_enter is None:
+            continue
+        if t_exit is None:
+            t_exit = rows[-1][0]
+        out.append({
+            "name":    sec.name,
+            "start_m": sec.start_m,
+            "end_m":   sec.end_m,
+            "t_enter": t_enter,
+            "t_exit":  t_exit,
+            "time_s":  t_exit - t_enter,
+        })
+    return out
+
+
+def _quantile(sorted_vals: list, p: float) -> float:
+    """Tukey linear-interp quantile per docs/api.md spec."""
+    if not sorted_vals:
+        return 0.0
+    n = len(sorted_vals)
+    if n == 1:
+        return float(sorted_vals[0])
+    h = p * (n - 1) + 1.0
+    lo = max(int(h) - 1, 0)
+    hi = min(lo + 1, n - 1)
+    frac = h - int(h)
+    return float(sorted_vals[lo]) + frac * (float(sorted_vals[hi]) - float(sorted_vals[lo]))
+
+
+def _load_track_json(track_id: str) -> dict | None:
+    """Load data/tracks/<id>.json or return None."""
+    path = os.path.abspath(os.path.join(
+        SIM_DIR, "..", "..", "data", "tracks", f"{track_id}.json",
+    ))
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except Exception:
+        return None
+
+
+def _corner_bounds_from_track(track: dict) -> list:
+    """Return [{name, entry_m, apex_m, exit_m}] for each corner in track JSON."""
+    out: list = []
+    for c in (track or {}).get("corners", []):
+        try:
+            out.append({
+                "name":    c["name"],
+                "entry_m": float(c["entry"]["distance"]),
+                "apex_m":  float(c["apex"]["distance"]),
+                "exit_m":  float(c["exit"]["distance"]),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
 
 
 # ── Frame helpers — DuckDB rows ↔ TelemetryFrame ─────────────────────────────
@@ -680,6 +1277,15 @@ def session_frames(sid: str):
     if not raw_frames:
         return jsonify({"saved": False, "error": "no frames"}), 400
 
+    _ensure_session_row(
+        sid,
+        driver=data.get("driver"),
+        driver_level=data.get("driver_level"),
+        track=data.get("track"),
+        car=data.get("car"),
+        note=data.get("note"),
+    )
+
     with _db_lock:
         conn = get_db()
         if conn is None:
@@ -870,12 +1476,188 @@ def session_import():
 
     duration_s = frames[-1].timestamp - frames[0].timestamp
     distance_m = frames[-1].distance - frames[0].distance
+
+    n_caps = _compute_capabilities(sid)
+
     return jsonify({
-        "session_id": sid,
-        "n_frames":   len(frames),
-        "duration_s": round(duration_s, 2),
-        "distance_m": round(distance_m, 1),
-        "vbo_source": os.path.basename(vbo),
+        "session_id":         sid,
+        "n_frames":           len(frames),
+        "duration_s":         round(duration_s, 2),
+        "distance_m":         round(distance_m, 1),
+        "vbo_source":         os.path.basename(vbo),
+        "capabilities_count": n_caps,
+    })
+
+
+# ── Session lifecycle (start / end / list / detail) ────────────────────────
+
+@app.route("/session/start", methods=["POST"])
+def session_start():
+    """Open a new session row in DuckDB.
+
+    Body fields are optional. If `session_id` is omitted, the bridge generates
+    `<track-slug>-<UTC-YYYYMMDD-HHMMSS>`. Idempotent: re-starting an existing
+    session_id is a no-op (200 with `started: true` either way).
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    data = request.get_json(force=True, silent=True) or {}
+    track_name = data.get("track") or (_track.name if _track else None)
+    sid = data.get("session_id") or _new_session_id(track_name)
+    _ensure_session_row(
+        sid,
+        driver=data.get("driver"),
+        driver_level=data.get("driver_level"),
+        track=track_name,
+        car=data.get("car"),
+        note=data.get("note"),
+    )
+    return jsonify({"started": True, "session_id": sid})
+
+
+@app.route("/session/<sid>/end", methods=["POST"])
+def session_end(sid: str):
+    """Stamp `ended_at = now()` on a session. Idempotent."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        existing = conn.execute(
+            "SELECT 1 FROM sessions WHERE session_id = ?", [sid],
+        ).fetchone()
+        if existing is None:
+            conn.execute(
+                "INSERT INTO sessions (session_id, ended_at) VALUES (?, now())",
+                [sid],
+            )
+        else:
+            conn.execute(
+                "UPDATE sessions SET ended_at = now() "
+                "WHERE session_id = ? AND ended_at IS NULL",
+                [sid],
+            )
+        conn.close()
+    return jsonify({"ended": True, "session_id": sid})
+
+
+@app.route("/sessions", methods=["GET"])
+def sessions_list():
+    """List sessions, newest first. `?active_only=true` hides ended ones."""
+    if not HAS_DUCKDB:
+        return jsonify({"sessions": [], "error": "duckdb not available"})
+    try:
+        limit = int(request.args.get("limit", 50))
+    except ValueError:
+        return jsonify({"error": "limit must be an integer"}), 400
+    active_only = (request.args.get("active_only", "false").lower() == "true")
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"sessions": []})
+        sql = ("SELECT session_id, driver, driver_level, track, car, "
+               "started_at, ended_at, note FROM sessions")
+        params: list = []
+        if active_only:
+            sql += " WHERE ended_at IS NULL"
+        sql += " ORDER BY started_at DESC LIMIT ?"
+        params.append(limit)
+        sess_rows = conn.execute(sql, params).fetchall()
+
+        # Per-session derived: lap_count + best_lap_s from the laps table.
+        sessions_out: list = []
+        for r in sess_rows:
+            sid = r[0]
+            lap_row = conn.execute(
+                "SELECT COUNT(*), MIN(lap_time_s) FROM laps WHERE session_id = ?",
+                [sid],
+            ).fetchone()
+            lap_count = int(lap_row[0]) if lap_row else 0
+            best_lap_s = float(lap_row[1]) if lap_row and lap_row[1] is not None else None
+            sessions_out.append({
+                "session_id":   r[0],
+                "driver":       r[1],
+                "driver_level": r[2],
+                "track":        r[3],
+                "car":          r[4],
+                "started_at":   r[5].isoformat() if r[5] else None,
+                "ended_at":     r[6].isoformat() if r[6] else None,
+                "note":         r[7],
+                "lap_count":    lap_count,
+                "best_lap_s":   best_lap_s,
+            })
+        conn.close()
+    return jsonify({"sessions": sessions_out, "count": len(sessions_out)})
+
+
+@app.route("/session/<sid>", methods=["GET"])
+def session_detail(sid: str):
+    """Full session detail: row + laps + recent coaching_notes."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        sess_row = conn.execute(
+            "SELECT session_id, driver, driver_level, track, car, "
+            "started_at, ended_at, note FROM sessions WHERE session_id = ?",
+            [sid],
+        ).fetchone()
+        if sess_row is None:
+            conn.close()
+            return jsonify({"error": "session not found", "session_id": sid}), 404
+
+        lap_rows = conn.execute(
+            "SELECT lap_number, lap_time_s, best_sector, avg_speed_kmh, "
+            "max_combo_g, coast_pct, recorded_at FROM laps "
+            "WHERE session_id = ? ORDER BY lap_number ASC",
+            [sid],
+        ).fetchall()
+
+        note_rows = conn.execute(
+            "SELECT burst_id, distance_m, text, source, recorded_at "
+            "FROM coaching_notes WHERE session_id = ? "
+            "ORDER BY recorded_at DESC LIMIT 50",
+            [sid],
+        ).fetchall()
+        conn.close()
+
+    laps = [
+        {"lap_number":    int(r[0]) if r[0] is not None else None,
+         "lap_time_s":    float(r[1]) if r[1] is not None else None,
+         "best_sector":   float(r[2]) if r[2] is not None else None,
+         "avg_speed_kmh": float(r[3]) if r[3] is not None else None,
+         "max_combo_g":   float(r[4]) if r[4] is not None else None,
+         "coast_pct":     float(r[5]) if r[5] is not None else None,
+         "recorded_at":   r[6].isoformat() if r[6] else None}
+        for r in lap_rows
+    ]
+    notes = [
+        {"burst_id":    r[0], "distance_m": r[1], "text": r[2],
+         "source":      r[3], "recorded_at": r[4].isoformat() if r[4] else None}
+        for r in note_rows
+    ]
+    best_lap_s = min((l["lap_time_s"] for l in laps if l["lap_time_s"] is not None),
+                     default=None)
+    session_dict = {
+        "session_id":   sess_row[0],
+        "driver":       sess_row[1],
+        "driver_level": sess_row[2],
+        "track":        sess_row[3],
+        "car":          sess_row[4],
+        "started_at":   sess_row[5].isoformat() if sess_row[5] else None,
+        "ended_at":     sess_row[6].isoformat() if sess_row[6] else None,
+        "note":         sess_row[7],
+    }
+    return jsonify({
+        "session":    session_dict,
+        "laps":       laps,
+        "notes":      notes,
+        "lap_count":  len(laps),
+        "best_lap_s": best_lap_s,
     })
 
 
@@ -1113,6 +1895,970 @@ def session_clips(sid: str):
     return jsonify({"session_id": sid, "clips": clips, "count": len(clips)})
 
 
+# ── Phase-6: lap performance + corner/straight aggregates ───────────────────
+
+def _laps_or_400(sid: str):
+    """Resolve laps for a session; returns (laps, error_response)."""
+    if not _session_has_telemetry(sid):
+        return None, (jsonify({"error": "session not found", "session_id": sid}), 404)
+    laps = _detect_laps(sid)
+    if not laps:
+        return None, (jsonify({
+            "error":      "no complete laps detected",
+            "session_id": sid,
+        }), 400)
+    return laps, None
+
+
+@app.route("/session/<sid>/lap_time_table", methods=["GET"])
+def session_lap_time_table(sid: str):
+    """Per-lap times + sector splits, with best-lap and best-sector flags."""
+    laps, err = _laps_or_400(sid)
+    if err:
+        return err
+
+    sectors_per_lap = [_lap_sectors(sid, l) for l in laps]
+    sector_names = [s.name for s in sonoma.SECTORS]
+
+    best_t = min(l["lap_time_s"] for l in laps)
+    best_lap_no = next(l["lap_number"] for l in laps if l["lap_time_s"] == best_t)
+
+    best_sector_t: dict = {}
+    for nm in sector_names:
+        ts = [s["time_s"] for sl in sectors_per_lap for s in sl if s["name"] == nm]
+        if ts:
+            best_sector_t[nm] = min(ts)
+
+    laps_out = []
+    for lap, secs in zip(laps, sectors_per_lap):
+        sec_out = []
+        for s in secs:
+            best = best_sector_t.get(s["name"])
+            sec_out.append({
+                "name":    s["name"],
+                "time_s":  round(s["time_s"], 3),
+                "is_best": best is not None and abs(s["time_s"] - best) < 1e-6,
+            })
+        laps_out.append({
+            "lap_number":      lap["lap_number"],
+            "lap_time_s":      round(lap["lap_time_s"], 3),
+            "delta_to_best_s": round(lap["lap_time_s"] - best_t, 3),
+            "is_best":         lap["lap_number"] == best_lap_no,
+            "sectors":         sec_out,
+        })
+    return jsonify({
+        "session_id":      sid,
+        "lap_count":       len(laps),
+        "best_lap_s":      round(best_t, 3),
+        "best_lap_number": best_lap_no,
+        "laps":            laps_out,
+    })
+
+
+@app.route("/session/<sid>/lap_time_distribution", methods=["GET"])
+def session_lap_time_distribution(sid: str):
+    """Tukey box-plot statistics over the session's lap times."""
+    laps, err = _laps_or_400(sid)
+    if err:
+        return err
+    times = sorted(l["lap_time_s"] for l in laps)
+    n = len(times)
+    q1 = _quantile(times, 0.25)
+    q2 = _quantile(times, 0.50)
+    q3 = _quantile(times, 0.75)
+    iqr = q3 - q1
+    lo_fence = q1 - 1.5 * iqr
+    hi_fence = q3 + 1.5 * iqr
+    in_range = [t for t in times if lo_fence <= t <= hi_fence]
+    whisker_low = min(in_range) if in_range else times[0]
+    whisker_high = max(in_range) if in_range else times[-1]
+    outliers = [
+        {"lap_number": l["lap_number"], "lap_time_s": round(l["lap_time_s"], 3)}
+        for l in laps if l["lap_time_s"] < lo_fence or l["lap_time_s"] > hi_fence
+    ]
+    mu = sum(times) / n
+    var = sum((t - mu) ** 2 for t in times) / n
+    sigma = var ** 0.5
+    return jsonify({
+        "session_id":     sid,
+        "lap_count":      n,
+        "min_s":          round(times[0], 3),
+        "max_s":          round(times[-1], 3),
+        "q1_s":           round(q1, 3),
+        "median_s":       round(q2, 3),
+        "q3_s":           round(q3, 3),
+        "iqr_s":          round(iqr, 3),
+        "whisker_low_s":  round(whisker_low, 3),
+        "whisker_high_s": round(whisker_high, 3),
+        "outliers":       outliers,
+        "mean_s":         round(mu, 3),
+        "stddev_s":       round(sigma, 3),
+    })
+
+
+@app.route("/session/<sid>/ideal_lap", methods=["GET"])
+def session_ideal_lap(sid: str):
+    """Theoretical fastest lap = sum of best per-sector times."""
+    laps, err = _laps_or_400(sid)
+    if err:
+        return err
+    sectors_per_lap = [_lap_sectors(sid, l) for l in laps]
+    best_per_sector = []
+    for sec in sonoma.SECTORS:
+        best_time = None
+        from_lap = None
+        for lap, secs in zip(laps, sectors_per_lap):
+            for s in secs:
+                if s["name"] != sec.name:
+                    continue
+                if best_time is None or s["time_s"] < best_time:
+                    best_time = s["time_s"]
+                    from_lap = lap["lap_number"]
+        if best_time is not None:
+            best_per_sector.append({
+                "name":     sec.name,
+                "time_s":   round(best_time, 3),
+                "from_lap": from_lap,
+            })
+    if not best_per_sector:
+        return jsonify({"error": "no sector times computed"}), 400
+    ideal = sum(s["time_s"] for s in best_per_sector)
+    best_actual = min(l["lap_time_s"] for l in laps)
+    return jsonify({
+        "session_id":        sid,
+        "ideal_lap_s":       round(ideal, 3),
+        "best_actual_lap_s": round(best_actual, 3),
+        "gain_potential_s":  round(best_actual - ideal, 3),
+        "best_sectors":      best_per_sector,
+    })
+
+
+@app.route("/session/<sid>/sector_times", methods=["GET"])
+def session_sector_times(sid: str):
+    """Thinner per-lap-per-sector view: just S1/S2/S3 numbers."""
+    laps, err = _laps_or_400(sid)
+    if err:
+        return err
+    sectors_per_lap = [_lap_sectors(sid, l) for l in laps]
+    laps_out = []
+    for lap, secs in zip(laps, sectors_per_lap):
+        s_by_name = {s["name"]: s["time_s"] for s in secs}
+        laps_out.append({
+            "lap_number": lap["lap_number"],
+            "s1": round(s_by_name.get(sonoma.SECTORS[0].name, 0.0), 3),
+            "s2": round(s_by_name.get(sonoma.SECTORS[1].name, 0.0), 3),
+            "s3": round(s_by_name.get(sonoma.SECTORS[2].name, 0.0), 3),
+        })
+    return jsonify({
+        "session_id": sid,
+        "sector_definitions": [
+            {"name": s.name, "start_m": s.start_m, "end_m": s.end_m}
+            for s in sonoma.SECTORS
+        ],
+        "laps": laps_out,
+    })
+
+
+@app.route("/session/<sid>/pedal_behavior", methods=["GET"])
+def session_pedal_behavior(sid: str):
+    """4-state distribution: throttle_only / brake_only / trail_brake / coast."""
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    try:
+        thr_th = float(request.args.get("throttle_th") or 5.0)
+        brk_th = float(request.args.get("brake_th") or 1.0)
+    except ValueError:
+        return jsonify({"error": "thresholds must be numbers"}), 400
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        rows = conn.execute(
+            "SELECT timestamp, throttle_pct, brake_bar FROM telemetry "
+            "WHERE session_id = ? ORDER BY timestamp", [sid],
+        ).fetchall()
+        conn.close()
+    if not rows:
+        return jsonify({"error": "session not found"}), 404
+
+    states = {"throttle_only": 0, "brake_only": 0, "trail_brake": 0, "coast": 0}
+    n = 0
+    for _t, thr, brk in rows:
+        thr = thr or 0.0
+        brk = brk or 0.0
+        on_thr = thr > thr_th
+        on_brk = brk > brk_th
+        if on_thr and on_brk:
+            states["trail_brake"] += 1
+        elif on_thr:
+            states["throttle_only"] += 1
+        elif on_brk:
+            states["brake_only"] += 1
+        else:
+            states["coast"] += 1
+        n += 1
+
+    deltas = sorted(rows[i + 1][0] - rows[i][0] for i in range(len(rows) - 1)) if len(rows) > 1 else [0.1]
+    frame_dt = deltas[len(deltas) // 2] if deltas else 0.1
+
+    out = {}
+    for k, v in states.items():
+        out[k] = {
+            "frames": v,
+            "pct":    round(100.0 * v / n, 1) if n else 0.0,
+            "time_s": round(v * frame_dt, 1),
+        }
+    return jsonify({
+        "session_id":  sid,
+        "frame_count": n,
+        "thresholds":  {"throttle_pct": thr_th, "brake_bar": brk_th},
+        "frame_dt_s":  round(frame_dt, 4),
+        "states":      out,
+    })
+
+
+@app.route("/session/<sid>/throttle_corner_box", methods=["GET"])
+def session_throttle_corner_box(sid: str):
+    """Per-corner throttle box-plot stats over all passes through that corner."""
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    track = _load_track_json("sonoma") or {}
+    corner_bounds = _corner_bounds_from_track(track)
+    if not corner_bounds:
+        return jsonify({"error": "no corner geometry available"}), 422
+
+    laps = _detect_laps(sid)
+    n_passes_default = max(len(laps), 1)
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        out: list = []
+        for c in corner_bounds:
+            rows = conn.execute(
+                "SELECT throttle_pct FROM telemetry "
+                "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
+                [sid, c["entry_m"], c["exit_m"]],
+            ).fetchall()
+            samples = sorted(float(r[0]) for r in rows if r[0] is not None)
+            if not samples:
+                out.append({
+                    "name":       c["name"],
+                    "n_passes":   0,
+                    "n_samples":  0,
+                    "min_pct":    None, "q1_pct": None,
+                    "median_pct": None, "q3_pct": None,
+                    "max_pct":    None, "mean_pct": None,
+                })
+                continue
+            mean = sum(samples) / len(samples)
+            out.append({
+                "name":       c["name"],
+                "n_passes":   n_passes_default,
+                "n_samples":  len(samples),
+                "min_pct":    round(samples[0], 2),
+                "q1_pct":     round(_quantile(samples, 0.25), 2),
+                "median_pct": round(_quantile(samples, 0.50), 2),
+                "q3_pct":     round(_quantile(samples, 0.75), 2),
+                "max_pct":    round(samples[-1], 2),
+                "mean_pct":   round(mean, 2),
+            })
+        conn.close()
+    return jsonify({"session_id": sid, "corners": out})
+
+
+@app.route("/session/<sid>/corner_classification", methods=["GET"])
+def session_corner_classification(sid: str):
+    """Group corners into low/med/high speed bands by min apex speed."""
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    try:
+        low_max = float(request.args.get("low_max") or 80.0)
+        med_max = float(request.args.get("med_max") or 130.0)
+    except ValueError:
+        return jsonify({"error": "thresholds must be numbers"}), 400
+    track = _load_track_json("sonoma") or {}
+    corner_bounds = _corner_bounds_from_track(track)
+    if not corner_bounds:
+        return jsonify({"error": "no corner geometry available"}), 422
+
+    bands = {"low_speed": [], "med_speed": [], "high_speed": []}
+    apex_speeds_by_band: dict = {"low_speed": [], "med_speed": [], "high_speed": []}
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        for c in corner_bounds:
+            row = conn.execute(
+                "SELECT MIN(speed_ms) FROM telemetry "
+                "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
+                [sid, c["entry_m"], c["exit_m"]],
+            ).fetchone()
+            min_ms = row[0] if row else None
+            if min_ms is None:
+                continue
+            apex_kmh = float(min_ms) * 3.6
+            if apex_kmh < low_max:
+                band = "low_speed"
+            elif apex_kmh < med_max:
+                band = "med_speed"
+            else:
+                band = "high_speed"
+            bands[band].append(c["name"])
+            apex_speeds_by_band[band].append(apex_kmh)
+        conn.close()
+
+    out = []
+    for band_name in ("low_speed", "med_speed", "high_speed"):
+        speeds = apex_speeds_by_band[band_name]
+        out.append({
+            "band":              band_name,
+            "corners":           bands[band_name],
+            "mean_apex_kmh":     round(sum(speeds) / len(speeds), 1) if speeds else None,
+            "median_apex_kmh":   round(_quantile(sorted(speeds), 0.5), 1) if speeds else None,
+        })
+    return jsonify({
+        "session_id": sid,
+        "thresholds": {"low_max_kmh": low_max, "med_max_kmh": med_max},
+        "bands":      out,
+    })
+
+
+@app.route("/session/<sid>/straight_line_speed", methods=["GET"])
+def session_straight_line_speed(sid: str):
+    """Top speed per named straight (sonoma.STRAIGHTS)."""
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    laps = _detect_laps(sid)
+    track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+
+        out = []
+        for st in sonoma.STRAIGHTS:
+            if st.start_m <= st.end_m:
+                where = "distance_m >= ? AND distance_m <= ?"
+                params = [sid, st.start_m, st.end_m]
+            else:
+                # wraps S/F: distance_m >= start OR distance_m <= end
+                where = "(distance_m >= ? OR distance_m <= ?)"
+                params = [sid, st.start_m, st.end_m]
+            row = conn.execute(
+                f"SELECT timestamp, speed_ms, distance_m FROM telemetry "
+                f"WHERE session_id = ? AND {where} "
+                f"ORDER BY speed_ms DESC LIMIT 1",
+                params,
+            ).fetchone()
+            if row is None:
+                out.append({
+                    "name": st.name, "start_m": st.start_m, "end_m": st.end_m,
+                    "top_speed_kmh": None, "from_lap": None,
+                })
+                continue
+            t_top, top_ms, _d = row
+            from_lap = None
+            for l in laps:
+                if l["t_start"] <= t_top <= l["t_end"]:
+                    from_lap = l["lap_number"]
+                    break
+            out.append({
+                "name":          st.name,
+                "start_m":       st.start_m,
+                "end_m":         st.end_m,
+                "top_speed_kmh": round(float(top_ms) * 3.6, 1),
+                "from_lap":      from_lap,
+            })
+        conn.close()
+    return jsonify({"session_id": sid, "track_length_m": track_len, "straights": out})
+
+
+@app.route("/session/<sid>/brake_acceleration", methods=["GET"])
+def session_brake_acceleration(sid: str):
+    """Heavy-brake decel + corner-exit longitudinal accel scatter."""
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    track = _load_track_json("sonoma") or {}
+    corner_bounds = _corner_bounds_from_track(track)
+    if not corner_bounds:
+        return jsonify({"error": "no corner geometry available"}), 422
+
+    BRAKE_TH = 25.0
+    laps = _detect_laps(sid)
+    n_passes = max(len(laps), 1)
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        rows = conn.execute(
+            "SELECT timestamp, distance_m, brake_bar, throttle_pct, g_long, speed_ms "
+            "FROM telemetry WHERE session_id = ? ORDER BY timestamp", [sid],
+        ).fetchall()
+        conn.close()
+
+    def nearest_corner(d):
+        if d is None:
+            return None
+        return min(corner_bounds, key=lambda c: abs(d - c["entry_m"]))["name"]
+
+    # Brake zones: contiguous frames with brake > 25 bar.
+    brake_zones: list = []
+    current: list = []
+    for r in rows:
+        if (r[2] or 0.0) > BRAKE_TH:
+            current.append(r)
+        elif current:
+            brake_zones.append(current)
+            current = []
+    if current:
+        brake_zones.append(current)
+
+    decel_by_corner: dict = {}
+    duration_by_corner: dict = {}
+    for zone in brake_zones:
+        ts = [z[0] for z in zone]
+        glongs = [z[4] for z in zone if z[4] is not None]
+        d_mid = zone[len(zone) // 2][1]
+        if not glongs:
+            continue
+        cname = nearest_corner(d_mid)
+        if cname is None:
+            continue
+        peak = min(glongs)
+        decel_by_corner.setdefault(cname, []).append(peak)
+        duration_by_corner.setdefault(cname, []).append(ts[-1] - ts[0])
+
+    brake_zones_out = []
+    for cname in sorted(decel_by_corner.keys()):
+        peaks = decel_by_corner[cname]
+        durs = duration_by_corner.get(cname, [])
+        brake_zones_out.append({
+            "corner":      cname,
+            "max_decel_g": round(sum(peaks) / len(peaks), 3),
+            "duration_s":  round(sum(durs) / len(durs), 2) if durs else 0.0,
+            "n_passes":    len(peaks),
+        })
+
+    # Corner exits: throttle > 50% within (apex_m, exit_m).
+    accel_by_corner: dict = {}
+    exit_speed_by_corner: dict = {}
+    for c in corner_bounds:
+        glongs = [r[4] for r in rows
+                  if r[1] is not None and c["apex_m"] <= r[1] <= c["exit_m"]
+                  and (r[3] or 0) > 50 and r[4] is not None]
+        exit_speeds = [r[5] for r in rows
+                       if r[1] is not None and abs(r[1] - c["exit_m"]) < 5
+                       and r[5] is not None]
+        if glongs:
+            accel_by_corner[c["name"]] = max(glongs)
+        if exit_speeds:
+            exit_speed_by_corner[c["name"]] = sum(exit_speeds) / len(exit_speeds)
+
+    corner_exits_out = []
+    for cname in sorted(accel_by_corner.keys()):
+        corner_exits_out.append({
+            "corner":           cname,
+            "max_long_accel_g": round(accel_by_corner[cname], 3),
+            "exit_speed_kmh":   round(exit_speed_by_corner.get(cname, 0.0) * 3.6, 1),
+            "n_passes":         n_passes,
+        })
+
+    return jsonify({
+        "session_id":   sid,
+        "brake_zones":  brake_zones_out,
+        "corner_exits": corner_exits_out,
+    })
+
+
+@app.route("/track/<track_id>/elevation", methods=["GET"])
+def track_elevation(track_id: str):
+    """Elevation profile sampled along the centerline of a track JSON."""
+    track = _load_track_json(track_id)
+    if track is None:
+        return jsonify({"error": "track not found", "track_id": track_id}), 404
+    profile = track.get("elevation_profile") or []
+    if not profile:
+        ref = track.get("reference_line") or []
+        if not ref:
+            return jsonify({
+                "error":    "no reference_line — cannot derive elevation",
+                "track_id": track_id,
+            }), 422
+        return jsonify({
+            "track_id":         track_id,
+            "name":             track.get("name", track_id),
+            "track_length_m":   track.get("track_length_m"),
+            "elevation_source": "missing",
+            "samples":          [],
+        })
+    try:
+        step_m = float(request.args.get("step_m") or 10.0)
+    except ValueError:
+        return jsonify({"error": "step_m must be a number"}), 400
+    if step_m <= 0:
+        return jsonify({"error": "step_m must be > 0"}), 400
+
+    pts = sorted(profile, key=lambda p: float(p.get("distance", 0.0)))
+    max_d = float(pts[-1].get("distance", 0.0))
+    samples: list = []
+    j = 0
+    d = 0.0
+    while d <= max_d + 1e-9:
+        while j + 1 < len(pts) and float(pts[j + 1]["distance"]) < d:
+            j += 1
+        if j + 1 >= len(pts):
+            elev = float(pts[-1].get("altitude") or 0.0)
+        else:
+            d0 = float(pts[j].get("distance", 0.0))
+            d1 = float(pts[j + 1].get("distance", 0.0))
+            a0 = float(pts[j].get("altitude") or 0.0)
+            a1 = float(pts[j + 1].get("altitude") or 0.0)
+            elev = a0 if d1 == d0 else a0 + (a1 - a0) * (d - d0) / (d1 - d0)
+        samples.append({"distance_m": round(d, 2), "elevation_m": round(elev, 2)})
+        d += step_m
+
+    elevs = [s["elevation_m"] for s in samples if s["elevation_m"] is not None]
+    return jsonify({
+        "track_id":         track_id,
+        "name":             track.get("name", track_id),
+        "track_length_m":   track.get("track_length_m"),
+        "step_m":           step_m,
+        "elevation_source": "json_profile",
+        "min_elevation_m":  min(elevs) if elevs else None,
+        "max_elevation_m":  max(elevs) if elevs else None,
+        "samples":          samples,
+    })
+
+
+@app.route("/driver/<driver_id>/evolution", methods=["GET"])
+def driver_evolution(driver_id: str):
+    """Multi-session driver evolution time-series.
+
+    204 if the driver has < 5 sessions for the requested track (frontend
+    hides the panel). 404 if zero sessions for that filter.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    track_filter = request.args.get("track")
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        sql = ("SELECT session_id, started_at, track FROM sessions "
+               "WHERE driver = ?")
+        params: list = [driver_id]
+        if track_filter:
+            sql += " AND (track = ? OR track IS NULL)"
+            params.append(track_filter)
+        sql += " ORDER BY started_at ASC"
+        sess_rows = conn.execute(sql, params).fetchall()
+        conn.close()
+
+    if not sess_rows:
+        return jsonify({
+            "error":     "no sessions for this driver/track",
+            "driver_id": driver_id,
+        }), 404
+
+    if len(sess_rows) < 5:
+        return jsonify({
+            "driver_id":     driver_id,
+            "track":         track_filter,
+            "session_count": len(sess_rows),
+            "evolution":     [],
+            "summary":       None,
+            "note":          "evolution requires >= 5 sessions",
+        }), 204
+
+    evolution = []
+    for idx, (sess_id, started_at, sess_track) in enumerate(sess_rows, start=1):
+        laps = _detect_laps(sess_id)
+        if not laps:
+            continue
+        times = sorted(l["lap_time_s"] for l in laps)
+        sectors_per_lap = [_lap_sectors(sess_id, l) for l in laps]
+        sec_pbs: dict = {}
+        for sec_idx, sec in enumerate(sonoma.SECTORS):
+            ts = [s["time_s"] for sl in sectors_per_lap for s in sl if s["name"] == sec.name]
+            if ts:
+                sec_pbs[f"s{sec_idx + 1}"] = round(min(ts), 3)
+        evolution.append({
+            "session_id":    sess_id,
+            "started_at":    started_at.isoformat() if started_at else None,
+            "session_index": idx,
+            "best_lap_s":    round(times[0], 3),
+            "median_lap_s":  round(_quantile(times, 0.5), 3),
+            "lap_count":     len(laps),
+            "sector_pbs":    sec_pbs,
+        })
+
+    if not evolution:
+        return jsonify({
+            "driver_id":     driver_id,
+            "track":         track_filter,
+            "session_count": len(sess_rows),
+            "evolution":     [],
+            "summary":       None,
+            "note":          "no laps detected in any session",
+        })
+
+    first_best = evolution[0]["best_lap_s"]
+    latest_best = evolution[-1]["best_lap_s"]
+    return jsonify({
+        "driver_id":     driver_id,
+        "track":         track_filter,
+        "session_count": len(evolution),
+        "evolution":     evolution,
+        "summary": {
+            "first_best_s":   first_best,
+            "latest_best_s":  latest_best,
+            "improvement_s":  round(first_best - latest_best, 3),
+        },
+    })
+
+
+# ── Roadmap endpoints (api.md §"Roadmap, proposed") ────────────────────────
+
+@app.route("/session/<sid>/frame", methods=["POST"])
+def session_frame(sid: str):
+    """Append a single telemetry frame. Foundation for per-corner replay.
+
+    Body shape: same fields as one element of `/frames` (timestamp, distance,
+    speed, g_lat, g_long, combo_g, brake_pressure, throttle, steering, rpm,
+    lat, lon). Returns the assigned `frame_idx` so the caller can build a
+    per-corner replay reference.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    f = request.get_json(force=True, silent=True) or {}
+    if not isinstance(f, dict) or not f:
+        return jsonify({"error": "no frame body"}), 400
+
+    _ensure_session_row(
+        sid,
+        driver=f.get("driver"),
+        track=f.get("track"),
+    )
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        existing = conn.execute(
+            "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
+            [sid],
+        ).fetchone()[0]
+        next_idx = (existing if existing is not None else -1) + 1
+        try:
+            conn.execute(
+                "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (sid, next_idx,
+                 float(f.get("timestamp", 0)),
+                 float(f.get("distance", 0)),
+                 float(f.get("speed", 0)),
+                 float(f.get("g_lat", 0)),
+                 float(f.get("g_long", 0)),
+                 float(f.get("combo_g", 0)),
+                 float(f.get("brake_pressure", 0)),
+                 float(f.get("throttle", 0)),
+                 float(f.get("steering", 0)),
+                 float(f.get("rpm", 0)),
+                 float(f.get("lat", 0)),
+                 float(f.get("lon", 0))),
+            )
+        except (TypeError, ValueError) as e:
+            conn.close()
+            return jsonify({"error": f"invalid frame: {e}"}), 400
+        conn.close()
+    return jsonify({"saved": True, "session_id": sid, "frame_idx": next_idx})
+
+
+@app.route("/session/<sid>/corners", methods=["GET"])
+def session_corners(sid: str):
+    """Per-corner aggregates: best pass + averages, optional gold-standard delta.
+
+    For each corner in the track JSON, walks every detected lap and computes
+    entry/apex/exit speeds, peak brake, max gLat, and corner time. Best pass
+    is the lap with the highest apex speed (least time spent slow).
+    """
+    laps, err = _laps_or_400(sid)
+    if err:
+        return err
+    track = _load_track_json("sonoma") or {}
+    corner_bounds = _corner_bounds_from_track(track)
+    if not corner_bounds:
+        return jsonify({"error": "no corner geometry available"}), 422
+
+    gold_by_corner = {}
+    try:
+        from gold_standard import load_gold_standard
+        gold_path = os.path.abspath(os.path.join(
+            SIM_DIR, "..", "..", "data", "reference", "sonoma_gold.json",
+        ))
+        if os.path.exists(gold_path):
+            gold = load_gold_standard(gold_path)
+            for cp in (gold.corner_passes if hasattr(gold, "corner_passes") else []):
+                gold_by_corner[cp.corner] = cp
+    except Exception:
+        pass
+
+    out = []
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+
+        for c in corner_bounds:
+            passes = []
+            for lap in laps:
+                rows = conn.execute(
+                    "SELECT timestamp, distance_m, speed_ms, brake_bar, g_lat "
+                    "FROM telemetry WHERE session_id = ? "
+                    "AND timestamp >= ? AND timestamp <= ? "
+                    "AND distance_m >= ? AND distance_m <= ? "
+                    "ORDER BY timestamp",
+                    [sid, lap["t_start"], lap["t_end"],
+                     c["entry_m"] - 50, c["exit_m"] + 10],
+                ).fetchall()
+                if not rows:
+                    continue
+                in_corner = [r for r in rows
+                             if r[1] is not None and c["entry_m"] <= r[1] <= c["exit_m"]]
+                if not in_corner:
+                    continue
+                speeds = [r[2] for r in in_corner if r[2] is not None]
+                if not speeds:
+                    continue
+                # Entry / exit speeds at the corner boundaries (closest sample).
+                entry_row = min(in_corner, key=lambda r: abs((r[1] or 0) - c["entry_m"]))
+                exit_row  = min(in_corner, key=lambda r: abs((r[1] or 0) - c["exit_m"]))
+                apex_idx = min(range(len(in_corner)), key=lambda i: in_corner[i][2] or 1e9)
+                apex_row = in_corner[apex_idx]
+                peak_brake = max(((r[3] or 0) for r in rows), default=0.0)
+                max_glat   = max((abs(r[4] or 0) for r in in_corner), default=0.0)
+                t_in       = in_corner[0][0]
+                t_out      = in_corner[-1][0]
+                passes.append({
+                    "lap_number":      lap["lap_number"],
+                    "entry_speed_kmh": round(float(entry_row[2] or 0) * 3.6, 1),
+                    "apex_speed_kmh":  round(float(apex_row[2]  or 0) * 3.6, 1),
+                    "exit_speed_kmh":  round(float(exit_row[2]  or 0) * 3.6, 1),
+                    "peak_brake_bar":  round(float(peak_brake), 1),
+                    "max_g_lat":       round(float(max_glat), 2),
+                    "corner_time_s":   round(float(t_out - t_in), 3),
+                    "apex_distance_m": round(float(apex_row[1] or 0), 1),
+                })
+            if not passes:
+                out.append({"name": c["name"], "n_passes": 0,
+                            "best_pass": None, "averages": None,
+                            "grade": "ungraded", "gold_delta_kmh": None})
+                continue
+
+            best_pass = max(passes, key=lambda p: p["apex_speed_kmh"])
+            apexes = [p["apex_speed_kmh"] for p in passes]
+            ctimes = [p["corner_time_s"] for p in passes]
+            averages = {
+                "apex_speed_kmh": round(sum(apexes) / len(apexes), 1),
+                "corner_time_s":  round(sum(ctimes) / len(ctimes), 3),
+            }
+
+            grade = "ungraded"
+            gold_delta_kmh = None
+            gold = gold_by_corner.get(c["name"])
+            if gold is not None:
+                gold_apex = float(getattr(gold, "apex_speed_kmh", 0))
+                if gold_apex > 0:
+                    delta = best_pass["apex_speed_kmh"] - gold_apex
+                    gold_delta_kmh = round(delta, 1)
+                    # Grade: ≥-1 km/h = A, -3 = B, -5 = C, -8 = D, worse = F.
+                    if delta >= -1.0:
+                        grade = "A"
+                    elif delta >= -3.0:
+                        grade = "B"
+                    elif delta >= -5.0:
+                        grade = "C"
+                    elif delta >= -8.0:
+                        grade = "D"
+                    else:
+                        grade = "F"
+
+            out.append({
+                "name":           c["name"],
+                "n_passes":       len(passes),
+                "best_pass":      best_pass,
+                "averages":       averages,
+                "grade":          grade,
+                "gold_delta_kmh": gold_delta_kmh,
+                "passes":         passes,
+            })
+        conn.close()
+
+    return jsonify({
+        "session_id":      sid,
+        "track":           track.get("name", "Sonoma Raceway"),
+        "lap_count":       len(laps),
+        "corners":         out,
+        "gold_available":  bool(gold_by_corner),
+    })
+
+
+@app.route("/score", methods=["POST"])
+def gemini_score():
+    """Gemini-graded session score: 0–100 + one-sentence why.
+
+    Body: {session_id, focus?: <corner name>, driver_level?: "intermediate"}.
+    Returns 503 when Gemini is unavailable; 400 when the session has no
+    telemetry; 200 with `{score, why, model}` otherwise.
+    """
+    if not HAS_GENAI or not os.environ.get("GEMINI_API_KEY"):
+        return jsonify({
+            "error": "gemini not available — set GEMINI_API_KEY and install google.genai",
+        }), 503
+    body = request.get_json(force=True, silent=True) or {}
+    sid = body.get("session_id")
+    focus = body.get("focus", "")
+    driver_level = body.get("driver_level", "intermediate")
+    if not sid:
+        return jsonify({"error": "session_id required"}), 400
+    if not _session_has_telemetry(sid):
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+
+    laps = _detect_laps(sid)
+    best_lap_s = min((l["lap_time_s"] for l in laps), default=None)
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        agg = conn.execute(
+            "SELECT AVG(speed_ms), MAX(combo_g), MAX(brake_bar), AVG(throttle_pct) "
+            "FROM telemetry WHERE session_id = ?", [sid],
+        ).fetchone()
+        conn.close()
+    avg_speed_ms, max_combo_g, max_brake_bar, avg_throttle = (agg or (0, 0, 0, 0))
+
+    prompt = (
+        f"You are an expert racing coach grading a {driver_level} driver "
+        f"after a session at Sonoma Raceway. Score the session 0–100 "
+        f"(100 = textbook fast lap, 50 = average track-day, 0 = unsafe). "
+        f"Ground your judgement in Ross Bentley's pedagogy "
+        f"(trail-brake quality, exit speed > corner speed, look ahead).\n\n"
+        f"Session stats:\n"
+        f"- best lap: {best_lap_s:.2f}s\n"
+        if best_lap_s else "- no complete lap\n"
+    )
+    prompt += (
+        f"- lap count: {len(laps)}\n"
+        f"- average speed: {(avg_speed_ms or 0) * 3.6:.0f} km/h\n"
+        f"- peak combined G: {(max_combo_g or 0):.2f}\n"
+        f"- peak brake: {(max_brake_bar or 0):.0f} bar\n"
+        f"- average throttle: {(avg_throttle or 0):.0f}%\n"
+    )
+    if focus:
+        prompt += f"- focus corner: {focus}\n"
+    prompt += (
+        '\nReturn ONLY one JSON object: '
+        '{"score": <int 0-100>, "why": "<one sentence>"}'
+    )
+
+    try:
+        client = genai.Client()
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash", contents=prompt,
+        )
+        text = resp.text or ""
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+        data = json.loads(text.strip())
+        score = int(data.get("score", 0))
+        why = str(data.get("why", "")).strip()
+    except Exception as e:
+        return jsonify({"error": f"gemini call failed: {e}"}), 502
+
+    return jsonify({
+        "session_id": sid,
+        "score":      max(0, min(100, score)),
+        "why":        why,
+        "model":      "gemini-2.5-flash",
+        "focus":      focus or None,
+    })
+
+
+@app.route("/markers", methods=["GET"])
+def markers_filtered():
+    """Filterable view over the Sonoma marker schema (ADR-011).
+
+    Query params (all optional, intersect):
+        corner    e.g. "Turn 11"
+        kind      "brake" | "apex" | "track_out" | "reference"
+    """
+    track_path = os.path.abspath(os.path.join(
+        SIM_DIR, "..", "..", "data", "tracks", "sonoma.json",
+    ))
+    try:
+        with open(track_path) as fh:
+            data = json.load(fh)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    markers = data.get("markers", [])
+    corner = request.args.get("corner")
+    kind = request.args.get("kind")
+    if corner:
+        markers = [m for m in markers if m.get("corner") == corner]
+    if kind:
+        markers = [m for m in markers if m.get("kind") == kind]
+    return jsonify({
+        "track":    data.get("name", "Sonoma Raceway"),
+        "filters":  {"corner": corner, "kind": kind},
+        "markers":  markers,
+        "count":    len(markers),
+    })
+
+
+# Static map: concept_id → (description, when-fired hint). Mirrors the
+# match_bentley_concept() if-tree so the frontend can render a tray of
+# coachable behaviours without parsing Python source.
+_BENTLEY_CONCEPTS = (
+    {"id": "trail_brake",   "description": "Smoothly release brake as steering increases at corner entry.",
+     "fires_when": "in_corner AND brake>10% AND |g_lat|>0.4 g"},
+    {"id": "entry_release", "description": "Keep some brake on entry to load the front tires (anti-pattern: bleeding off too soon).",
+     "fires_when": "in_corner AND brake<1% AND |g_lat|>0.6 g"},
+    {"id": "exit_speed",    "description": "Throttle on early — exit speed beats corner speed.",
+     "fires_when": "past_apex AND throttle<20% AND |g_lat|>0.3 g"},
+    {"id": "hustle",        "description": "Commit to 100% throttle on the straights, even briefly.",
+     "fires_when": "not in_corner AND throttle<5% AND brake<2 bar AND speed>50 km/h"},
+    {"id": "eob",           "description": "Look at the end of braking, not the start.",
+     "fires_when": "30m < meters_to_entry < brake_zone_m+30 AND brake<2%"},
+    {"id": "downhill_brake","description": "Downhill: brake earlier — gravity adds to your speed.",
+     "fires_when": "next_elevation_change < -5m AND meters_to_entry<200"},
+    {"id": "uphill_brake",  "description": "Uphill: brake zone is shorter — the climb decelerates you.",
+     "fires_when": "next_elevation_change > 5m AND meters_to_entry<200"},
+    {"id": "late_apex",     "description": "Late apex for a faster exit.",
+     "fires_when": "0 < meters_to_entry < 250 (default approach reminder)"},
+    {"id": "look_ahead",    "description": "Eyes far ahead — vision drives the line.",
+     "fires_when": "on a clean straight far from anything"},
+)
+
+
+@app.route("/coach/concepts", methods=["GET"])
+def coach_concepts():
+    """List the 9 Bentley pedagogical concepts the coach can fire (ADR-012)."""
+    return jsonify({
+        "source":   "Ross Bentley — Performance Driving Illustrated",
+        "concepts": list(_BENTLEY_CONCEPTS),
+        "count":    len(_BENTLEY_CONCEPTS),
+    })
+
+
 # ── Pre-brief + driver profile ───────────────────────────────────────────────
 
 @app.route("/coach/brief", methods=["GET"])
@@ -1203,6 +2949,357 @@ def driver_profile_route(driver_id: str):
 
 
 # ── Markers, danger zones, weather (pure-data endpoints for the frontend) ───
+
+@app.route("/session/<sid>/capabilities", methods=["GET"])
+def session_capabilities_get(sid: str):
+    """ADR-015 Phase 3: per-session capability envelope.
+
+    Returns the signals this session has, at what mean rate, with a `useful`
+    flag against `signal_registry.min_useful_hz`. Frontend hits this once at
+    session-load to drive its widget tray; the coach engine intersects the
+    list with each rule's `requires` (Phase 4).
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        rows = conn.execute(
+            """SELECT sr.name, sc.n_samples, sc.mean_hz, sr.min_useful_hz,
+                      sc.t_start, sc.t_end
+               FROM session_capabilities sc
+               JOIN signal_registry sr USING(signal_id)
+               WHERE sc.session_id = ?
+               ORDER BY sr.name""",
+            [sid],
+        ).fetchall()
+        conn.close()
+    if not rows:
+        return jsonify({"error": "session not found", "session_id": sid}), 404
+    signals = []
+    caps_by_name: dict = {}
+    t_starts: list = []
+    t_ends: list = []
+    for name, n_samples, mean_hz, min_useful_hz, t_start, t_end in rows:
+        useful = (min_useful_hz is None) or (float(mean_hz) >= float(min_useful_hz))
+        signals.append({
+            "name":      name,
+            "n_samples": int(n_samples),
+            "mean_hz":   float(mean_hz),
+            "useful":    bool(useful),
+        })
+        caps_by_name[name] = {"mean_hz": float(mean_hz), "useful": bool(useful)}
+        t_starts.append(float(t_start))
+        t_ends.append(float(t_end))
+    duration_s = (max(t_ends) - min(t_starts)) if t_starts else 0.0
+
+    available: list = []
+    disabled: list = []
+    try:
+        from coach_engine import evaluate_coach_gating
+        available, disabled = evaluate_coach_gating(caps_by_name)
+    except ImportError:
+        pass
+
+    return jsonify({
+        "session_id":        sid,
+        "duration_s":        duration_s,
+        "signals":           signals,
+        "coaches_available": available,
+        "coaches_disabled":  disabled,
+    })
+
+
+@app.route("/session/<sid>/signals", methods=["GET"])
+def session_signals_get(sid: str):
+    """ADR-015 Phase 3: query-time synchroniser.
+
+    Query params:
+        names    comma-separated signal names (required)
+        axis     'gps' (default) | 'lap_distance' | <signal_name>
+        rate_hz  resample to this rate; 0 (default) = axis-native
+        interp   'hold' (default, ASOF) | 'lerp' (linear bracketing)
+        t_from   epoch seconds — clip lower bound
+        t_to     epoch seconds — clip upper bound
+
+    Signals not present in the session come back as null columns alongside a
+    `missing` list; the response still 200s. 400 for unknown names/axes,
+    404 for sessions with no telemetry at all.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+
+    names_param = request.args.get("names", "") or ""
+    names = [n.strip() for n in names_param.split(",") if n.strip()]
+    if not names:
+        return jsonify({"error": "names is required (comma-separated)"}), 400
+
+    axis = (request.args.get("axis") or "gps").strip()
+    interp_kind = (request.args.get("interp") or "hold").strip().lower()
+    if interp_kind not in ("hold", "lerp"):
+        return jsonify({"error": "interp must be 'hold' or 'lerp'"}), 400
+
+    try:
+        rate_hz = float(request.args.get("rate_hz") or 0)
+    except ValueError:
+        return jsonify({"error": "rate_hz must be a number"}), 400
+    if rate_hz < 0:
+        return jsonify({"error": "rate_hz must be >= 0"}), 400
+
+    try:
+        t_from = request.args.get("t_from")
+        t_to   = request.args.get("t_to")
+        t_from = float(t_from) if t_from not in (None, "") else None
+        t_to   = float(t_to)   if t_to   not in (None, "") else None
+    except ValueError:
+        return jsonify({"error": "t_from/t_to must be numbers"}), 400
+
+    if request.args.get("lap") is not None:
+        return jsonify({"error": "lap clipping not yet implemented (Phase 4)"}), 400
+
+    AXIS_KEYWORDS = {"gps", "time", "t", "lap_distance"}
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+
+        n_wide = conn.execute(
+            "SELECT COUNT(*) FROM telemetry WHERE session_id = ?", [sid],
+        ).fetchone()[0]
+        n_tall = conn.execute(
+            "SELECT COUNT(*) FROM telemetry_signals WHERE session_id = ?", [sid],
+        ).fetchone()[0]
+        if not n_wide and not n_tall:
+            conn.close()
+            return jsonify({"error": "session not found", "session_id": sid}), 404
+
+        for nm in names:
+            if nm in _WIDE_SIGNAL_NAMES:
+                continue
+            r = conn.execute(
+                "SELECT 1 FROM signal_registry WHERE name = ?", [nm],
+            ).fetchone()
+            if r is None:
+                conn.close()
+                return jsonify({"error": f"unknown signal: {nm}"}), 400
+
+        if axis not in AXIS_KEYWORDS and axis not in _WIDE_SIGNAL_NAMES:
+            r = conn.execute(
+                "SELECT 1 FROM signal_registry WHERE name = ?", [axis],
+            ).fetchone()
+            if r is None:
+                conn.close()
+                return jsonify({"error": f"unknown axis signal: {axis}"}), 400
+
+        # Default the window to the union of the session's signal coverage.
+        if t_from is None or t_to is None:
+            bounds: list = []
+            r = conn.execute(
+                "SELECT MIN(timestamp), MAX(timestamp) FROM telemetry "
+                "WHERE session_id = ?", [sid],
+            ).fetchone()
+            if r and r[0] is not None:
+                bounds.append((float(r[0]), float(r[1])))
+            r = conn.execute(
+                "SELECT MIN(t), MAX(t) FROM telemetry_signals "
+                "WHERE session_id = ?", [sid],
+            ).fetchone()
+            if r and r[0] is not None:
+                bounds.append((float(r[0]), float(r[1])))
+            if bounds:
+                if t_from is None:
+                    t_from = min(b[0] for b in bounds)
+                if t_to is None:
+                    t_to = max(b[1] for b in bounds)
+
+        signal_data = {nm: _read_signal(conn, sid, nm, t_from, t_to) for nm in names}
+
+        if rate_hz > 0:
+            if t_from is None or t_to is None or t_to <= t_from:
+                conn.close()
+                return jsonify({"error": "rate_hz>0 requires a non-empty time window"}), 400
+            step = 1.0 / rate_hz
+            axis_ts: list = []
+            t = t_from
+            while t <= t_to + 1e-9:
+                axis_ts.append(t)
+                t += step
+        elif axis in AXIS_KEYWORDS:
+            sql = ("SELECT DISTINCT timestamp FROM telemetry "
+                   "WHERE session_id = ?")
+            params: list = [sid]
+            if t_from is not None:
+                sql += " AND timestamp >= ?"
+                params.append(t_from)
+            if t_to is not None:
+                sql += " AND timestamp <= ?"
+                params.append(t_to)
+            sql += " ORDER BY timestamp"
+            axis_ts = [float(r[0]) for r in conn.execute(sql, params).fetchall()]
+        else:
+            ax_data = _read_signal(conn, sid, axis, t_from, t_to)
+            axis_ts = [d[0] for d in ax_data]
+
+        distance_at = None
+        if axis == "lap_distance" and axis_ts:
+            dist_data = _read_signal(conn, sid, "distance_m", t_from, t_to)
+            distance_at = _interp_hold(axis_ts, dist_data)
+
+        conn.close()
+
+    values_by_name: dict = {}
+    missing: list = []
+    for nm in names:
+        data = signal_data[nm]
+        if not data:
+            values_by_name[nm] = [None] * len(axis_ts)
+            missing.append(nm)
+        else:
+            values_by_name[nm] = _interp(axis_ts, data, interp_kind)
+
+    rows_out = []
+    for k, at in enumerate(axis_ts):
+        row = {"t": at}
+        if axis == "lap_distance" and distance_at is not None:
+            row["distance_m"] = distance_at[k]
+        for nm in names:
+            row[nm] = values_by_name[nm][k]
+        rows_out.append(row)
+
+    return jsonify({
+        "session_id": sid,
+        "axis":       axis,
+        "rate_hz":    rate_hz,
+        "interp":     interp_kind,
+        "t_from":     t_from,
+        "t_to":       t_to,
+        "names":      names,
+        "rows":       rows_out,
+        "missing":    missing,
+        "count":      len(rows_out),
+    })
+
+
+@app.route("/session/<sid>/signals", methods=["POST"])
+def session_signals_post(sid: str):
+    """ADR-015: append (name, t, value) tuples to telemetry_signals.
+
+    Body shape:
+        {"signals": [
+            {"name": "oil_temp_c", "t": 1714316103.0, "value": 92.1},
+            {"name": "clutch_pos_pct", "t": 1714316103.05, "value": 23.4}
+        ]}
+
+    Either `name` (string) or `signal_id` (integer) is required. Novel names
+    auto-register with units=NULL, discovery='discovered'. The session's
+    capabilities are recomputed at the end of every batch.
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    body = request.get_json(force=True, silent=True) or {}
+    items = body.get("signals") or []
+    if not items:
+        return jsonify({"error": "no signals"}), 400
+
+    names_seen: set[str] = set()
+    discovered: list[str] = []
+    rows_written = 0
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+
+        # Resolve all unique names to signal_ids in one pre-pass; novel ones
+        # are auto-registered as 'discovered'.
+        name_to_id: dict[str, int] = {}
+        for it in items:
+            nm = it.get("name")
+            if nm is None or nm in name_to_id:
+                continue
+            existed = conn.execute(
+                "SELECT 1 FROM signal_registry WHERE name = ?", [nm],
+            ).fetchone()
+            sid_id = _resolve_signal_id(conn, nm)
+            name_to_id[nm] = sid_id
+            if not existed:
+                discovered.append(nm)
+
+        rows = []
+        for it in items:
+            nm = it.get("name")
+            sig_id = it.get("signal_id") if nm is None else name_to_id.get(nm)
+            t = it.get("t")
+            v = it.get("value")
+            if sig_id is None or t is None or v is None:
+                continue
+            try:
+                rows.append((sid, int(sig_id), float(t), float(v)))
+            except (TypeError, ValueError):
+                continue
+            if nm:
+                names_seen.add(nm)
+
+        if not rows:
+            conn.close()
+            return jsonify({"error": "no valid samples (need name|signal_id, t, value)"}), 400
+
+        conn.executemany(
+            """INSERT INTO telemetry_signals VALUES (?, ?, ?, ?)
+               ON CONFLICT (session_id, signal_id, t) DO UPDATE SET
+                   value = excluded.value""",
+            rows,
+        )
+        rows_written = len(rows)
+        conn.close()
+
+    n_caps = _compute_capabilities(sid)
+
+    return jsonify({
+        "saved":              True,
+        "session_id":         sid,
+        "n_appended":         rows_written,
+        "names":              sorted(names_seen),
+        "newly_discovered":   discovered,
+        "capabilities_count": n_caps,
+    })
+
+
+@app.route("/session/<sid>/capabilities/recompute", methods=["POST"])
+def session_capabilities_recompute(sid: str):
+    """Trigger _compute_capabilities for a session — useful after bulk import."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    n = _compute_capabilities(sid)
+    return jsonify({"session_id": sid, "capabilities_count": n})
+
+
+@app.route("/signals/registry", methods=["GET"])
+def signals_registry():
+    """ADR-015: full signal catalog. Frontend caches once at app launch."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        rows = conn.execute(
+            """SELECT signal_id, name, units, semantics, "group",
+                      expected_hz, min_useful_hz, discovery, obd2_pid
+               FROM signal_registry
+               ORDER BY "group", name"""
+        ).fetchall()
+        conn.close()
+    signals = [
+        {"signal_id":     r[0], "name":          r[1], "units":     r[2],
+         "semantics":     r[3], "group":         r[4], "expected_hz": r[5],
+         "min_useful_hz": r[6], "discovery":     r[7], "obd2_pid":  r[8]}
+        for r in rows
+    ]
+    return jsonify({"count": len(signals), "signals": signals})
+
 
 @app.route("/track/markers", methods=["GET"])
 def track_markers():
@@ -1304,6 +3401,13 @@ if __name__ == "__main__":
             print(f"✓  Track: {_track.name} ({len(_track.corners)} corners)")
         except Exception as e:
             print(f"⚠  Track load failed: {e}")
+
+    if HAS_DUCKDB:
+        try:
+            n = seed_signal_registry()
+            print(f"✓  signal_registry seeded ({n} entries from {os.path.relpath(REGISTRY_SEED_PATH)})")
+        except Exception as e:
+            print(f"⚠  signal_registry seed skipped: {e}")
 
     port = args.port
     print(f"\n🏁  Pitwall Bridge v2 on http://127.0.0.1:{port}")

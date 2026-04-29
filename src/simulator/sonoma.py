@@ -25,12 +25,21 @@ ELEVATION_RANGE_M = 49
 # `sonoma_real_gps.json` holds the full real-GPS centerline + marker pins.
 SF_LAT = 38.16152
 SF_LON = -122.45472
+SF_HEADING_DEG = 354.2     # S/F line orientation (degrees from North CW)
 TRACK_CENTROID_LAT = 38.1601
 TRACK_CENTROID_LON = -122.4594
 
 
 @dataclass(frozen=True)
 class Sector:
+    name: str
+    start_m: float
+    end_m: float
+    description: str
+
+
+@dataclass(frozen=True)
+class Straight:
     name: str
     start_m: float
     end_m: float
@@ -74,6 +83,30 @@ SECTORS = (
         start_m=2752,
         end_m=4258,
         description="T10 exit through T11 (Calamity Corner) onto the front straight",
+    ),
+)
+
+
+# Three named straights — top-speed measurements per straight feed
+# `/session/<sid>/straight_line_speed`. Front Straight wraps over S/F.
+STRAIGHTS = (
+    Straight(
+        name="Front Straight",
+        start_m=4080,
+        end_m=60,
+        description="T11 exit through S/F into T1 brake zone (wraps S/F)",
+    ),
+    Straight(
+        name="T4 Run",
+        start_m=600,
+        end_m=880,
+        description="Short squirt out of T4 toward T5",
+    ),
+    Straight(
+        name="T7 → T8a",
+        start_m=1620,
+        end_m=1820,
+        description="Downhill section — fastest sustained speed",
     ),
 )
 
@@ -295,9 +328,11 @@ CORNER_ORDER = (
 
 __all__ = [
     "TRACK_NAME", "TRACK_LENGTH_M", "ELEVATION_RANGE_M",
-    "SF_LAT", "SF_LON", "TRACK_CENTROID_LAT", "TRACK_CENTROID_LON",
-    "Sector", "DangerZone", "WeatherPhase",
-    "SECTORS", "LAP_TIME_LEVERAGE", "DANGER_ZONES", "WEATHER_PHASES",
+    "SF_LAT", "SF_LON", "SF_HEADING_DEG",
+    "TRACK_CENTROID_LAT", "TRACK_CENTROID_LON",
+    "Sector", "DangerZone", "WeatherPhase", "Straight",
+    "SECTORS", "STRAIGHTS",
+    "LAP_TIME_LEVERAGE", "DANGER_ZONES", "WEATHER_PHASES",
     "weather_phase_for_hour", "RIG_NOTES", "SURFACE_HISTORY",
     "CORNER_TIPS", "TROD_VOICE", "SYSTEM_PROMPT_LORE",
     "TRACK_JSON_RELATIVE", "TRACK_REAL_GPS_RELATIVE",

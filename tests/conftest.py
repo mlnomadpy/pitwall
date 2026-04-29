@@ -46,6 +46,55 @@ def make_frame_fn():
 
 
 @pytest.fixture
+def synth_multi_lap_frames():
+    """Build N synthetic laps for lap-detection testing.
+
+    Each lap is 90 seconds, distance wraps 0 → 4258 → 0. Laps differ slightly
+    in speed so lap times are not identical (forces best-lap arg-min to pick
+    a single winner).
+
+    Returns 3 laps × 900 frames = 2700 frames at 10 Hz.
+    """
+    frames = []
+    track_len = 4258.0
+    laps_per_session = 3
+    n_per_lap = 900
+    base_t = 1000.0
+    base_d = 0.0
+    corner_distances = [56, 536, 668, 976, 1098, 1294, 1540, 1586, 1820, 2556, 4100]
+    for lap_idx in range(laps_per_session):
+        speed_factor = 1.0 + lap_idx * 0.05  # later laps slightly faster
+        for i in range(n_per_lap):
+            d = (i / (n_per_lap - 1)) * track_len
+            t = base_t + i * 0.1 / speed_factor
+            gaps = [(c - d) % track_len for c in corner_distances]
+            nearest_gap = min(gaps)
+            if nearest_gap < 80:
+                t_in = 1 - (nearest_gap / 80)
+                speed_kmh = (110 - 60 * t_in) * speed_factor
+                brake_bar = 30 * t_in if nearest_gap > 20 else 5 * t_in
+                g_lat = 1.2 * t_in
+                throttle = 20 if nearest_gap < 30 else 60
+            else:
+                speed_kmh = 170 * speed_factor
+                brake_bar = 0
+                g_lat = 0
+                throttle = 99
+            prev = frames[-1] if frames else None
+            prev_kmh = (prev.speed * 3.6) if prev else speed_kmh
+            g_long = (speed_kmh - prev_kmh) / 9.81 if prev else 0
+            frames.append(make_frame(
+                t=t, distance=d,
+                speed_kmh=speed_kmh, brake_bar=brake_bar,
+                throttle_pct=throttle, g_lat=g_lat, g_long=g_long,
+                steering_deg=g_lat * 30,
+                rpm=2000 + (speed_kmh / 200) * 6500,
+            ))
+        base_t = frames[-1].timestamp + 0.1
+    return frames
+
+
+@pytest.fixture
 def synth_lap_frames():
     """Build a synthetic 90-second lap: 11 corners, slow-fast-slow pattern.
 

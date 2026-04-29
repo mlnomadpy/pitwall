@@ -85,6 +85,138 @@ class CoachingMessage:
     reason: str = ""           # debug only — why we said this
 
 
+# ─── ADR-015 Phase 4: capability-aware coach rule registry ──────────────────
+
+
+@dataclass(frozen=True)
+class CoachRule:
+    """A coach rule's capability declaration.
+
+    The decorated callable is not yet wired into RuleCoach — Phase 4 ships
+    the registry + capability filter so the frontend's capabilities endpoint
+    can advertise *which rules will fire on this session*. Phase 5 will
+    consume the same registry to actually dispatch coaching at runtime.
+    """
+    id: str
+    description: str
+    requires: tuple        # signal names this rule reads
+    min_rates: tuple       # ((signal_name, hz), ...)
+
+
+COACH_RULES: list[CoachRule] = []
+
+
+def coach_rule(*, id: str, description: str = "",
+               requires=None, min_rates=None):
+    """Decorator that registers a coach rule with its capability requirements.
+
+    Example:
+        @coach_rule(id="oil_temp_warning_t11", requires=["oil_temp_c"],
+                    min_rates={"oil_temp_c": 1.0})
+        def oil_warning(ctx, signals): ...
+    """
+    req_tuple = tuple(requires or [])
+    rates_tuple = tuple(sorted((min_rates or {}).items()))
+
+    def decorator(fn):
+        # De-dupe by id (in-place) — a re-import of this module shouldn't
+        # double-register. Mutate rather than rebind so other modules that
+        # imported the list see the update.
+        COACH_RULES[:] = [r for r in COACH_RULES if r.id != id]
+        COACH_RULES.append(CoachRule(
+            id=id, description=description or fn.__doc__ or "",
+            requires=req_tuple, min_rates=rates_tuple,
+        ))
+        return fn
+    return decorator
+
+
+def evaluate_coach_gating(caps_by_name: dict) -> tuple[list, list]:
+    """Split COACH_RULES into (available, disabled) given session capabilities.
+
+    `caps_by_name` maps signal name → {"mean_hz": float, "useful": bool}.
+    A rule is *available* iff every name in `requires` is present in caps
+    AND every (name, min_hz) in `min_rates` is satisfied by caps[name].mean_hz.
+    `disabled` items carry a human-readable reason.
+    """
+    available: list = []
+    disabled: list = []
+    for rule in COACH_RULES:
+        missing = [n for n in rule.requires if n not in caps_by_name]
+        if missing:
+            disabled.append({
+                "coach_id": rule.id,
+                "reason":   f"missing signal: {missing[0]}",
+            })
+            continue
+        rate_fail = None
+        for nm, min_hz in rule.min_rates:
+            actual = float(caps_by_name.get(nm, {}).get("mean_hz", 0.0))
+            if actual < float(min_hz):
+                rate_fail = (nm, actual, min_hz)
+                break
+        if rate_fail:
+            nm, actual, min_hz = rate_fail
+            disabled.append({
+                "coach_id": rule.id,
+                "reason":   f"{nm} rate ({actual:.1f} Hz) below min_useful_hz ({min_hz:.1f})",
+            })
+            continue
+        available.append(rule.id)
+    return available, disabled
+
+
+# ─── Built-in coach rules (capability declarations only — Phase 5 wires them) ─
+
+
+@coach_rule(
+    id="base_pace_note",
+    description="Default pace-note coaching from sonic_model cues.",
+    requires=["speed_ms", "distance_m"],
+)
+def _rule_base_pace_note(ctx, signals):  # pragma: no cover
+    pass
+
+
+@coach_rule(
+    id="trail_brake_score",
+    description="Score trail-brake quality at corner entry.",
+    requires=["brake_bar", "throttle_pct", "g_lat", "speed_ms"],
+)
+def _rule_trail_brake_score(ctx, signals):  # pragma: no cover
+    pass
+
+
+@coach_rule(
+    id="oil_temp_warning_t11",
+    description="Warn driver if oil temp > 105°C approaching T11.",
+    requires=["oil_temp_c", "distance_m"],
+    min_rates={"oil_temp_c": 1.0},
+)
+def _rule_oil_temp_warning(ctx, signals):  # pragma: no cover
+    pass
+
+
+@coach_rule(
+    id="clutch_balance",
+    description="Score clutch position smoothness during shifts.",
+    requires=["clutch_pos_pct", "rpm"],
+    min_rates={"clutch_pos_pct": 5.0},
+)
+def _rule_clutch_balance(ctx, signals):  # pragma: no cover
+    pass
+
+
+@coach_rule(
+    id="tpms_drift",
+    description="Alert on tire pressure drift across stints.",
+    requires=["tpms_fl_kpa", "tpms_fr_kpa", "tpms_rl_kpa", "tpms_rr_kpa"],
+    min_rates={"tpms_fl_kpa": 5.0},
+)
+def _rule_tpms_drift(ctx, signals):  # pragma: no cover
+    pass
+
+
 # ─── Pedagogical vector matcher ───────────────────────────────────────────────
 
 
