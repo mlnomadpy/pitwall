@@ -58,6 +58,16 @@ except ImportError as e:
     print(f"⚠  sonic_model not available ({e}) — falling back to rule engine")
 
 try:
+    from coach_engine import make_coach, CoachArbiter, build_context
+    _coach = make_coach(kind="auto")
+    _arbiter = CoachArbiter()
+    print(f"✓  coach_engine loaded ({_coach.name})")
+except ImportError as e:
+    _coach = None
+    _arbiter = None
+    print(f"⚠  coach_engine not available ({e})")
+
+try:
     import duckdb
     HAS_DUCKDB = True
 except ImportError:
@@ -241,7 +251,7 @@ def analyze():
     with _burst_lock:
         _session_bursts.append(burst)
 
-    # Tier 1: Full sonic_model pipeline
+    # Tier 1: Full sonic_model pipeline (audio cues)
     coaching, cues = _sonic_coaching(burst)
 
     # Tier 2: Rule fallback
@@ -251,11 +261,53 @@ def analyze():
     else:
         source = "sonic_model"
 
+    # Tier 3: Insightful Coach Engine (Pace Notes)
+    pace_note = None
+    coach_source = None
+    
+    if _coach and _track:
+        import time
+        import types
+        
+        frame = types.SimpleNamespace(
+            speed=burst.get("avg_speed_kmh", 0) / 3.6,
+            brake_pressure=burst.get("max_brake_bar", 0),
+            throttle=burst.get("avg_throttle_pct", 0),
+            g_lat=burst.get("max_lateral_g", burst.get("max_combo_g", 0) * 0.7),
+            g_long=burst.get("max_long_g", burst.get("max_combo_g", 0) * 0.7)
+        )
+        
+        distance_m = burst.get("distance_m", 0)
+        nearest = find_nearest_corner(_track, distance_m)
+        dist_to_corner = distance_to_corner(_track, distance_m, nearest) if nearest else 999.0
+        in_corner_obj = nearest if burst.get("in_corner", False) else None
+        
+        ctx = build_context(
+            driver_level=burst.get("driver_level", "intermediate"),
+            track=_track,
+            frame=frame,
+            next_corner=nearest,
+            meters_to_entry=dist_to_corner,
+            in_corner_obj=in_corner_obj,
+            past_apex=burst.get("past_apex", False),
+        )
+        
+        msg = _coach.propose(ctx)
+        msg = _arbiter.submit(msg, now=time.time(), on_straight=abs(frame.g_lat) < 0.3)
+        if msg:
+            pace_note = msg.text
+            coach_source = _coach.name
+            # Override generic sonic_model coaching with the more insightful pace note
+            coaching = pace_note
+            source = coach_source
+
     return jsonify({
-        "coaching":  coaching,
-        "cues":      cues,          # audio cues for future HUD visualisation
-        "burst_id":  burst_id,
-        "source":    source,
+        "coaching":     coaching,
+        "cues":         cues,
+        "burst_id":     burst_id,
+        "source":       source,
+        "pace_note":    pace_note,
+        "coach_source": coach_source,
     })
 
 
