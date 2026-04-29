@@ -25,7 +25,23 @@ import argparse
 import os
 import sys
 import threading
+import json
 from datetime import datetime
+try:
+    from google import genai
+    HAS_GENAI = True
+except ImportError:
+    HAS_GENAI = False
+
+# Load .env file
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
+if os.path.exists(env_path):
+    with open(env_path) as f:
+        for line in f:
+            if line.strip() and not line.startswith("#"):
+                key, val = line.strip().split("=", 1)
+                os.environ[key.strip()] = val.strip().strip('"\'')
+
 from flask import Flask, request, jsonify
 
 # ── Add src/simulator to path so we can import the real coaching engine ────────
@@ -384,26 +400,232 @@ def list_sessions():
     Query params:
         limit       (int, default 50)
         active_only (bool, default false) — only sessions without ended_at
+   
+    Score 4 insight dimensions across accumulated session bursts.
+    Returns up to 3 insights sorted by effort ASC, est_gain DESC.
     """
-    limit = int(request.args.get("limit", 50))
-    active_only = request.args.get("active_only", "").lower() in ("1", "true", "yes")
-    with _db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"sessions": [], "error": "duckdb not available"}), 503
-        q = """
-            SELECT s.session_id, s.driver, s.driver_level, s.track, s.car,
-                   s.started_at, s.ended_at, s.note,
-                   (SELECT COUNT(*) FROM laps l WHERE l.session_id = s.session_id) AS lap_count,
-                   (SELECT MIN(lap_time_s) FROM laps l WHERE l.session_id = s.session_id) AS best_lap_s
-            FROM sessions s
-        """
-        if active_only:
-            q += " WHERE s.ended_at IS NULL"
-        q += " ORDER BY s.started_at DESC LIMIT ?"
-        rows = conn.execute(q, [limit]).fetchall()
-        cols = [d[0] for d in conn.description]
-        conn.close()
+    if not bursts:
+        return []
+
+    # --- Dimension accumulators ---
+    total_frames   = sum(b.get("frame_count", 1) for b in bursts)
+    coast_frames   = sum(b.get("coast_frames", 0) for b in bursts)
+    trail_frames   = sum(b.get("trail_brake_frames", 0) for b in bursts)
+    corner_bursts  = [b for b in bursts if b.get("corners_visited")]
+    all_g          = [b.get("max_combo_g", 0) for b in bursts]
+    avg_g          = sum(all_g) / len(all_g) if all_g else 0
+    avg_speed      = sum(b.get("avg_speed_kmh", 0) for b in bursts) / len(bursts)
+
+    coast_pct      = (coast_frames / max(total_frames, 1)) * 100
+    grip_headroom  = 2.29 - avg_g   # Gs below the tyre limit
+
+    # Collect corner names with issues
+    coast_corners  = []
+    grip_corners   = []
+    for b in corner_bursts:
+        if (b.get("coast_frames", 0) / max(b.get("frame_count", 1), 1)) > 0.20:
+            coast_corners.extend(b.get("corners_visited", []))
+        if b.get("max_combo_g", 0) < 1.5:
+            grip_corners.extend(b.get("corners_visited", []))
+    coast_corners = list(dict.fromkeys(coast_corners))[:4]  # dedupe, max 4
+    grip_corners  = list(dict.fromkeys(grip_corners))[:4]
+
+    insights = []
+
+    # 1. Coast excess — easiest gain, just lift the foot earlier
+    if coast_pct > 15:
+        est = round(min(coast_pct * 0.03, 1.5), 1)
+        insights.append({
+            "id":             "coast_excess",
+            "title":          "Early Throttle Pickup",
+            "detail":         f"You're coasting {coast_pct:.0f}% of corners. "
+                              f"Get to full throttle at the apex instead of mid-exit. "
+                              f"Every tenth of a second off throttle is lost time.",
+            "corners":        coast_corners,
+            "metric_label":   "Coast",
+            "metric_value":   f"{coast_pct:.0f}%",
+            "effort":         1,
+            "est_gain_s":     est,
+            "evidence_bursts": len([b for b in bursts if b.get("coast_frames", 0) > 0]),
+        })
+
+    # 2. Grip headroom — easy, just carry more speed
+    if avg_g < 1.6 and len(grip_corners) >= 2:
+        est = round(min(grip_headroom * 0.4, 1.0), 1)
+        insights.append({
+            "id":             "grip_headroom",
+            "title":          "Unused Grip Budget",
+            "detail":         f"Peak G averaging {avg_g:.2f}G — tyres support 2.29G. "
+                              f"You have {grip_headroom:.2f}G of headroom. "
+                              f"Carry more entry speed through the corners listed.",
+            "corners":        grip_corners,
+            "metric_label":   "Peak G",
+            "metric_value":   f"{avg_g:.2f}G",
+            "effort":         1,
+            "est_gain_s":     est,
+            "evidence_bursts": len(grip_corners),
+        })
+
+    # 3. Trail braking absent — moderate effort, technique change
+    in_corner_bursts = [b for b in corner_bursts if b.get("in_corner")]
+    if in_corner_bursts and trail_frames == 0:
+        trail_corners = list(dict.fromkeys(
+            c for b in in_corner_bursts for c in b.get("corners_visited", [])
+        ))[:4]
+        insights.append({
+            "id":             "trail_absent",
+            "title":          "Add Trail Braking",
+            "detail":         "No trail braking detected. Holding light brake pressure "
+                              "through corner entry adds rotation, lets you brake later, "
+                              "and improves mid-corner balance.",
+            "corners":        trail_corners,
+            "metric_label":   "Trail frames",
+            "metric_value":   "0",
+            "effort":         2,
+            "est_gain_s":     0.4,
+            "evidence_bursts": len(in_corner_bursts),
+        })
+
+    # 4. Braking late / low entry speed
+    slow_entry_corners = []
+    for b in corner_bursts:
+        if b.get("avg_speed_kmh", 999) < 70 and b.get("in_corner"):
+            slow_entry_corners.extend(b.get("corners_visited", []))
+    slow_entry_corners = list(dict.fromkeys(slow_entry_corners))[:4]
+    if slow_entry_corners:
+        insights.append({
+            "id":             "braking_late",
+            "title":          "Brake Point Optimisation",
+            "detail":         f"Corner entry averaging {avg_speed:.0f} km/h at the corners "
+                              f"listed. Try moving your brake marker 15–20m later — you may "
+                              f"be over-braking and scrubbing speed unnecessarily.",
+            "corners":        slow_entry_corners,
+            "metric_label":   "Avg entry",
+            "metric_value":   f"{avg_speed:.0f} km/h",
+            "effort":         2,
+            "est_gain_s":     0.5,
+            "evidence_bursts": len(slow_entry_corners),
+        })
+
+    # Sort: effort ASC, then est_gain DESC, pick top 3
+    insights.sort(key=lambda x: (x["effort"], -x["est_gain_s"]))
+    for i, ins in enumerate(insights[:3], 1):
+        ins["rank"] = i
+    return insights[:3]
+
+
+def _gemini_insights(bursts: list, lap: int = None) -> list:
+    if not bursts: return []
+    if not HAS_GENAI or not os.environ.get("GEMINI_API_KEY"):
+        return _score_insights(bursts)
+    
+    base_dir = os.path.dirname(__file__)
+    repo_dir = os.path.abspath(os.path.join(base_dir, ".."))
+    
+    try:
+        with open(os.path.join(repo_dir, "transcript.txt"), "r") as f:
+            transcript = f.read()
+    except Exception:
+        transcript = ""
+        
+    try:
+        with open(os.path.join(repo_dir, "Performance-Driving-Illustrated-2-23-24.txt"), "r") as f:
+            pedagogy = f.read()[:5000]
+    except Exception:
+        pedagogy = ""
+
+    gold_standard = """
+    Sonoma Raceway Gold Standard (Turn, Speed, Gear):
+    Turn 1: Entry 111 km/h, Apex 113 km/h, Exit 117 km/h, Gear 2
+    Turn 3: Entry 104 km/h, Apex 87 km/h, Exit 102 km/h, Gear 4
+    Turn 6: Entry 92 km/h, Apex 77 km/h, Exit 105 km/h, Gear 5
+    Turn 9: Entry 121 km/h, Apex 116 km/h, Exit 132 km/h, Gear 3
+    Turn 10: Entry 106 km/h, Apex 73 km/h, Exit 108 km/h, Gear 6
+    Turn 11: Entry 88 km/h, Apex 64 km/h, Exit 95 km/h, Gear 5
+    """
+    driver_level = bursts[0].get("driver_level", "intermediate") if bursts else "intermediate"
+
+    prompt = f"""
+    You are an expert racing coach. Provide exactly 3 actionable racing insights for a {driver_level} driver who just completed{' lap ' + str(lap) if lap is not None else ' a lap'} at Sonoma Raceway.
+    Compare their telemetry with the Gold Standard lap. Use the coaching pedagogy provided. Adjust the tone, terminology, and complexity of your feedback to suit a {driver_level} driver.
+
+    ## Pedagogy
+    {pedagogy}
+    
+    ## Transcript
+    {transcript}
+
+    ## Gold Standard
+    {gold_standard}
+
+    ## Driver Lap Telemetry
+    """
+    
+    for i, b in enumerate(bursts):
+        prompt += f"Burst {i+1}:\n"
+        prompt += f"- Corners Visited: {b.get('corners_visited', [])}\n"
+        prompt += f"- Avg Speed: {b.get('avg_speed_kmh', 0):.0f} km/h\n"
+        prompt += f"- Max Combo G: {b.get('max_combo_g', 0):.2f} G\n"
+        prompt += f"- Coasting Frames: {b.get('coast_frames', 0)} / {b.get('frame_count', 1)}\n"
+        prompt += f"- Trail Braking Frames: {b.get('trail_brake_frames', 0)}\n\n"
+
+    prompt += """
+    Output ONLY a valid JSON array of 3 objects with exactly this structure:
+    [
+      {
+        "id": "insight_id_like_brake_late",
+        "title": "Short Title (max 4 words)",
+        "detail": "Actionable coaching advice. Mention specific corners.",
+        "corners": ["Turn 3"],
+        "metric_label": "Short label (e.g. Avg Speed)",
+        "metric_value": "Value (e.g. 104 km/h)",
+        "effort": 1,
+        "est_gain_s": 0.5
+      }
+    ]
+    effort should be 1, 2, or 3.
+    est_gain_s should be a float.
+    Make the advice sound professional, encouraging, and highly specific to the corners.
+    """
+
+    client = genai.Client()
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        
+        text = response.text
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+            
+        data = json.loads(text.strip())
+        
+        for i, item in enumerate(data):
+            item["rank"] = i + 1
+            
+        insights = data[:3]
+        print(f"\\n🏁 Gemini Insights Generated Successfully:\\n{json.dumps(insights, indent=2)}\\n")
+        return insights
+    except Exception as e:
+        print(f"Gemini generation failed: {e}")
+        return _score_insights(bursts)
+
+@app.route("/insights", methods=["GET"])
+def get_insights():
+    """Return top-3 prioritised driver insights from the current session bursts."""
+    lap_param = request.args.get("lap")
+    lap = int(lap_param) if lap_param else None
+
+    with _burst_lock:
+        bursts_snapshot = list(_session_bursts)
+
+    if lap is not None:
+        bursts_snapshot = [b for b in bursts_snapshot if b.get("lap") == lap]
+
+    insights = _gemini_insights(bursts_snapshot, lap=lap)
     return jsonify({
         "sessions": [dict(zip(cols, r)) for r in rows],
         "count":    len(rows),
