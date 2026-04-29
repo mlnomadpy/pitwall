@@ -73,3 +73,4 @@ nav:
       - "012: Coach Engine Adapter": adr/012-coach-engine-adapter.md
       - "013: Frontend/Backend Boundary": adr/013-frontend-backend-boundary.md
       - "014: Sonoma is the Product": adr/014-sonoma-as-the-product.md
+      - "015: Universal Telemetry Sink": adr/015-universal-telemetry-sink.md

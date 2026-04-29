@@ -16,7 +16,7 @@ flowchart LR
     CAM[Pixel dashcam<br/>MP4 chunks]
   end
 
-  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 26 endpoints"]
+  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 37 endpoints"]
     direction TB
     INGEST["/session/&lt;id&gt;/frames<br/>/session/&lt;id&gt;/video_frames<br/>/analyze (burst)"]
     QUERY["/session/&lt;id&gt;/scorecard<br/>/highlights /map /sync<br/>/coach/brief /debrief"]
@@ -450,19 +450,35 @@ flowchart LR
     CL[GET /session/&lt;id&gt;/clips]
   end
 
+  subgraph LP["lap-performance &amp; analysis (Phase 6)"]
+    direction TB
+    LT1[GET /session/&lt;id&gt;/lap_time_table]
+    LT2[GET /session/&lt;id&gt;/lap_time_distribution]
+    IL[GET /session/&lt;id&gt;/ideal_lap]
+    ST2[GET /session/&lt;id&gt;/sector_times]
+    PB[GET /session/&lt;id&gt;/pedal_behavior]
+    TCB[GET /session/&lt;id&gt;/throttle_corner_box]
+    CC[GET /session/&lt;id&gt;/corner_classification]
+    SLS[GET /session/&lt;id&gt;/straight_line_speed]
+    BA[GET /session/&lt;id&gt;/brake_acceleration]
+  end
+
   subgraph M["track + driver metadata"]
     direction TB
-    TM[GET /track/markers]
-    TD[GET /track/danger_zones]
-    TW[GET /track/weather]
+    TM[GET /track/&lt;id&gt;/markers]
+    TD[GET /track/&lt;id&gt;/danger_zones]
+    TW[GET /track/&lt;id&gt;/weather]
+    TE[GET /track/&lt;id&gt;/elevation]
     DP[GET /driver/&lt;id&gt;/profile]
+    DE[GET /driver/&lt;id&gt;/evolution]
   end
 
   class H,A,BR,DB coach
   class SLIST,SSTART,SDETAIL,SEND sess
   class FRAMES,VFRAMES,SYNC,LAP,LAPS telem
   class SC,HL,ST,FC,HM,EOB,INC,MAP,CL analyze
-  class TM,TD,TW,DP meta
+  class LT1,LT2,IL,ST2,PB,TCB,CC,SLS,BA analyze
+  class TM,TD,TW,TE,DP,DE meta
 ```
 
 ---
@@ -524,6 +540,425 @@ pitwall/
     ├── extract_marker_thumbnails.py
     └── validate_litert.py             (Pixel-side smoke)
 ```
+
+---
+
+## Lap-performance & analysis pipeline (Phase 6)
+
+The 11 new analysis endpoints all share the same back-end shape: they read frames from `telemetry`, slice them into laps using S/F-line projection, compute per-lap or per-corner aggregates, and return a JSON envelope ready for chart rendering. The frontend never touches raw frames for these views.
+
+```mermaid
+flowchart LR
+  classDef ingest fill:#5d4a1a,stroke:#8a6e3a,color:#e0e0e0
+  classDef store fill:#1a3a52,stroke:#4a6e8a,color:#e0e0e0
+  classDef detect fill:#5d2a1a,stroke:#8a4e3a,color:#e0e0e0
+  classDef agg fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
+  classDef api fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+  classDef ui fill:#5d1a3a,stroke:#8a3a5e,color:#e0e0e0
+
+  IN[VBO / live frames]:::ingest
+  TEL[(telemetry table)]:::store
+  LAPS[(laps table)]:::store
+
+  LAPDET[lap_detector<br/>S/F sign-change<br/>+ outlier filter]:::detect
+  SECDET[sector_splitter<br/>boundaries from<br/>sonoma.SECTORS]:::detect
+  CORNDET[corner_pass_detector<br/>per-corner intervals<br/>from track JSON]:::detect
+
+  AGG_LAP[lap_time aggregator<br/>min/median/quantiles]:::agg
+  AGG_PEDAL[pedal_state classifier<br/>4-state thresholds]:::agg
+  AGG_BAND[corner_band classifier<br/>apex-speed banding]:::agg
+  AGG_BOX[throttle box-plot<br/>per-corner Tukey]:::agg
+  AGG_BRK[brake_accel aggregator<br/>heavy-decel runs]:::agg
+  AGG_STR[straight-speed aggregator<br/>max v in window]:::agg
+  AGG_ELEV[elevation_sampler<br/>centerline interp]:::agg
+
+  E1["/session/&lt;id&gt;/lap_time_table"]:::api
+  E2["/session/&lt;id&gt;/lap_time_distribution"]:::api
+  E3["/session/&lt;id&gt;/ideal_lap"]:::api
+  E4["/session/&lt;id&gt;/sector_times"]:::api
+  E5["/session/&lt;id&gt;/pedal_behavior"]:::api
+  E6["/session/&lt;id&gt;/throttle_corner_box"]:::api
+  E7["/session/&lt;id&gt;/corner_classification"]:::api
+  E8["/session/&lt;id&gt;/straight_line_speed"]:::api
+  E9["/session/&lt;id&gt;/brake_acceleration"]:::api
+  E10["/track/&lt;id&gt;/elevation"]:::api
+  E11["/driver/&lt;id&gt;/evolution"]:::api
+
+  FE[Flutter charts<br/>box-plots, line charts,<br/>track-map overlays]:::ui
+
+  IN --> TEL
+  TEL --> LAPDET --> LAPS
+  TEL --> SECDET
+  TEL --> CORNDET
+  LAPS --> AGG_LAP
+  SECDET --> AGG_LAP
+  TEL --> AGG_PEDAL
+  CORNDET --> AGG_BAND & AGG_BOX & AGG_BRK
+  TEL --> AGG_STR
+  TEL --> AGG_ELEV
+
+  AGG_LAP --> E1 & E2 & E3 & E4
+  AGG_PEDAL --> E5
+  AGG_BOX --> E6
+  AGG_BAND --> E7
+  AGG_STR --> E8
+  AGG_BRK --> E9
+  AGG_ELEV --> E10
+  AGG_LAP --> E11
+  AGG_BAND --> E11
+
+  E1 & E2 & E3 & E4 & E5 & E6 & E7 & E8 & E9 & E10 & E11 --> FE
+```
+
+The `lap_detector` runs once per session and persists boundaries into the existing `laps` table (no new schema). The aggregators are pure functions over telemetry rows + lap boundaries — no global state, easy to test.
+
+---
+
+## Pedal-state classifier (4-state model)
+
+Every frame's `(throttle_pct, brake_bar)` pair maps deterministically to exactly one of four states. `pedal_behavior` returns the distribution; `lap_time_table` and `ideal_lap` use the same classifier internally for sector "trail-brake fraction" annotations.
+
+```mermaid
+flowchart TB
+  classDef state fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+  classDef axis fill:#3a3a3a,stroke:#6e6e6e,color:#e0e0e0
+
+  F[frame<br/>&#40;throttle_pct, brake_bar&#41;]
+  T{throttle_pct &gt; 5%}:::axis
+  B1{brake_bar &gt; 1.0}:::axis
+  B2{brake_bar &gt; 1.0}:::axis
+
+  TR[trail_brake<br/>both pedals modulating]:::state
+  TO[throttle_only<br/>cruise / WOT]:::state
+  BO[brake_only<br/>pure stopping]:::state
+  CO[coast<br/>off both pedals — alarm]:::state
+
+  F --> T
+  T -- yes --> B1
+  T -- no --> B2
+  B1 -- yes --> TR
+  B1 -- no --> TO
+  B2 -- yes --> BO
+  B2 -- no --> CO
+```
+
+Thresholds chosen for road-car drivers (5% / 1 bar). F1 telemetry uses 95% / 5 bar — too aggressive for the Sonoma track-day audience and would classify almost every frame as "coast".
+
+---
+
+## Corner-classification banding
+
+Each corner's apex speed determines its band. The endpoint groups corners and reports per-band stats so the coach can say "you're a low-speed driver, focus on T7/T11".
+
+```mermaid
+flowchart LR
+  classDef low fill:#5d2a1a,stroke:#8a4e3a,color:#e0e0e0
+  classDef med fill:#5d4a1a,stroke:#8a6e3a,color:#e0e0e0
+  classDef high fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
+
+  C[corner pass<br/>frames]
+  AP[apex_speed = min&#40;v_f&#41;]
+  D{apex band}
+
+  L[low_speed<br/>&lt; 80 km/h<br/>T7, T11]:::low
+  M[med_speed<br/>80–130 km/h<br/>T1, T2, T3a, T4, T8a, T9]:::med
+  H[high_speed<br/>≥ 130 km/h<br/>T6, T10]:::high
+
+  C --> AP --> D
+  D -- low --> L
+  D -- med --> M
+  D -- high --> H
+```
+
+Thresholds are query-tunable (`?low_max=80&med_max=130`) so bench analysts can re-classify without redeploying.
+
+---
+
+## Multi-track parameterisation
+
+The bridge currently hardcodes Sonoma per [ADR-014](adr/014-sonoma-as-the-product.md), but the new `/track/<id>/*` route shape lets us add tracks **without code changes** — drop a JSON in `data/tracks/` and the loader resolves it on demand.
+
+```mermaid
+flowchart LR
+  classDef req fill:#5d2a1a,stroke:#8a4e3a,color:#e0e0e0
+  classDef router fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+  classDef cache fill:#5d4a1a,stroke:#8a6e3a,color:#e0e0e0
+  classDef data fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
+  classDef err fill:#5d1a3a,stroke:#8a3a5e,color:#e0e0e0
+
+  REQ["GET /track/&lt;id&gt;/elevation<br/>GET /track/&lt;id&gt;/markers<br/>GET /track/&lt;id&gt;/danger_zones"]:::req
+  ROUTER[Flask router<br/>extracts &lt;id&gt;]:::router
+  CACHE["_track_cache: dict&lt;id, TrackMap&gt;"]:::cache
+  HIT{cache hit?}
+  LOAD[track_loader.load_track<br/>data/tracks/&lt;id&gt;.json]:::router
+  EXIST{file exists?}
+
+  D1[/data/tracks/sonoma.json/]:::data
+  D2[/data/tracks/laguna_seca.json<br/>future/]:::data
+  D3[/data/tracks/road_atlanta.json<br/>future/]:::data
+
+  E404[404 Not Found<br/>track id unknown]:::err
+  RESP[200 OK<br/>JSON response]:::router
+
+  REQ --> ROUTER --> HIT
+  HIT -- yes --> RESP
+  HIT -- no --> EXIST
+  EXIST -- yes --> LOAD --> CACHE --> RESP
+  EXIST -- no --> E404
+  LOAD -.reads.-> D1
+  LOAD -.future.-> D2
+  LOAD -.future.-> D3
+```
+
+The cache lives in-process (the bridge is single-process by design — see [ADR-010](adr/010-http-bridge-warm-path.md)). Track JSONs are small (10–50 KB each) so an LRU isn't needed.
+
+---
+
+## Driver evolution pipeline (multi-session)
+
+`/driver/<id>/evolution` is the only endpoint that joins data **across sessions**. It reads from the existing `sessions`, `laps`, `telemetry`, and `driver_events` tables — no new tables needed.
+
+```mermaid
+flowchart TB
+  classDef store fill:#1a3a52,stroke:#4a6e8a,color:#e0e0e0
+  classDef proc fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
+  classDef api fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+  classDef ui fill:#5d1a3a,stroke:#8a3a5e,color:#e0e0e0
+
+  SESS[(sessions<br/>WHERE driver=? AND track=?)]:::store
+  LAPS[(laps)]:::store
+  TEL[(telemetry)]:::store
+  EVT[(driver_events)]:::store
+
+  ORDER[order by started_at ASC<br/>assign session_index]:::proc
+  PER_SESS[per-session aggregator<br/>best_lap, median_lap,<br/>sector_pbs, lap_count]:::proc
+  CORNER_EVOL[per-corner regression<br/>apex_speed vs session_index<br/>linear least-squares]:::proc
+  SUMMARY[summary builder<br/>improvement_s,<br/>biggest_corner_gain]:::proc
+  GUARD{session_count<br/>≥ 5?}
+
+  R204[204 No Content<br/>need more sessions]:::api
+  R200[200 OK<br/>evolution + summary]:::api
+
+  CHART[Flutter line chart<br/>+ hero card]:::ui
+
+  SESS --> ORDER --> PER_SESS
+  LAPS --> PER_SESS
+  TEL --> CORNER_EVOL
+  EVT --> CORNER_EVOL
+  PER_SESS --> SUMMARY
+  CORNER_EVOL --> SUMMARY
+  SUMMARY --> GUARD
+  GUARD -- no --> R204
+  GUARD -- yes --> R200
+  R200 --> CHART
+  R204 --> CHART
+```
+
+The 5-session minimum is a noise floor — single-session drivers always look like outliers in a regression. The empty-state UI (`204`) tells the frontend to render a "you need 3 more sessions to unlock evolution" placeholder instead of a misleading chart.
+
+---
+
+## Comprehensive backend topology
+
+The full as-shipped picture, including Phase 6. Every node is a real module or table; every edge a real call or query.
+
+```mermaid
+flowchart TB
+  classDef sensor fill:#5d4a1a,stroke:#8a6e3a,color:#e0e0e0
+  classDef bridge fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+  classDef sim fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
+  classDef store fill:#1a3a52,stroke:#4a6e8a,color:#e0e0e0
+  classDef tools fill:#5d2a1a,stroke:#8a4e3a,color:#e0e0e0
+  classDef ui fill:#5d1a3a,stroke:#8a3a5e,color:#e0e0e0
+  classDef data fill:#3a3a3a,stroke:#6e6e6e,color:#e0e0e0
+
+  subgraph SENSORS["📡 Sensors"]
+    RL[Racelogic VBO<br/>10 Hz]:::sensor
+    OBD[OBDLink MX]:::sensor
+    CAM[Pixel dashcam]:::sensor
+  end
+
+  subgraph TOOLS["🛠 tools/"]
+    BULK[bulk_import_<br/>sonoma_vbos.py]:::tools
+    BEST[best_sonoma_lap.py<br/>S/F line projection]:::tools
+    EXTRACT[extract_gold_lap.py]:::tools
+    THUMB[extract_marker_<br/>thumbnails.py]:::tools
+    GPS_IMP[import_sonoma_<br/>real_gps.py]:::tools
+    ENRICH[enrich_sonoma_<br/>track.py]:::tools
+    VAL[validate_litert.py]:::tools
+  end
+
+  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 37 endpoints"]
+    direction TB
+
+    subgraph BRG_INGEST["ingest"]
+      B_FRAMES[/session/&lt;id&gt;/frames]:::bridge
+      B_VFRAMES[/session/&lt;id&gt;/video_frames]:::bridge
+      B_IMPORT[/session/import]:::bridge
+      B_RESET[/session/reset]:::bridge
+    end
+
+    subgraph BRG_COACH["coach"]
+      B_ANALYZE[/analyze]:::bridge
+      B_BRIEF[/coach/brief]:::bridge
+      B_DEBRIEF[/coach/debrief]:::bridge
+    end
+
+    subgraph BRG_QUERY["analysis"]
+      B_SCORE[/scorecard /highlights /stats]:::bridge
+      B_FRIC[/friction_circle /hustle_map]:::bridge
+      B_EOB[/eob /incidents /map /clips /sync]:::bridge
+      B_LAPTAB[/lap_time_table /lap_time_distribution]:::bridge
+      B_IDEAL[/ideal_lap /sector_times]:::bridge
+      B_PEDAL[/pedal_behavior /throttle_corner_box]:::bridge
+      B_BAND[/corner_classification /straight_line_speed]:::bridge
+      B_BRK[/brake_acceleration]:::bridge
+    end
+
+    subgraph BRG_META["meta"]
+      B_HEALTH[/health /insights]:::bridge
+      B_TRACK[/track/&lt;id&gt;/markers /danger_zones]:::bridge
+      B_WX[/track/&lt;id&gt;/weather /elevation]:::bridge
+      B_LAP_CRUD[/lap /laps]:::bridge
+    end
+
+    subgraph BRG_PROFILE["profile"]
+      B_PROF[/driver/&lt;id&gt;/profile]:::bridge
+      B_EVOL[/driver/&lt;id&gt;/evolution]:::bridge
+    end
+  end
+
+  subgraph SIM["🐍 src/simulator/"]
+    direction TB
+    S_SONOMA[sonoma.py<br/>constants + lore]:::sim
+    S_VBO[vbo_parser.py]:::sim
+    S_TRACK[track_loader.py<br/>multi-track aware]:::sim
+    S_GOLD[gold_standard.py]:::sim
+    S_GRADE[corner_grader.py]:::sim
+    S_ANAL[analytics.py<br/>13+ analysers]:::sim
+    S_HL[highlight_finder.py]:::sim
+    S_PROF[driver_profile.py]:::sim
+    S_ANALYZER[session_analyzer.py]:::sim
+    S_COACH[coach_engine.py<br/>RuleCoach / LitertCoach]:::sim
+    S_AUDIO[audio_engine.py]:::sim
+    S_SONIC[sonic_model_v2.py]:::sim
+    S_APP[pitwall_app.py]:::sim
+    S_LAPDET[lap_detector<br/>NEW]:::sim
+    S_PEDAL[pedal_classifier<br/>NEW]:::sim
+    S_BAND[corner_bander<br/>NEW]:::sim
+  end
+
+  subgraph DB["💾 DuckDB"]
+    direction TB
+    T_S[(sessions)]:::store
+    T_L[(laps)]:::store
+    T_T[(telemetry)]:::store
+    T_V[(video_frames)]:::store
+    T_N[(coaching_notes)]:::store
+    T_E[(driver_events)]:::store
+  end
+
+  subgraph DATA["📂 data/"]
+    direction TB
+    D_TRACKS[/data/tracks/<br/>&lt;id&gt;.json/]:::data
+    D_REAL[/sonoma_real_gps.json/]:::data
+    D_GOLD[/reference/<br/>sonoma_gold.json/]:::data
+    D_THUMB[/markers/sonoma/<br/>*.jpg/]:::data
+  end
+
+  subgraph FE["📱 Flutter / Kotlin"]
+    direction TB
+    UI_HUD[on-track HUD]:::ui
+    UI_PADDOCK[paddock review]:::ui
+    UI_MAP[track map overlay]:::ui
+    UI_CHART[charts<br/>box-plots, lines]:::ui
+    UI_EVOL[evolution<br/>hero card]:::ui
+  end
+
+  RL --> BULK & B_IMPORT
+  OBD --> B_FRAMES
+  CAM --> B_VFRAMES
+
+  BULK --> B_IMPORT
+  EXTRACT -.feeds.-> D_GOLD
+  GPS_IMP -.feeds.-> D_REAL
+  ENRICH -.feeds.-> D_TRACKS
+  THUMB -.feeds.-> D_THUMB
+  BEST -.diagnostics.-> T_T
+  VAL -.smoke-tests.-> B_HEALTH
+
+  BRG_INGEST --> T_T & T_V & T_N & T_L
+  BRG_COACH --> S_COACH
+  BRG_QUERY --> S_ANALYZER & S_LAPDET & S_PEDAL & S_BAND
+  BRG_META --> S_TRACK & S_SONOMA
+  BRG_PROFILE --> S_PROF & S_ANALYZER
+
+  S_LAPDET --> T_T & T_L
+  S_PEDAL --> T_T
+  S_BAND --> T_T
+
+  S_ANALYZER --> S_GRADE & S_ANAL & S_HL & S_GOLD & S_PROF
+  S_COACH --> S_SONOMA & S_TRACK
+  S_GRADE --> S_SONOMA
+  S_HL --> S_SONOMA
+  S_PROF --> T_E
+  S_GOLD -.reads.-> D_GOLD
+  S_TRACK -.reads.-> D_TRACKS & D_REAL
+  S_APP --> S_COACH & S_SONIC & S_TRACK & S_VBO
+
+  BRG_QUERY --> UI_HUD & UI_PADDOCK & UI_CHART & UI_MAP
+  BRG_PROFILE --> UI_EVOL
+  D_THUMB --> UI_MAP
+  D_REAL --> UI_MAP
+```
+
+This is the canonical "what's in the box" diagram — print it and tape it to the rig.
+
+---
+
+## Endpoint × DuckDB table read/write matrix
+
+Which tables each endpoint touches. Useful when reasoning about migration safety: changing a column shape only affects the rows in the **R** column; deleting an endpoint frees nothing in the **W** column unless every other writer is also gone.
+
+```mermaid
+flowchart LR
+  classDef tab fill:#1a3a52,stroke:#4a6e8a,color:#e0e0e0
+  classDef ep fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
+
+  subgraph T["DuckDB tables"]
+    T_S[(sessions)]:::tab
+    T_L[(laps)]:::tab
+    T_T[(telemetry)]:::tab
+    T_V[(video_frames)]:::tab
+    T_N[(coaching_notes)]:::tab
+    T_E[(driver_events)]:::tab
+  end
+
+  EP_FRAMES["/session/&lt;id&gt;/frames"]:::ep
+  EP_VFRAMES["/session/&lt;id&gt;/video_frames"]:::ep
+  EP_IMPORT["/session/import"]:::ep
+  EP_ANALYZE["/analyze"]:::ep
+  EP_DEBRIEF["/coach/debrief"]:::ep
+  EP_LAPTAB["/lap_time_table /sector_times<br/>/ideal_lap /lap_time_distribution"]:::ep
+  EP_PEDAL["/pedal_behavior<br/>/throttle_corner_box<br/>/corner_classification<br/>/straight_line_speed<br/>/brake_acceleration"]:::ep
+  EP_EVOL["/driver/&lt;id&gt;/evolution"]:::ep
+  EP_PROFILE["/driver/&lt;id&gt;/profile"]:::ep
+  EP_SCORE["/scorecard /highlights /stats<br/>/friction_circle /hustle_map<br/>/eob /incidents /map /clips /sync"]:::ep
+
+  EP_FRAMES -- W --> T_T
+  EP_VFRAMES -- W --> T_V
+  EP_IMPORT -- W --> T_S & T_T & T_L
+  EP_ANALYZE -- W --> T_N
+  EP_DEBRIEF -- R --> T_T
+  EP_DEBRIEF -- W --> T_E
+  EP_LAPTAB -- R --> T_T & T_L
+  EP_PEDAL -- R --> T_T
+  EP_EVOL -- R --> T_S & T_L & T_T & T_E
+  EP_PROFILE -- R --> T_E
+  EP_SCORE -- R --> T_T & T_V
+```
+
+**Rule of thumb:** `telemetry` is the hottest read table — most analysis endpoints touch it. `driver_events` is append-only and small; safe to add columns. `coaching_notes` is the only table written by the live `/analyze` path, so it accumulates fast — consider a TTL prune in a future migration.
 
 ---
 
