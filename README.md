@@ -4,6 +4,8 @@
 
 Production deployment of the [Pitwall](../forza/) architecture for the Trustable AI sprint (April--May 2026). Coaches drivers in real time at Sonoma Raceway using Gemma 4 on Pixel 10 TPU (reflexive hot path) and Gemini 3.0 on Vertex AI (strategic warm path), connected by the Antigravity store-and-forward pipeline.
 
+**[Watch the Demo Video](https://drive.google.com/file/d/1qmO_r6clIHjOjHjl7l7d-wrt26zy3xq8/view?usp=sharing)**
+
 ## Architecture
 
 ```
