@@ -65,8 +65,7 @@ class SessionManager:
         *,
         driver_level: str = "intermediate",
         coach_kind: str = "auto",
-        coach_url: str = "http://127.0.0.1:8080",
-        coach_model: str = "local",
+        tflite_model_path: str = "",
         voice_enabled: bool = True,
     ):
         self.track = load_track(track_path)
@@ -96,9 +95,8 @@ class SessionManager:
         self.driver_level = driver_level
         self.coach = make_coach(
             kind=coach_kind,
-            base_url=coach_url,
-            model=coach_model,
             driver_level=driver_level,
+            tflite_model_path=tflite_model_path,
         )
         self.arbiter = CoachArbiter(cooldown_s=3.0, stale_s=5.0)
         print(f"  Coach: {self.coach.name} (driver={driver_level})")
@@ -204,8 +202,7 @@ def run_simple(args):
         args.track, model_path,
         driver_level=args.level,
         coach_kind=args.coach,
-        coach_url=args.coach_url,
-        coach_model=args.coach_model,
+        litert_model_path=args.litert_model,
         voice_enabled=args.voice_enabled,
     )
     print(f"Track: {session.track.name} ({session.track.track_length:.0f}m, {len(session.track.corners)} corners)")
@@ -334,7 +331,7 @@ if HAS_TEXTUAL:
 
         def __init__(self, track_path, replay_path=None, speed=1.0,
                      level="intermediate", coach="auto",
-                     coach_url="http://127.0.0.1:8080", coach_model="local",
+                     tflite_model_path="",
                      voice_enabled=True):
             super().__init__()
             self.track_path = track_path
@@ -343,8 +340,7 @@ if HAS_TEXTUAL:
             self.session = None
             self._level = level
             self._coach = coach
-            self._coach_url = coach_url
-            self._coach_model = coach_model
+            self._tflite_model_path = tflite_model_path
             self._voice_enabled = voice_enabled
 
         def compose(self) -> ComposeResult:
@@ -366,8 +362,7 @@ if HAS_TEXTUAL:
                 self.track_path, model_path,
                 driver_level=self._level,
                 coach_kind=self._coach,
-                coach_url=self._coach_url,
-                coach_model=self._coach_model,
+                tflite_model_path=self._tflite_model_path,
                 voice_enabled=self._voice_enabled,
             )
             self.query_one("#status_bar").update(
@@ -458,12 +453,11 @@ def main():
                         choices=["beginner", "intermediate", "pro"],
                         help="Driver level — tunes coach phrasing")
     parser.add_argument("--coach", default="auto",
-                        choices=["auto", "rule", "llamacpp", "ollama", "openai"],
-                        help="Coach engine. 'auto' tries llama.cpp then falls back to rule.")
-    parser.add_argument("--coach-url", default="http://127.0.0.1:8080",
-                        help="OpenAI-compatible base URL (llama.cpp llama-server default)")
-    parser.add_argument("--coach-model", default="local",
-                        help="Model name to send in the API request (any string for llama.cpp)")
+                        choices=["auto", "rule", "litert"],
+                        help="Coach engine. 'auto' tries on-device LiteRT-LM, falls back to rule.")
+    parser.add_argument("--litert-model", default="",
+                        help="Path to Gemma 4 LiteRT-LM .task file. If empty, LitertCoach "
+                             "probes ~/storage/shared/Pitwall/models/ and ./models/.")
     parser.add_argument("--no-voice", action="store_true",
                         help="Suppress TTS playback (still prints/displays voice lines). "
                              "Auto-enabled when --speed != 1.0 to avoid swamping the audio daemon.")
@@ -485,7 +479,7 @@ def main():
         app = PitwallTUI(
             args.track, args.replay, args.speed,
             level=args.level, coach=args.coach,
-            coach_url=args.coach_url, coach_model=args.coach_model,
+            tflite_model_path=args.tflite_model,
             voice_enabled=args.voice_enabled,
         )
         app.run()

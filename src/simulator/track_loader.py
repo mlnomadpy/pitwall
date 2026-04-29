@@ -10,6 +10,23 @@ from pathlib import Path
 
 
 @dataclass
+class MarkerDef:
+    """A named visual / brake / apex reference point on the track.
+
+    `kind` is one of "brake_ref", "apex_ref", "turn_in_ref", "exit_ref",
+    "visual", "nickname". `distance` is the cumulative track distance in
+    metres. `corner` is the canonical corner name this marker belongs to.
+    """
+    id: str
+    kind: str
+    label: str
+    distance: float
+    corner: str
+    source: str = ""
+    note: str = ""
+
+
+@dataclass
 class CornerDef:
     name: str
     number: int
@@ -25,6 +42,9 @@ class CornerDef:
     brake_distance: float   # meters before entry where braking starts
     brake_pressure: float   # typical peak bar
     elevation_change: float # meters
+    nicknames: list[str] = None
+    coaching_tip: str = ""
+    markers: list[MarkerDef] = None
 
 
 @dataclass
@@ -45,6 +65,23 @@ class TrackMap:
     sectors: list[SectorDef]
     elevation_profile: list[tuple[float, float]]  # (distance, altitude)
     reference_line: list[tuple[float, float, float]]  # (distance, lat, lon)
+    markers: list[MarkerDef] = None
+    intel_notes: dict = None
+
+
+def _markers_from_corner(c: dict) -> list[MarkerDef]:
+    out = []
+    for m in c.get("markers", []) or []:
+        out.append(MarkerDef(
+            id=m.get("id", ""),
+            kind=m.get("kind", "visual"),
+            label=m.get("label", ""),
+            distance=float(m.get("distance", 0)),
+            corner=m.get("corner", c.get("name", "")),
+            source=m.get("source", ""),
+            note=m.get("note", ""),
+        ))
+    return out
 
 
 def load_track(path: object) -> TrackMap:
@@ -71,6 +108,9 @@ def load_track(path: object) -> TrackMap:
             brake_distance=brk.get("distance_before_entry", 0),
             brake_pressure=brk.get("pressure_bar", 0),
             elevation_change=c.get("elevation_change_m", 0),
+            nicknames=c.get("nicknames", []) or [],
+            coaching_tip=c.get("coaching_tip", "") or "",
+            markers=_markers_from_corner(c),
         ))
 
     sectors = []
@@ -85,6 +125,24 @@ def load_track(path: object) -> TrackMap:
     elev = [(e["distance"], e["altitude"]) for e in data.get("elevation_profile", [])]
     ref = [(r["distance"], r["lat"], r["lon"]) for r in data.get("reference_line", [])]
 
+    # Flat markers list (top-level array in JSON; falls back to flattening corners)
+    flat_markers = []
+    if isinstance(data.get("markers"), list):
+        for m in data["markers"]:
+            flat_markers.append(MarkerDef(
+                id=m.get("id", ""),
+                kind=m.get("kind", "visual"),
+                label=m.get("label", ""),
+                distance=float(m.get("distance", 0)),
+                corner=m.get("corner", ""),
+                source=m.get("source", ""),
+                note=m.get("note", ""),
+            ))
+    else:
+        for c in corners:
+            flat_markers.extend(c.markers or [])
+    flat_markers.sort(key=lambda m: m.distance)
+
     return TrackMap(
         name=data.get("name", "Unknown"),
         track_length=data.get("track_length_m", 0),
@@ -95,6 +153,8 @@ def load_track(path: object) -> TrackMap:
         sectors=sectors,
         elevation_profile=elev,
         reference_line=ref,
+        markers=flat_markers,
+        intel_notes=data.get("intel_notes", {}) or {},
     )
 
 
@@ -178,6 +238,58 @@ def get_reference_position(track: TrackMap, distance: float) -> object:
 
     d, lat, lon = track.reference_line[-1]
     return (lat, lon)
+
+
+def find_nearest_marker(
+    track: TrackMap,
+    distance: float,
+    *,
+    kind: str = None,
+    corner: str = None,
+    lookahead: float = 250.0,
+) -> object:
+    """Find the next marker within `lookahead` metres ahead of the car.
+
+    `kind` filters by marker kind (e.g. "brake_ref"). `corner` filters to
+    markers attached to a specific corner name (e.g. "Turn 11"). Returns
+    None when nothing matches.
+    """
+    if not track.markers:
+        return None
+    track_dist = distance % track.track_length if track.track_length else distance
+    best = None
+    best_gap = float("inf")
+    for m in track.markers:
+        if kind and m.kind != kind:
+            continue
+        if corner and m.corner != corner:
+            continue
+        gap = (m.distance - track_dist) % track.track_length if track.track_length else m.distance - track_dist
+        if 0 < gap < lookahead and gap < best_gap:
+            best = m
+            best_gap = gap
+    return best
+
+
+def find_marker_for_next_corner(
+    track: TrackMap,
+    distance: float,
+    *,
+    kind: str = "brake_ref",
+    lookahead: float = 250.0,
+) -> object:
+    """Convenience: pick the most relevant marker for the upcoming corner.
+
+    Walks through corners in lookahead range and returns the closest marker
+    of the requested kind belonging to that corner. Falls back to any marker
+    of `kind` within `lookahead` if no corner-attached one is found.
+    """
+    nxt = find_nearest_corner(track, distance, lookahead=lookahead)
+    if nxt is not None:
+        m = find_nearest_marker(track, distance, kind=kind, corner=nxt.name, lookahead=lookahead)
+        if m is not None:
+            return m
+    return find_nearest_marker(track, distance, kind=kind, lookahead=lookahead)
 
 
 def cross_track_error(track: TrackMap, distance: float, lat: float, lon: float) -> float:

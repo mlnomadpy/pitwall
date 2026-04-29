@@ -134,35 +134,39 @@ curl -s http://127.0.0.1:8765/health | python3 -m json.tool
 ```bash
 # In Termux on the device:
 pkg install python git
-pip install flask duckdb
+pip install flask duckdb mediapipe
+
+# Push the on-device LLM artifact into shared storage, e.g.:
+mkdir -p ~/storage/shared/Pitwall/models/
+# Download gemma-4-E2B-it.task from huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
 
 # Clone the repo or copy src/simulator/ + tools/ to the device, then:
-python tools/pitwall_bridge.py --track src/simulator/sonoma.json &
+python tools/pitwall_bridge.py --coach litert \
+    --litert-model ~/storage/shared/Pitwall/models/gemma-4-E2B-it.task &
 ```
 
-The app connects to `127.0.0.1:8765` on the same device loopback — no port forwarding needed.
+The Flutter app connects to `127.0.0.1:8765` on the same device loopback — no port forwarding needed.
 
 #### Warm Path Priority
 
-Every 7.5 seconds of telemetry is analysed in this order:
+The project committed to **on-device coaching only** (per [`docs/adr/012-coach-engine-adapter.md`](docs/adr/012-coach-engine-adapter.md)). Every 7.5 seconds of telemetry is analysed in this order:
 
 | Tier | Transport | Latency | Requires |
 |------|-----------|---------|----------|
 | 1 | `127.0.0.1:8765/analyze` (bridge) | < 50ms | Bridge running |
-| 2 | Gemini API (`gemini-2.5-flash`) | 1–3s | `GEMINI_API_KEY` set |
-| 3 | Mock fallback | 0ms | Nothing (always works) |
+| 2 | Mock fallback | 0ms | Nothing (always works, used for tests / when bridge is unreachable) |
 
 ### 4 — Gemma On-Device Model (Hot Path)
 
-The reflexive hot path uses Gemma 3 1B INT4 running on the Pixel 10 TPU. Install it once:
+Per [`docs/adr/013-frontend-backend-boundary.md`](docs/adr/013-frontend-backend-boundary.md), the backend owns inference. `LitertCoach` runs Gemma 4 E2B in-process via MediaPipe Genai's LiteRT-LM runtime; the legacy Kotlin `GemmaEngine.kt` is deprecated.
 
 ```bash
-# Download gemma-3-1b-it-int4.bin from Google AI Hub, then:
-~/Library/Android/sdk/platform-tools/adb push gemma-3-1b-it-int4.bin \
-    /data/data/com.pitwall.app/files/
+# Download gemma-4-E2B-it.task from huggingface.co/litert-community/gemma-4-E2B-it-litert-lm
+mkdir -p ~/storage/shared/Pitwall/models/
+# adb push (from desktop) or wget (in Termux) the .task file there
 ```
 
-Without the model file, `GemmaEngine` logs a warning and the hot path is disabled — the warm path and mock coaching still work normally.
+Without the `.task` file, `LitertCoach` logs a warning and the bridge falls back to `RuleCoach` (templated pace notes). The system still works, just without the LLM voice.
 
 ### 5 — Live Hardware (On-Track)
 
@@ -175,30 +179,6 @@ Pair the following devices via Bluetooth before tapping **START SESSION**:
 | Pixel Earbuds | Audio coaching output via TTS |
 
 The `PitwallService` foreground service manages all three connections and keeps coaching active with the screen off.
-
-### 6 — Gemini API Key (Warm Path Tier 2)
-
-When the Python bridge is not running, the app falls back to Google's Gemini API.
-Credentials live in `flutter/android/local.properties` — **gitignored, never commit this file**.
-
-
-**Step 1 — Add it to `local.properties`:**
-
-```properties
-# flutter/android/local.properties
-GEMINI_API_KEY=AIzaSy...
-```
-
-**Step 2 — Rebuild:**
-
-```bash
-cd flutter && flutter run
-```
-
-Gradle bakes the key into `BuildConfig` at compile time. The key is used as
-`?key=` query parameter on `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`.
-
-> **Tip:** The bridge (Tier 1) intercepts every burst when running — Gemini is only called if the bridge is unreachable. For on-track use, run the bridge in Termux and skip the API key entirely.
 
 ## Team 2 (Intermediate, BMW M3)
 

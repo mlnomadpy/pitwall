@@ -2,6 +2,14 @@
 
 Three layers of coaching feedback: real-time sonic cues (during driving), post-corner quick feedback (between corners), and full session review (off-track).
 
+!!! info "Sonoma-specific data points feeding each layer"
+    Layer 1 (sonic cues) is unchanged. Layer 2 (post-corner one-liner) and Layer 3 (off-track review) draw on the Sonoma research delivered 2026-04-28:
+
+    - Per-corner brake refs + apex refs in [`markers.md`](markers.md) feed the verbal coach with named landmarks ("brake at the bridge", "apex at the third tire stack").
+    - The [Sonoma Track Intelligence](sonoma_track_intelligence.md) doc supplies common-mistake patterns ("most drivers brake too late at T4", "T11 has no painted brake board") that drive the post-corner Gemma one-liner.
+    - The [T-Rod Sonoma Session](trod_sonoma_session.md) transcript provides canonical pro phrasings ("Distance is king", "Wait, you're not at the apex yet", "Trust the curb") for the off-track narrative debrief.
+    - The bridge persists every emitted pace note to the DuckDB `coaching_notes` table, indexed by `session_id` and `distance_m` — Layer 3's review screen scrubs them back-to-back with telemetry on the lap timeline. See [`api.md`](api.md#session-management).
+
 ---
 
 ## The Three Layers
