@@ -137,7 +137,20 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch { _commands.emit(SessionCommand.Stop) }
         telemetryJob?.cancel()
         coachingJob?.cancel()
-        _ui.update { PitwallUiState() }
+        _ui.update { state -> 
+            state.copy(
+                mode = AppMode.SETUP,
+                telemetry = null,
+                lastCoaching = null,
+                isStarting = false,
+                slowSinceMs = null,
+                laps = emptyList(),
+                insights = emptyList(),
+                insightsLoading = false,
+                insightsError = false,
+                cornerStats = emptyMap(),
+            )
+        }
     }
 
     fun enterPaddock() {

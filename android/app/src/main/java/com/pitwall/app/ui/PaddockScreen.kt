@@ -52,6 +52,7 @@ fun PaddockScreen(
     insightsError: Boolean,
     cornerStats: Map<String, CornerSessionStats>,
     trackOutline: TrackOutline?,
+    useMph: Boolean,
     onReturnToTrack: () -> Unit,
     onRefreshInsights: () -> Unit,
 ) {
@@ -71,7 +72,7 @@ fun PaddockScreen(
             Spacer(Modifier.width(8.dp))
             Text("ENGINEER MODE", color = PitwallColors.TextDim, fontSize = 10.sp, letterSpacing = 2.sp)
             Spacer(Modifier.weight(1f))
-            if (telemetry != null && telemetry.speedKmh > 10f) {
+            if (telemetry != null && (if (useMph) telemetry.speedMph else telemetry.speedKmh) > 10f) {
                 IconButton(onClick = onReturnToTrack) {
                     Icon(Icons.Outlined.DirectionsCar, null, tint = PitwallColors.GripGreen)
                 }
@@ -103,8 +104,8 @@ fun PaddockScreen(
             when (selectedTab) {
                 0 -> LapsTab(laps)
                 1 -> InsightsTab(insights, insightsLoading, insightsError, onRefreshInsights)
-                2 -> SpeedTraceTab(telemetry, trackOutline)
-                3 -> CornersTab(cornerStats, trackOutline)
+                2 -> SpeedTraceTab(telemetry, trackOutline, useMph)
+                3 -> CornersTab(cornerStats, trackOutline, useMph)
                 4 -> FrictionTab(telemetry)
                 5 -> ProfileTab(cornerStats)
             }
@@ -247,13 +248,13 @@ private fun InsightCard(insight: DriverInsight) {
 // ── SPEED TRACE ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline?) {
+private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline?, useMph: Boolean) {
     // Accumulate up to 300 speed values in a ring
     val speeds = remember { ArrayDeque<Float>(300) }
     LaunchedEffect(telemetry) {
         telemetry?.let {
             if (speeds.size >= 300) speeds.removeFirst()
-            speeds.addLast(it.speedKmh)
+            speeds.addLast(if (useMph) it.speedMph else it.speedKmh)
         }
     }
     val speedSnapshot = speeds.toList()
@@ -282,12 +283,13 @@ private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline
             if (speedSnapshot.size < 2) {
                 Text("Collecting data…", color = PitwallColors.TextDim, fontSize = 13.sp)
             } else {
-                val rawMax = speedSnapshot.maxOrNull()?.coerceAtLeast(50f) ?: 200f
-                // Snap max speed to next 20 for a cleaner Y-axis (e.g. 105 -> 120)
-                val maxSpeed = ((rawMax / 20).toInt() + 1) * 20f
+                val rawMax = speedSnapshot.maxOrNull()?.coerceAtLeast(if (useMph) 30f else 50f) ?: (if (useMph) 120f else 200f)
+                // Snap max speed to next 10 or 20 for a cleaner Y-axis
+                val snap = if (useMph) 10f else 20f
+                val maxSpeed = ((rawMax / snap).toInt() + 1) * snap
 
                 Row(Modifier.fillMaxSize()) {
-                // Y-axis labels (Speed km/h)
+                // Y-axis labels (Speed)
                 Column(
                     Modifier.fillMaxHeight().width(32.dp).padding(bottom = 24.dp),
                     verticalArrangement = Arrangement.SpaceBetween,
@@ -371,7 +373,7 @@ private fun SpeedTraceTab(telemetry: TelemetryFrame?, trackOutline: TrackOutline
 // ── CORNERS ───────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CornersTab(cornerStats: Map<String, CornerSessionStats>, trackOutline: TrackOutline?) {
+private fun CornersTab(cornerStats: Map<String, CornerSessionStats>, trackOutline: TrackOutline?, useMph: Boolean) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) {
         if (cornerStats.isEmpty()) {
             Text("Collecting corner data…", color = PitwallColors.TextDim, fontSize = 13.sp)
@@ -379,7 +381,9 @@ private fun CornersTab(cornerStats: Map<String, CornerSessionStats>, trackOutlin
             // Sort by largest loss (totalDeltaKmh negative means observed is slower than ref)
             val sortedStats = cornerStats.values.sortedBy { it.totalDeltaKmh }
             sortedStats.forEach { stat ->
-                val delta = stat.totalDeltaKmh
+                val speedFactor = if (useMph) 0.621371f else 1f
+                val speedUnit = if (useMph) "mph" else "km/h"
+                val delta = stat.totalDeltaKmh * speedFactor
                 val name = stat.name
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 6.dp),
@@ -395,7 +399,7 @@ private fun CornersTab(cornerStats: Map<String, CornerSessionStats>, trackOutlin
                     }
                     Spacer(Modifier.width(16.dp))
                     val sign = if (delta >= 0) "+" else ""
-                    Text("$sign${String.format("%.1f", delta)} km/h", color = if (delta >= 0) PitwallColors.ThrottleGreen else PitwallColors.GripRed,
+                    Text("$sign${String.format("%.1f", delta)} $speedUnit", color = if (delta >= 0) PitwallColors.ThrottleGreen else PitwallColors.GripRed,
                         fontFamily = MonoFamily, fontSize = 13.sp, modifier = Modifier.width(76.dp))
                 }
                 // Detail row showing entry, apex, exit speeds
@@ -403,9 +407,9 @@ private fun CornersTab(cornerStats: Map<String, CornerSessionStats>, trackOutlin
                     Modifier.fillMaxWidth().padding(bottom = 12.dp, start = 116.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("In: ${stat.observedEntryKmh.toInt()} (${stat.refEntryKmh.toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
-                    Text("Mid: ${stat.observedApexKmh.toInt()} (${stat.refApexKmh.toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
-                    Text("Out: ${stat.observedExitKmh.toInt()} (${stat.refExitKmh.toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
+                    Text("In: ${(stat.observedEntryKmh * speedFactor).toInt()} (${(stat.refEntryKmh * speedFactor).toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
+                    Text("Mid: ${(stat.observedApexKmh * speedFactor).toInt()} (${(stat.refApexKmh * speedFactor).toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
+                    Text("Out: ${(stat.observedExitKmh * speedFactor).toInt()} (${(stat.refExitKmh * speedFactor).toInt()})", color = PitwallColors.TextDim, fontSize = 10.sp)
                 }
             }
         }

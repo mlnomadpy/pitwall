@@ -13,11 +13,13 @@ fun PitwallApp(viewModel: PitwallViewModel) {
                 uiState = state,
                 onStartSession = { path, level -> viewModel.startSession(path, level) },
                 onLevelChange = { viewModel.setDriverLevel(it) },
+                onUseMphChange = { viewModel.setUseMph(it) },
             )
             AppMode.ON_TRACK -> OnTrackScreen(
                 telemetry = state.telemetry,
                 lastCoaching = state.lastCoaching,
                 trackOutline = state.trackOutline,
+                useMph = state.useMph,
                 onEnterPaddock = { viewModel.enterPaddock() },
                 onReturnToSetup = { viewModel.stopSession() },
             )
@@ -30,6 +32,7 @@ fun PitwallApp(viewModel: PitwallViewModel) {
                 insightsError   = state.insightsError,
                 cornerStats  = state.cornerStats,
                 trackOutline = state.trackOutline,
+                useMph       = state.useMph,
                 onReturnToTrack = { viewModel.returnToTrack() },
                 onRefreshInsights = { viewModel.fetchPendingInsights() },
             )

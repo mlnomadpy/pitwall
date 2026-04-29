@@ -33,6 +33,7 @@ fun OnTrackScreen(
     telemetry: TelemetryFrame?,
     lastCoaching: CoachingMessage?,
     trackOutline: TrackOutline?,
+    useMph: Boolean,
     onEnterPaddock: () -> Unit,
     onReturnToSetup: () -> Unit,
 ) {
@@ -144,7 +145,9 @@ fun OnTrackScreen(
             Spacer(Modifier.width(24.dp))
             LapTimer(telemetry?.lapTime ?: 0f)
             Spacer(Modifier.weight(1f))
-            Text("${telemetry?.speedKmh?.toInt() ?: 0} km/h",
+            val speedDisplay = if (useMph) telemetry?.speedMph?.toInt() ?: 0 else telemetry?.speedKmh?.toInt() ?: 0
+            val speedUnit = if (useMph) "mph" else "km/h"
+            Text("$speedDisplay $speedUnit",
                 color = PitwallColors.TextDim, fontSize = 12.sp, fontFamily = MonoFamily)
         }
 

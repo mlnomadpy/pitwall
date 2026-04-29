@@ -32,6 +32,7 @@ fun SetupScreen(
     uiState: PitwallUiState,
     onStartSession: (replayPath: String?, level: String) -> Unit,
     onLevelChange: (String) -> Unit,
+    onUseMphChange: (Boolean) -> Unit,
 ) {
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -88,6 +89,41 @@ fun SetupScreen(
                         label = {
                             Text(
                                 level.uppercase(),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PitwallColors.GripGreen.copy(alpha = 0.15f),
+                            selectedLabelColor = PitwallColors.GripGreen,
+                            containerColor = PitwallColors.Surface,
+                            labelColor = PitwallColors.TextDim,
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = selected,
+                            selectedBorderColor = PitwallColors.GripGreen,
+                            borderColor = PitwallColors.Border,
+                        ),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            // ── Units ─────────────────────────────────────────────────────────
+            SectionLabel("UNITS")
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(false to "km/h", true to "mph").forEach { (isMph, label) ->
+                    val selected = uiState.useMph == isMph
+                    FilterChip(
+                        selected = selected,
+                        onClick = { onUseMphChange(isMph) },
+                        label = {
+                            Text(
+                                label.uppercase(),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
