@@ -50,23 +50,12 @@ sys.path.insert(0, os.path.abspath(SIM_DIR))
 
 try:
     from sonic_model import compute_cues, AudioCue, Pattern
-    from track_loader import (
-        load_track, find_nearest_corner, distance_to_corner,
-        is_in_corner, is_past_apex,
-    )
+    from track_loader import load_track, find_nearest_corner, distance_to_corner
     HAS_SONIC = True
     print("✓  sonic_model loaded")
 except ImportError as e:
     HAS_SONIC = False
     print(f"⚠  sonic_model not available ({e}) — falling back to rule engine")
-
-try:
-    from coach_engine import make_coach, build_context, CoachArbiter
-    HAS_COACH = True
-    print("✓  coach_engine loaded")
-except ImportError as e:
-    HAS_COACH = False
-    print(f"⚠  coach_engine not available ({e}) — pace notes disabled")
 
 try:
     import duckdb
@@ -78,10 +67,12 @@ except ImportError:
 # ── Global state ───────────────────────────────────────────────────────────────
 app = Flask(__name__)
 _track = None           # loaded on startup via --track
-_coach = None           # CoachEngine instance — instantiated once at startup
-_arbiter = None         # CoachArbiter — gates pace notes by priority + cooldown
 _db_lock = threading.Lock()
 DB_PATH = os.path.join(os.path.dirname(__file__), "pitwall_sessions.duckdb")
+
+# Session burst accumulator — cleared by POST /session/reset
+_session_bursts: list = []
+_burst_lock = threading.Lock()
 
 
 # ── DuckDB helpers ─────────────────────────────────────────────────────────────
@@ -90,20 +81,8 @@ def get_db():
         return None
     conn = duckdb.connect(DB_PATH)
     conn.execute("""
-        CREATE SEQUENCE IF NOT EXISTS sessions_id_seq;
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id    VARCHAR PRIMARY KEY,
-            driver        VARCHAR,
-            driver_level  VARCHAR,
-            track         VARCHAR,
-            car           VARCHAR,
-            started_at    TIMESTAMP DEFAULT now(),
-            ended_at      TIMESTAMP,
-            note          VARCHAR
-        );
-        CREATE SEQUENCE IF NOT EXISTS laps_id_seq;
         CREATE TABLE IF NOT EXISTS laps (
-            id            INTEGER PRIMARY KEY DEFAULT nextval('laps_id_seq'),
+            id            INTEGER PRIMARY KEY,
             session_id    VARCHAR,
             lap_number    INTEGER,
             lap_time_s    DOUBLE,
@@ -112,17 +91,7 @@ def get_db():
             max_combo_g   DOUBLE,
             coast_pct     DOUBLE,
             recorded_at   TIMESTAMP DEFAULT now()
-        );
-        CREATE SEQUENCE IF NOT EXISTS notes_id_seq;
-        CREATE TABLE IF NOT EXISTS coaching_notes (
-            id            INTEGER PRIMARY KEY DEFAULT nextval('notes_id_seq'),
-            session_id    VARCHAR,
-            burst_id      INTEGER,
-            distance_m    DOUBLE,
-            text          VARCHAR,
-            source        VARCHAR,
-            recorded_at   TIMESTAMP DEFAULT now()
-        );
+        )
     """)
     return conn
 
@@ -211,84 +180,6 @@ def _sonic_coaching(burst: dict) -> tuple[str, list]:
     return coaching, serialised
 
 
-def _pace_note(burst: dict) -> tuple[str, str]:
-    """Build a rally-style pace note from a telemetry burst using coach_engine.
-
-    Returns (text, source_label). Empty text means "say nothing this burst".
-    Source label is the engine name (e.g. "rule", "llamacpp") or "" if disabled.
-
-    The bridge sees burst SUMMARIES (avg_speed, max_brake, corners_visited),
-    not per-frame data. We synthesize a representative frame at the burst's
-    peak-stress moment so coach_engine.match_bentley_concept fires on the
-    most coachable instant within the burst window.
-    """
-    if not HAS_COACH or _coach is None or _track is None:
-        return "", ""
-
-    from types import SimpleNamespace
-    import time as _t
-
-    avg_speed_kmh = float(burst.get("avg_speed_kmh", 0))
-    max_combo_g = float(burst.get("max_combo_g", 0))
-    distance_m = float(burst.get("distance_m", 0))
-
-    # Synthetic peak-stress frame — use max where safety-critical, avg where
-    # representative. The 0.7 split between gLat/gLong is a rough projection;
-    # the burst doesn't carry the per-frame breakdown.
-    frame = SimpleNamespace(
-        timestamp=_t.time(),
-        speed=avg_speed_kmh / 3.6,
-        brake_pressure=float(burst.get("max_brake_bar", 0)),
-        throttle=float(burst.get("avg_throttle_pct", 0)),
-        g_lat=float(burst.get("max_lateral_g", max_combo_g * 0.7)),
-        g_long=float(burst.get("max_long_g", max_combo_g * 0.7)),
-        distance=distance_m,
-    )
-
-    # Resolve next corner + in_corner / past_apex from track context
-    next_corner = find_nearest_corner(_track, distance_m) if distance_m else None
-    meters_to_entry = (
-        distance_to_corner(_track, distance_m, next_corner)
-        if next_corner else 999.0
-    )
-    in_corner_obj = is_in_corner(_track, distance_m) if distance_m else None
-    past_apex_obj = is_past_apex(_track, distance_m) if distance_m else None
-
-    # If the burst tells us in_corner=True but our distance lookup disagrees,
-    # trust the burst (the Kotlin pipeline knows current state better than
-    # our distance modulo arithmetic).
-    if not in_corner_obj and burst.get("in_corner") and burst.get("corners_visited"):
-        names = burst.get("corners_visited") or []
-        for c in _track.corners:
-            if c.name in names:
-                in_corner_obj = c
-                break
-
-    ctx = build_context(
-        driver_level=getattr(_coach, "driver_level", "intermediate"),
-        track=_track,
-        frame=frame,
-        next_corner=next_corner,
-        meters_to_entry=meters_to_entry,
-        in_corner_obj=in_corner_obj,
-        past_apex=past_apex_obj is not None,
-    )
-    proposal = _coach.propose(ctx)
-    if proposal is None:
-        return "", _coach.name
-
-    # Run through the arbiter so cooldowns + corner suppression apply across
-    # consecutive bursts. on_straight follows the same rule the SessionManager
-    # uses (|gLat| < 0.3G + not in a corner).
-    on_straight = abs(frame.g_lat) < 0.3 and in_corner_obj is None
-    emitted = _arbiter.submit(
-        proposal, now=frame.timestamp, on_straight=on_straight,
-    )
-    if emitted is None:
-        return "", _coach.name
-    return emitted.text, _coach.name
-
-
 def _rule_coaching(burst: dict) -> str:
     """Fallback rule engine — used when sonic_model is unavailable."""
     avg_speed    = burst.get("avg_speed_kmh", 0)
@@ -319,14 +210,12 @@ def _rule_coaching(burst: dict) -> str:
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({
-        "status":       "ok",
-        "version":      "2.1",
-        "engine":       "sonic_model" if HAS_SONIC else "rules",
-        "coach":        _coach.name if _coach else None,
-        "driver_level": getattr(_coach, "driver_level", None) if _coach else None,
-        "track":        _track.name if _track else None,
-        "duckdb":       HAS_DUCKDB,
-        "timestamp":    datetime.utcnow().isoformat(),
+        "status":    "ok",
+        "version":   "2.0",
+        "engine":    "sonic_model" if HAS_SONIC else "rules",
+        "track":     _track.name if _track else None,
+        "duckdb":    HAS_DUCKDB,
+        "timestamp": datetime.utcnow().isoformat(),
     })
 
 
@@ -348,59 +237,32 @@ def analyze():
     burst = request.get_json(force=True, silent=True) or {}
     burst_id = burst.get("burst_id", 0)
 
-    # Tier 1: Full sonic_model pipeline (audio cues + race-engineer-style summary)
+    # Accumulate burst for /insights scoring
+    with _burst_lock:
+        _session_bursts.append(burst)
+
+    # Tier 1: Full sonic_model pipeline
     coaching, cues = _sonic_coaching(burst)
 
-    # Tier 2: Rule fallback (basic threshold rules)
+    # Tier 2: Rule fallback
     if not coaching:
         coaching = _rule_coaching(burst)
         source = "bridge_rules"
     else:
         source = "sonic_model"
 
-    # Rally-style verbal pace note from coach_engine — independent of the
-    # audio cues above. The Flutter side can render either or both.
-    pace_note, coach_source = _pace_note(burst)
-
-    # If the burst tags a session, persist the pace note so /session/<id>
-    # can replay the coaching timeline alongside laps.
-    sid = burst.get("session_id")
-    if pace_note and sid and HAS_DUCKDB:
-        try:
-            with _db_lock:
-                c = get_db()
-                if c is not None:
-                    c.execute(
-                        "INSERT INTO coaching_notes "
-                        "(session_id, burst_id, distance_m, text, source) "
-                        "VALUES (?, ?, ?, ?, ?)",
-                        [sid, burst_id, float(burst.get("distance_m", 0)),
-                         pace_note, coach_source or ""],
-                    )
-                    c.close()
-        except Exception:
-            pass  # bridge must never fail /analyze on a side-effect
-
     return jsonify({
-        "coaching":     coaching,        # original race-engineer summary
-        "pace_note":    pace_note,       # rally-style short verbal cue (may be empty)
-        "coach_source": coach_source,    # "rule" | "llamacpp" | "" if disabled
-        "cues":         cues,            # audio cues for HUD visualisation
-        "burst_id":     burst_id,
-        "source":       source,
+        "coaching":  coaching,
+        "cues":      cues,          # audio cues for future HUD visualisation
+        "burst_id":  burst_id,
+        "source":    source,
     })
 
 
-# ── Session management ────────────────────────────────────────────────────────
+# ── Insights engine ───────────────────────────────────────────────────────────
 
-@app.route("/sessions", methods=["GET"])
-def list_sessions():
-    """List recent sessions, newest first.
-
-    Query params:
-        limit       (int, default 50)
-        active_only (bool, default false) — only sessions without ended_at
-   
+def _score_insights(bursts: list) -> list:
+    """
     Score 4 insight dimensions across accumulated session bursts.
     Returns up to 3 insights sorted by effort ASC, est_gain DESC.
     """
@@ -627,95 +489,19 @@ def get_insights():
 
     insights = _gemini_insights(bursts_snapshot, lap=lap)
     return jsonify({
-        "sessions": [dict(zip(cols, r)) for r in rows],
-        "count":    len(rows),
+        "insights":       insights,
+        "session_bursts": len(bursts_snapshot),
+        "generated_at":   datetime.utcnow().isoformat(),
     })
 
 
-@app.route("/session/start", methods=["POST"])
-def session_start():
-    """Open a new session. Body fields: driver, driver_level, track, car, note.
-
-    Returns the generated session_id (caller may pass their own).
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    sid = data.get("session_id") or _new_session_id(data.get("track"))
-    with _db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"started": False, "error": "duckdb not available"}), 503
-        conn.execute("""
-            INSERT INTO sessions (session_id, driver, driver_level, track, car, note)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, [
-            sid,
-            data.get("driver", ""),
-            data.get("driver_level", "intermediate"),
-            data.get("track", _track.name if _track else ""),
-            data.get("car", ""),
-            data.get("note", ""),
-        ])
-        conn.close()
-    return jsonify({"started": True, "session_id": sid})
-
-
-@app.route("/session/<sid>", methods=["GET"])
-def session_detail(sid: str):
-    """Session record + lap summary + most recent coaching notes."""
-    with _db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        s = conn.execute(
-            "SELECT * FROM sessions WHERE session_id = ?", [sid],
-        ).fetchone()
-        if not s:
-            conn.close()
-            return jsonify({"error": "session not found"}), 404
-        scols = [d[0] for d in conn.description]
-        laps = conn.execute(
-            "SELECT lap_number, lap_time_s, avg_speed_kmh, max_combo_g, coast_pct "
-            "FROM laps WHERE session_id = ? ORDER BY lap_number",
-            [sid],
-        ).fetchall()
-        lcols = [d[0] for d in conn.description]
-        notes = conn.execute(
-            "SELECT burst_id, distance_m, text, source, recorded_at "
-            "FROM coaching_notes WHERE session_id = ? "
-            "ORDER BY recorded_at DESC LIMIT 50",
-            [sid],
-        ).fetchall()
-        ncols = [d[0] for d in conn.description]
-        conn.close()
-    return jsonify({
-        "session":  dict(zip(scols, s)),
-        "laps":     [dict(zip(lcols, r)) for r in laps],
-        "notes":    [dict(zip(ncols, r)) for r in notes],
-        "lap_count": len(laps),
-        "best_lap_s": min((l[1] for l in laps if l[1]), default=None),
-    })
-
-
-@app.route("/session/<sid>/end", methods=["POST"])
-def session_end(sid: str):
-    """Close a session by stamping ended_at."""
-    with _db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"ended": False, "error": "duckdb not available"}), 503
-        n = conn.execute(
-            "UPDATE sessions SET ended_at = now() WHERE session_id = ? AND ended_at IS NULL",
-            [sid],
-        )
-        conn.close()
-    return jsonify({"ended": True, "session_id": sid})
-
-
-def _new_session_id(track: str = None) -> str:
-    """ISO-ish session ID: <track-slug>-<utc-stamp>."""
-    slug = (track or (_track.name if _track else "session")).lower().replace(" ", "-")
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    return f"{slug}-{stamp}"
+@app.route("/session/reset", methods=["POST"])
+def session_reset():
+    """Clear the burst accumulator — call this when a new session starts."""
+    with _burst_lock:
+        count = len(_session_bursts)
+        _session_bursts.clear()
+    return jsonify({"cleared_bursts": count, "status": "ok"})
 
 
 @app.route("/laps", methods=["GET"])
@@ -768,18 +554,6 @@ if __name__ == "__main__":
     parser.add_argument("--track", default=os.path.join(SIM_DIR, "sonoma.json"),
                         help="Path to track JSON (default: src/simulator/sonoma.json)")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--coach", default="auto",
-                        choices=["auto", "rule", "tflite", "off"],
-                        help="Coach engine. 'auto' tries on-device tflite then falls back "
-                             "to rule (templated). 'tflite' forces LiteRT and requires "
-                             "tflite_runtime + a Gemma 4 .tflite model. "
-                             "'off' disables pace_note in /analyze responses.")
-    parser.add_argument("--tflite-model", default="",
-                        help="Path to Gemma 4 .tflite model. If empty, TfliteCoach probes "
-                             "~/storage/shared/Pitwall/models/ and ./models/.")
-    parser.add_argument("--driver-level", default="intermediate",
-                        choices=["beginner", "intermediate", "pro"],
-                        help="Tunes pace-note phrasing per Bentley's 3-pod model")
     args = parser.parse_args()
 
     if HAS_SONIC and os.path.exists(args.track):
@@ -789,27 +563,9 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"⚠  Track load failed: {e}")
 
-    if HAS_COACH and args.coach != "off":
-        try:
-            _coach = make_coach(
-                kind=args.coach,
-                driver_level=args.driver_level,
-                tflite_model_path=args.tflite_model,
-            )
-            _arbiter = CoachArbiter(cooldown_s=3.0, stale_s=5.0)
-            print(f"✓  Coach: {_coach.name} (driver={args.driver_level})")
-            if hasattr(_coach, "health") and _coach.name == "tflite":
-                h = _coach.health()
-                print(f"   tflite: loaded={h.get('loaded')} "
-                      f"tokenizer={h.get('tokenizer')} "
-                      f"err={h.get('error') or '-'}")
-        except Exception as e:
-            print(f"⚠  Coach init failed: {e} — pace notes disabled")
-
     port = args.port
-    print(f"\n🏁  Pitwall Bridge v2.1 on http://127.0.0.1:{port}")
+    print(f"\n🏁  Pitwall Bridge v2 on http://127.0.0.1:{port}")
     print(f"    Engine: {'sonic_model (real cues)' if HAS_SONIC else 'rule fallback'}")
-    print(f"    Coach:  {_coach.name if _coach else 'disabled'}")
     print(f"    DuckDB: {'enabled → ' + DB_PATH if HAS_DUCKDB else 'disabled'}")
     print(f"\n    Emulator tunnel:")
     print(f"    ~/Library/Android/sdk/platform-tools/adb reverse tcp:{port} tcp:{port}\n")

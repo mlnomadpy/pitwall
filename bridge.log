@@ -1,0 +1,133 @@
+✓  sonic_model loaded
+✓  Track: Sonoma Raceway (11 corners)
+
+🏁  Pitwall Bridge v2 on http://127.0.0.1:8765
+    Engine: sonic_model (real cues)
+    DuckDB: enabled → /Users/vijayshankaran/Documents/GitHub/pitwall/tools/pitwall_sessions.duckdb
+
+    Emulator tunnel:
+    ~/Library/Android/sdk/platform-tools/adb reverse tcp:8765 tcp:8765
+
+ * Serving Flask app 'pitwall_bridge'
+ * Debug mode: off
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on http://127.0.0.1:8765
+Press CTRL+C to quit
+127.0.0.1 - - [28/Apr/2026 21:39:10] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:40:36] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:40:41] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:40:46] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:40:51] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:40:56] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:01] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:06] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:11] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:16] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:21] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:26] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:31] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:36] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:42] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:47] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:52] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:41:57] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:02] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:07] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:12] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:17] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:22] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:27] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:32] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:37] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:42] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:47] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:52] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:42:57] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:02] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:07] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:13] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:18] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:23] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:28] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:33] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:38] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:43] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:48] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:43:53] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:08] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:13] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:18] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:23] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:28] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:28] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:29] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:30] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:30] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:31] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:33] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:38] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:43] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:48] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:53] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:44:58] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:03] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:08] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:13] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:18] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:23] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:28] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:33] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:38] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:44] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:49] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:54] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:45:59] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:04] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:09] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:14] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:19] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:24] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:29] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:34] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:39] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:44] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:49] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:54] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:46:59] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:04] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:09] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:14] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:20] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:39] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:44] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:49] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:50] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:54] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:47:59] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:04] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:09] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:14] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:20] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:20] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:25] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:30] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:35] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:40] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:45] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:50] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:50] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:48:55] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:00] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:05] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:10] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:15] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:20] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:23] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:25] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:30] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:34] "GET /insights HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:35] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:40] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:45] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:51] "POST /analyze HTTP/1.1" 200 -
+127.0.0.1 - - [28/Apr/2026 21:49:53] "GET /insights HTTP/1.1" 200 -
