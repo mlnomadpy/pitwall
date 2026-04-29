@@ -385,13 +385,13 @@ def _gemini_insights(bursts: list, lap: int = None) -> list:
     repo_dir = os.path.abspath(os.path.join(base_dir, ".."))
     
     try:
-        with open(os.path.join(repo_dir, "transcript.txt"), "r") as f:
+        with open(os.path.join(repo_dir, "docs/transcript.txt"), "r") as f:
             transcript = f.read()
     except Exception:
         transcript = ""
         
     try:
-        with open(os.path.join(repo_dir, "Performance-Driving-Illustrated-2-23-24.txt"), "r") as f:
+        with open(os.path.join(repo_dir, "docs/Performance-Driving-Illustrated-2-23-24.txt"), "r") as f:
             pedagogy = f.read()[:5000]
     except Exception:
         pedagogy = ""
