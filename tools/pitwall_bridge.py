@@ -54,6 +54,10 @@ _track = None           # loaded on startup via --track
 _db_lock = threading.Lock()
 DB_PATH = os.path.join(os.path.dirname(__file__), "pitwall_sessions.duckdb")
 
+# Session burst accumulator — cleared by POST /session/reset
+_session_bursts: list = []
+_burst_lock = threading.Lock()
+
 
 # ── DuckDB helpers ─────────────────────────────────────────────────────────────
 def get_db():
@@ -217,6 +221,10 @@ def analyze():
     burst = request.get_json(force=True, silent=True) or {}
     burst_id = burst.get("burst_id", 0)
 
+    # Accumulate burst for /insights scoring
+    with _burst_lock:
+        _session_bursts.append(burst)
+
     # Tier 1: Full sonic_model pipeline
     coaching, cues = _sonic_coaching(burst)
 
@@ -233,6 +241,146 @@ def analyze():
         "burst_id":  burst_id,
         "source":    source,
     })
+
+
+# ── Insights engine ───────────────────────────────────────────────────────────
+
+def _score_insights(bursts: list) -> list:
+    """
+    Score 4 insight dimensions across accumulated session bursts.
+    Returns up to 3 insights sorted by effort ASC, est_gain DESC.
+    """
+    if not bursts:
+        return []
+
+    # --- Dimension accumulators ---
+    total_frames   = sum(b.get("frame_count", 1) for b in bursts)
+    coast_frames   = sum(b.get("coast_frames", 0) for b in bursts)
+    trail_frames   = sum(b.get("trail_brake_frames", 0) for b in bursts)
+    corner_bursts  = [b for b in bursts if b.get("corners_visited")]
+    all_g          = [b.get("max_combo_g", 0) for b in bursts]
+    avg_g          = sum(all_g) / len(all_g) if all_g else 0
+    avg_speed      = sum(b.get("avg_speed_kmh", 0) for b in bursts) / len(bursts)
+
+    coast_pct      = (coast_frames / max(total_frames, 1)) * 100
+    grip_headroom  = 2.29 - avg_g   # Gs below the tyre limit
+
+    # Collect corner names with issues
+    coast_corners  = []
+    grip_corners   = []
+    for b in corner_bursts:
+        if (b.get("coast_frames", 0) / max(b.get("frame_count", 1), 1)) > 0.20:
+            coast_corners.extend(b.get("corners_visited", []))
+        if b.get("max_combo_g", 0) < 1.5:
+            grip_corners.extend(b.get("corners_visited", []))
+    coast_corners = list(dict.fromkeys(coast_corners))[:4]  # dedupe, max 4
+    grip_corners  = list(dict.fromkeys(grip_corners))[:4]
+
+    insights = []
+
+    # 1. Coast excess — easiest gain, just lift the foot earlier
+    if coast_pct > 15:
+        est = round(min(coast_pct * 0.03, 1.5), 1)
+        insights.append({
+            "id":             "coast_excess",
+            "title":          "Early Throttle Pickup",
+            "detail":         f"You're coasting {coast_pct:.0f}% of corners. "
+                              f"Get to full throttle at the apex instead of mid-exit. "
+                              f"Every tenth of a second off throttle is lost time.",
+            "corners":        coast_corners,
+            "metric_label":   "Coast",
+            "metric_value":   f"{coast_pct:.0f}%",
+            "effort":         1,
+            "est_gain_s":     est,
+            "evidence_bursts": len([b for b in bursts if b.get("coast_frames", 0) > 0]),
+        })
+
+    # 2. Grip headroom — easy, just carry more speed
+    if avg_g < 1.6 and len(grip_corners) >= 2:
+        est = round(min(grip_headroom * 0.4, 1.0), 1)
+        insights.append({
+            "id":             "grip_headroom",
+            "title":          "Unused Grip Budget",
+            "detail":         f"Peak G averaging {avg_g:.2f}G — tyres support 2.29G. "
+                              f"You have {grip_headroom:.2f}G of headroom. "
+                              f"Carry more entry speed through the corners listed.",
+            "corners":        grip_corners,
+            "metric_label":   "Peak G",
+            "metric_value":   f"{avg_g:.2f}G",
+            "effort":         1,
+            "est_gain_s":     est,
+            "evidence_bursts": len(grip_corners),
+        })
+
+    # 3. Trail braking absent — moderate effort, technique change
+    in_corner_bursts = [b for b in corner_bursts if b.get("in_corner")]
+    if in_corner_bursts and trail_frames == 0:
+        trail_corners = list(dict.fromkeys(
+            c for b in in_corner_bursts for c in b.get("corners_visited", [])
+        ))[:4]
+        insights.append({
+            "id":             "trail_absent",
+            "title":          "Add Trail Braking",
+            "detail":         "No trail braking detected. Holding light brake pressure "
+                              "through corner entry adds rotation, lets you brake later, "
+                              "and improves mid-corner balance.",
+            "corners":        trail_corners,
+            "metric_label":   "Trail frames",
+            "metric_value":   "0",
+            "effort":         2,
+            "est_gain_s":     0.4,
+            "evidence_bursts": len(in_corner_bursts),
+        })
+
+    # 4. Braking late / low entry speed
+    slow_entry_corners = []
+    for b in corner_bursts:
+        if b.get("avg_speed_kmh", 999) < 70 and b.get("in_corner"):
+            slow_entry_corners.extend(b.get("corners_visited", []))
+    slow_entry_corners = list(dict.fromkeys(slow_entry_corners))[:4]
+    if slow_entry_corners:
+        insights.append({
+            "id":             "braking_late",
+            "title":          "Brake Point Optimisation",
+            "detail":         f"Corner entry averaging {avg_speed:.0f} km/h at the corners "
+                              f"listed. Try moving your brake marker 15–20m later — you may "
+                              f"be over-braking and scrubbing speed unnecessarily.",
+            "corners":        slow_entry_corners,
+            "metric_label":   "Avg entry",
+            "metric_value":   f"{avg_speed:.0f} km/h",
+            "effort":         2,
+            "est_gain_s":     0.5,
+            "evidence_bursts": len(slow_entry_corners),
+        })
+
+    # Sort: effort ASC, then est_gain DESC, pick top 3
+    insights.sort(key=lambda x: (x["effort"], -x["est_gain_s"]))
+    for i, ins in enumerate(insights[:3], 1):
+        ins["rank"] = i
+    return insights[:3]
+
+
+@app.route("/insights", methods=["GET"])
+def get_insights():
+    """Return top-3 prioritised driver insights from the current session bursts."""
+    with _burst_lock:
+        bursts_snapshot = list(_session_bursts)
+
+    insights = _score_insights(bursts_snapshot)
+    return jsonify({
+        "insights":       insights,
+        "session_bursts": len(bursts_snapshot),
+        "generated_at":   datetime.utcnow().isoformat(),
+    })
+
+
+@app.route("/session/reset", methods=["POST"])
+def session_reset():
+    """Clear the burst accumulator — call this when a new session starts."""
+    with _burst_lock:
+        count = len(_session_bursts)
+        _session_bursts.clear()
+    return jsonify({"cleared_bursts": count, "status": "ok"})
 
 
 @app.route("/laps", methods=["GET"])

@@ -7,11 +7,14 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.pitwall.app.MainActivity
 import com.pitwall.app.data.CoachingMessage
+import com.pitwall.app.data.CornerAccumulator
+import com.pitwall.app.data.CornerSessionStats
 import com.pitwall.app.data.TelemetryFrame
 import com.pitwall.app.data.TrackMap
 import com.pitwall.app.fusion.SensorFusion
@@ -28,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.decodeFromStream
 import android.net.Uri
+import java.util.Locale
 
 private const val TAG = "PitwallService"
 private const val NOTIF_CHANNEL = "pitwall_session"
@@ -35,16 +39,16 @@ private const val NOTIF_ID = 1001
 private const val BURST_INTERVAL_MS = 5_000L
 private const val RING_BUFFER_MAX = 50
 
+data class LapRecord(val lap: Int, val timeS: Float, val bestDeltaS: Float)
+
 /**
  * Foreground service — thin VBO/BT relay to the Python bridge.
  *
  * Exposes:
  *   [telemetry]  StateFlow<TelemetryFrame?> — consumed by PitwallViewModel (Compose)
  *   [coaching]   SharedFlow<CoachingMessage> — consumed by PitwallViewModel (Compose)
- *
- * No on-device ML, no audio, no EventChannel sinks — all coaching lives in pitwall_bridge.py.
  */
-class PitwallService : LifecycleService() {
+class PitwallService : LifecycleService(), TextToSpeech.OnInitListener {
 
     inner class LocalBinder : Binder() {
         val service get() = this@PitwallService
@@ -56,12 +60,18 @@ class PitwallService : LifecycleService() {
     private lateinit var fusion: SensorFusion
     private val bridge = BridgeClient()
 
+    private var tts: TextToSpeech? = null
+    private var isTtsReady = false
+
     // ── Public Compose-ready flows ────────────────────────────────────────────
     private val _telemetry = MutableStateFlow<TelemetryFrame?>(null)
     val telemetry: StateFlow<TelemetryFrame?> = _telemetry.asStateFlow()
 
     private val _coaching = MutableSharedFlow<CoachingMessage>(extraBufferCapacity = 32)
     val coaching: SharedFlow<CoachingMessage> = _coaching.asSharedFlow()
+
+    private val _laps = MutableStateFlow<List<LapRecord>>(emptyList())
+    val laps: StateFlow<List<LapRecord>> = _laps.asStateFlow()
 
     private val _isRunning = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _isRunning.asStateFlow()
@@ -72,17 +82,36 @@ class PitwallService : LifecycleService() {
     private var frameCount = 0
     private var lapCount = 0
     private var bestLapTime: Float? = null
+    private val lapHistory = mutableListOf<LapRecord>()
 
     // Ring buffer for bursts
     private val ringBuffer = ArrayDeque<TelemetryFrame>(RING_BUFFER_MAX)
     private var lastBurstAt = 0L
 
+    // Per-corner session accumulators
+    private val cornerAccumulators = mutableMapOf<String, CornerAccumulator>()
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        tts = TextToSpeech(this, this)
         // Note: startForeground() is called in onStartCommand(), not here.
         // Calling it here (when created via bindService) throws
         // ForegroundServiceStartNotAllowedException on API 34.
+    }
+
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val attrs = android.media.AudioAttributes.Builder()
+                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+            tts?.setAudioAttributes(attrs)
+            tts?.language = Locale.US
+            isTtsReady = true
+        } else {
+            Log.e(TAG, "TTS Initialization failed!")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -125,6 +154,27 @@ class PitwallService : LifecycleService() {
     private suspend fun processFrame(frame: TelemetryFrame) {
         frameCount++
 
+        if (frame.completedLapTime != null) {
+            val lTime = frame.completedLapTime
+            val best = bestLapTime
+            val delta = if (best != null) lTime - best else 0f
+
+            if (best == null || lTime < best) {
+                bestLapTime = lTime
+            }
+
+            lapHistory.add(
+                LapRecord(
+                    lap = frame.lap - 1,
+                    timeS = lTime,
+                    bestDeltaS = delta
+                )
+            )
+            _laps.value = lapHistory.toList()
+        }
+        
+        lapCount = frame.lap
+
         // Push telemetry to Compose UI
         _telemetry.value = frame
 
@@ -148,12 +198,52 @@ class PitwallService : LifecycleService() {
                     )
                     _coaching.tryEmit(msg)
                     Log.i(TAG, "Bridge coaching: \"$coachingText\"")
+                    
+                    if (isTtsReady) {
+                        val params = android.os.Bundle()
+                        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                        tts?.speak(coachingText, TextToSpeech.QUEUE_ADD, params, null)
+                    }
                 }
             }
+        }
+
+        // Per-corner accumulation
+        val cornerName = frame.currentCorner
+        if (cornerName != null) {
+            val acc = cornerAccumulators.getOrPut(cornerName) { CornerAccumulator(cornerName) }
+            val corner = track.corners.find { it.name == cornerName }
+            if (corner != null) {
+                // Determine phase based on distance through the corner
+                val d = if (track.trackLength > 0) frame.distance.value % track.trackLength else frame.distance.value
+                val phase = (d - corner.startDistance) / (corner.endDistance - corner.startDistance).coerceAtLeast(1f)
+
+                when {
+                    phase < 0.33f -> {
+                        acc.sumEntryKmh += frame.speedKmh
+                        acc.entryFrames++
+                        if (frame.brake.value > 3f) acc.trailFrames++
+                    }
+                    phase < 0.66f -> {
+                        acc.sumApexKmh += frame.speedKmh
+                        acc.apexFrames++
+                    }
+                    else -> {
+                        acc.sumExitKmh += frame.speedKmh
+                        acc.exitFrames++
+                    }
+                }
+            }
+
+            if (frame.comboG.value > acc.maxG) acc.maxG = frame.comboG.value
+            if (frame.isCoasting) acc.coastFrames++
+            acc.totalFrames++
         }
     }
 
     // ── Public API (called from ViewModel via binder) ─────────────────────────
+
+    fun getTrackMap(): TrackMap = track
 
     fun setDriverLevel(level: String) {
         driverLevel = level.lowercase()
@@ -173,6 +263,18 @@ class PitwallService : LifecycleService() {
         "bestLapTime" to bestLapTime,
         "bridgeUrl" to "http://127.0.0.1:8765",
     )
+
+    /**
+     * Returns per-corner stats accumulated since the session started.
+     * Matched against [track] corners so gold-standard speeds are available.
+     * Returns an empty map if no corner data has been collected yet.
+     */
+    fun getCornerStats(track: TrackMap): Map<String, CornerSessionStats> {
+        return cornerAccumulators.mapNotNull { (name, acc) ->
+            val corner = track.corners.find { it.name == name } ?: return@mapNotNull null
+            name to acc.toStats(corner)
+        }.toMap()
+    }
 
     // ── Burst serialisation ───────────────────────────────────────────────────
 
@@ -269,6 +371,12 @@ class PitwallService : LifecycleService() {
             .setContentIntent(pi)
             .setOngoing(true)
             .build()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        tts?.stop()
+        tts?.shutdown()
     }
 
     companion object {

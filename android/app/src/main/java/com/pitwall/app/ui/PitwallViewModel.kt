@@ -8,9 +8,13 @@ import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pitwall.app.data.CoachingMessage
+import com.pitwall.app.data.CornerSessionStats
+import com.pitwall.app.data.DriverInsight
 import com.pitwall.app.data.TelemetryFrame
+import com.pitwall.app.data.TrackOutline
 import com.pitwall.app.service.PitwallService
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -44,6 +48,13 @@ data class PitwallUiState(
     val slowSinceMs: Long? = null,
     /** Empty until [PitwallViewModel.refreshHardwareStatus] is called. */
     val hardwareStatus: List<HardwareStatus> = emptyList(),
+    // ── Analysis data ─────────────────────────────────────────────────────
+    val laps: List<com.pitwall.app.service.LapRecord> = emptyList(),
+    val insights: List<DriverInsight> = emptyList(),
+    val insightsLoading: Boolean = false,
+    val insightsError: Boolean = false,
+    val trackOutline: TrackOutline? = null,
+    val cornerStats: Map<String, CornerSessionStats> = emptyMap(),
 )
 
 /**
@@ -68,6 +79,9 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
     private var service: PitwallService? = null
     private var telemetryJob: Job? = null
     private var coachingJob: Job? = null
+    private var lapsJob: Job? = null
+    private var insightsPollingJob: Job? = null
+    private val bridgeClient = com.pitwall.app.service.BridgeClient()
 
     // ── Called by MainActivity after service bind ─────────────────────────────
 
@@ -75,6 +89,7 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         service = svc
         telemetryJob?.cancel()
         coachingJob?.cancel()
+        lapsJob?.cancel()
         telemetryJob = viewModelScope.launch {
             svc.telemetry.collect { frame ->
                 if (frame == null) return@collect
@@ -87,12 +102,18 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
                 _ui.update { it.copy(lastCoaching = msg) }
             }
         }
+        lapsJob = viewModelScope.launch {
+            svc.laps.collect { list ->
+                _ui.update { it.copy(laps = list) }
+            }
+        }
     }
 
     fun onServiceDisconnected() {
         service = null
         telemetryJob?.cancel()
         coachingJob?.cancel()
+        lapsJob?.cancel()
     }
 
     // ── UI actions ────────────────────────────────────────────────────────────
@@ -115,8 +136,18 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         _ui.update { PitwallUiState() }
     }
 
-    fun enterPaddock() = _ui.update { it.copy(mode = AppMode.PADDOCK) }
-    fun returnToTrack() = _ui.update { it.copy(mode = AppMode.ON_TRACK) }
+    fun enterPaddock() {
+        _ui.update { it.copy(mode = AppMode.PADDOCK) }
+        fetchInsights()          // immediate fetch on entry
+        startInsightsPolling()   // then poll every 30s
+        refreshCornerStats()
+    }
+
+    fun returnToTrack() {
+        stopInsightsPolling()
+        _ui.update { it.copy(mode = AppMode.ON_TRACK) }
+    }
+
     fun setDriverLevel(level: String) = _ui.update { it.copy(driverLevel = level) }
 
     /**
@@ -179,6 +210,91 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
             Build.HARDWARE == "ranchu"
     }
 
+    // ── Insights — fetch + 30-second auto-poll ──────────────────────────────
+
+    fun fetchInsights() {
+        viewModelScope.launch {
+            _ui.update { it.copy(insightsLoading = true, insightsError = false) }
+            val json = bridgeClient.getInsightsJson()
+            if (json == null) {
+                _ui.update { it.copy(insightsLoading = false, insightsError = true) }
+                return@launch
+            }
+            val insights = parseInsights(json)
+            _ui.update { it.copy(insights = insights, insightsLoading = false, insightsError = false) }
+        }
+    }
+
+    private fun startInsightsPolling() {
+        stopInsightsPolling()
+        insightsPollingJob = viewModelScope.launch {
+            while (true) {
+                delay(30_000L)
+                if (_ui.value.mode == AppMode.PADDOCK) fetchInsights()
+                else break
+            }
+        }
+    }
+
+    private fun stopInsightsPolling() {
+        insightsPollingJob?.cancel()
+        insightsPollingJob = null
+    }
+
+    private fun parseInsights(json: String): List<DriverInsight> = try {
+        val root = org.json.JSONObject(json)
+        val arr  = root.getJSONArray("insights")
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            val cornersArr = o.optJSONArray("corners")
+            val corners = if (cornersArr != null)
+                (0 until cornersArr.length()).map { cornersArr.getString(it) }
+            else emptyList()
+            DriverInsight(
+                id             = o.getString("id"),
+                rank           = o.optInt("rank", i + 1),
+                title          = o.getString("title"),
+                detail         = o.getString("detail"),
+                corners        = corners,
+                metricLabel    = o.optString("metric_label", ""),
+                metricValue    = o.optString("metric_value", ""),
+                effort         = o.optInt("effort", 2),
+                estGainS       = o.optDouble("est_gain_s", 0.0).toFloat(),
+                evidenceBursts = o.optInt("evidence_bursts", 0),
+            )
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("PitwallViewModel", "Insight parse error: ${e.message}")
+        emptyList()
+    }
+
+    // ── Track outline — load once from assets ─────────────────────────────
+
+    fun loadTrackOutline(context: Context) {
+        if (_ui.value.trackOutline != null) return  // already loaded
+        viewModelScope.launch {
+            val outline = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    context.assets.open("tracks/sonoma.json").bufferedReader().readText()
+                        .let { com.pitwall.app.data.TrackOutline.fromJson(it) }
+                } catch (e: Exception) {
+                    android.util.Log.w("PitwallViewModel", "Could not load track outline: ${e.message}")
+                    null
+                }
+            }
+            if (outline != null) _ui.update { it.copy(trackOutline = outline) }
+        }
+    }
+
+    // ── Corner stats — pull from service ─────────────────────────────────
+
+    fun refreshCornerStats() {
+        val svc = service ?: return
+        val track = try { svc.getTrackMap() } catch (_: Exception) { null } ?: return
+        val stats = svc.getCornerStats(track)
+        _ui.update { it.copy(cornerStats = stats) }
+    }
+
     // ── Auto-transition ───────────────────────────────────────────────────────
 
     private fun checkAutoTransition(frame: TelemetryFrame) {
@@ -190,10 +306,6 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
                 _ui.update { it.copy(slowSinceMs = since) }
                 if (now - since >= 30_000L) enterPaddock()
             }
-            frame.speedMph > 20f && mode == AppMode.PADDOCK -> {
-                _ui.update { it.copy(slowSinceMs = null) }
-                returnToTrack()
-            }
             else -> _ui.update { it.copy(slowSinceMs = null) }
         }
     }
@@ -202,5 +314,6 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
         super.onCleared()
         telemetryJob?.cancel()
         coachingJob?.cancel()
+        insightsPollingJob?.cancel()
     }
 }

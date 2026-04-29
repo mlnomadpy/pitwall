@@ -1,7 +1,6 @@
 package com.pitwall.app.ui
 
 import androidx.compose.runtime.*
-import androidx.compose.ui.tooling.preview.Preview
 import com.pitwall.app.ui.theme.PitwallTheme
 
 @Composable
@@ -18,13 +17,21 @@ fun PitwallApp(viewModel: PitwallViewModel) {
             AppMode.ON_TRACK -> OnTrackScreen(
                 telemetry = state.telemetry,
                 lastCoaching = state.lastCoaching,
+                trackOutline = state.trackOutline,
                 onEnterPaddock = { viewModel.enterPaddock() },
                 onReturnToSetup = { viewModel.stopSession() },
             )
             AppMode.PADDOCK -> PaddockScreen(
-                telemetry = state.telemetry,
+                telemetry    = state.telemetry,
                 lastCoaching = state.lastCoaching,
+                laps         = state.laps,
+                insights     = state.insights,
+                insightsLoading = state.insightsLoading,
+                insightsError   = state.insightsError,
+                cornerStats  = state.cornerStats,
+                trackOutline = state.trackOutline,
                 onReturnToTrack = { viewModel.returnToTrack() },
+                onRefreshInsights = { viewModel.fetchInsights() },
             )
         }
     }

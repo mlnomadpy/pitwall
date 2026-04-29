@@ -55,6 +55,7 @@ data class TelemetryFrame(
     val sector: String?,
     val lap: Int,
     val lapTime: Float,
+    val completedLapTime: Float? = null,
     val gear: Int,
 ) {
     val speedKmh get() = speed.value * 3.6f

@@ -11,24 +11,43 @@ data class TrackMap(
     val corners: List<TrackCorner>,
     val sectors: List<TrackSector>
 ) {
+    private fun modDistance(distance: Float): Float {
+        return if (trackLength > 0f) distance % trackLength else distance
+    }
+
     fun cornerAt(distance: Float): TrackCorner? {
-        return corners.find { distance in it.startDistance..it.endDistance }
+        val d = modDistance(distance)
+        return corners.find { d in it.startDistance..it.endDistance }
     }
 
     fun nearestCorner(distance: Float): TrackCorner? {
-        return corners.minByOrNull { Math.abs(it.apexDistance - distance) }
+        val d = modDistance(distance)
+        return corners.minByOrNull { Math.abs(it.apexDistance - d) }
+    }
+
+    fun nextCorner(distance: Float): TrackCorner? {
+        val d = modDistance(distance)
+        return corners.filter { it.apexDistance >= d }.minByOrNull { it.apexDistance - d }
+            ?: corners.firstOrNull()
     }
 
     fun distanceToCorner(distance: Float, corner: TrackCorner): Float {
-        return corner.apexDistance - distance
+        val d = modDistance(distance)
+        var diff = corner.apexDistance - d
+        if (diff < -trackLength / 2f) {
+            diff += trackLength
+        }
+        return diff
     }
 
     fun isPastApex(distance: Float, corner: TrackCorner): Boolean {
-        return distance > corner.apexDistance
+        val d = modDistance(distance)
+        return d > corner.apexDistance
     }
 
     fun sectorAt(distance: Float): TrackSector? {
-        return sectors.find { distance in it.startDistance..it.endDistance }
+        val d = modDistance(distance)
+        return sectors.find { d in it.startDistance..it.endDistance }
     }
 }
 

@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
         // Probe Bluetooth bonded devices (or emulator pass-through) so SetupScreen
         // can display real hardware status before the session starts.
         viewModel.refreshHardwareStatus(this)
+        viewModel.loadTrackOutline(this)   // pre-parse 1065-point GPS outline for mini-map
 
         setContent {
             PitwallApp(viewModel)

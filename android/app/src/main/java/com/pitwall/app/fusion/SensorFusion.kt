@@ -30,7 +30,9 @@ class SensorFusion(private val track: com.pitwall.app.data.TrackMap) {
     private var latestObd: RawFrame? = null
 
     // Lap tracking
-    private var lap = 0
+    private var customSfLat: Double? = null
+    private var customSfLon: Double? = null
+    private var lap = 1
     private var lapStartTime = 0.0
     private var wasNearSF = false
     private var sfCooldown = 0
@@ -78,14 +80,22 @@ class SensorFusion(private val track: com.pitwall.app.data.TrackMap) {
         }
 
         // ── Lap tracking ──────────────────────────────────────────────────────
+        if (customSfLat == null && rl.lat != null && rl.lon != null) {
+            customSfLat = rl.lat
+            customSfLon = rl.lon
+            lapStartTime = timestamp
+        }
+
         val nearSF = rl.lat != null && haversineM(
-            rl.lat, rl.lon ?: 0.0, track.sfLat, track.sfLon
+            rl.lat, rl.lon ?: 0.0, customSfLat ?: track.sfLat, customSfLon ?: track.sfLon
         ) < 30
         if (sfCooldown > 0) sfCooldown--
 
+        var completedLapTime: Float? = null
         if (nearSF && !wasNearSF && lap > 0 && sfCooldown == 0) {
-            val lapTime = (timestamp - lapStartTime).toFloat()
-            if (lapTime in 30f..300f) {
+            val lTime = (timestamp - lapStartTime).toFloat()
+            if (lTime in 30f..300f) {
+                completedLapTime = lTime
                 lap++
                 lapStartTime = timestamp
                 sfCooldown = 50
@@ -101,10 +111,9 @@ class SensorFusion(private val track: com.pitwall.app.data.TrackMap) {
 
         // ── Track position context ─────────────────────────────────────────────
         val corner = track.cornerAt(cumulativeDistance)
-        val nearestCorner = track.nearestCorner(cumulativeDistance)
-        val distToCorner = nearestCorner?.let { track.distanceToCorner(cumulativeDistance, it) } ?: 999f
-        val pastApex = corner != null && nearestCorner != null &&
-                track.isPastApex(cumulativeDistance, nearestCorner)
+        val nextCorner = track.nextCorner(cumulativeDistance)
+        val distToCorner = nextCorner?.let { track.distanceToCorner(cumulativeDistance, it) } ?: 999f
+        val pastApex = corner != null && track.isPastApex(cumulativeDistance, corner)
         val sector = track.sectorAt(cumulativeDistance)
 
         // ── Gear (derived from RPM/speed ratio) ────────────────────────────────
@@ -140,6 +149,7 @@ class SensorFusion(private val track: com.pitwall.app.data.TrackMap) {
             sector = sector?.name,
             lap = lap,
             lapTime = lapTime,
+            completedLapTime = completedLapTime,
             gear = gear,
         )
 
