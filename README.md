@@ -54,7 +54,7 @@ mkdocs serve -a 127.0.0.1:8889
 
 ### Prerequisites
 
-- Flutter SDK ≥ 3.3 — [install](https://docs.flutter.dev/get-started/install)
+- Android Studio (Ladybug or later) with a Pixel 10 AVD (API 35, arm64-v8a)
 - Android Studio with an emulator (Pixel 10 API 35) **or** a physical Pixel device
 - Python 3.10+ (for the local coaching bridge)
 - `adb` on your PATH: add `~/Library/Android/sdk/platform-tools` to `~/.zshrc`
@@ -62,9 +62,9 @@ mkdocs serve -a 127.0.0.1:8889
 ### 1 — Run the Flutter App
 
 ```bash
-cd flutter
-flutter pub get
-flutter run            # picks up the connected emulator or device automatically
+cd android
+./gradlew installDebug
+adb shell am start -n com.pitwall.app/.MainActivity
 ```
 
 On first launch, the Setup screen shows hardware status. Tap **START SESSION** to begin a live session (requires Racelogic Mini + OBDLink paired via Bluetooth), or **REPLAY VBO** to load a recorded session file.
@@ -115,7 +115,7 @@ python3 tools/pitwall_bridge.py --track src/simulator/sonoma.json
 ~/Library/Android/sdk/platform-tools/adb reverse tcp:8765 tcp:8765
 
 # Terminal B — run the app
-cd flutter && flutter run
+cd android && ./gradlew installDebug
 ```
 
 Verify the bridge and confirm which engine is active:
@@ -179,20 +179,20 @@ The `PitwallService` foreground service manages all three connections and keeps 
 ### 6 — Gemini API Key (Warm Path Tier 2)
 
 When the Python bridge is not running, the app falls back to Google's Gemini API.
-Credentials live in `flutter/android/local.properties` — **gitignored, never commit this file**.
+Credentials live in `android/local.properties` — **gitignored, never commit this file**.
 
 
 **Step 1 — Add it to `local.properties`:**
 
 ```properties
-# flutter/android/local.properties
+# android/local.properties
 GEMINI_API_KEY=AIzaSy...
 ```
 
 **Step 2 — Rebuild:**
 
 ```bash
-cd flutter && flutter run
+cd android && ./gradlew installDebug
 ```
 
 Gradle bakes the key into `BuildConfig` at compile time. The key is used as
