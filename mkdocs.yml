@@ -35,10 +35,14 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Architecture: architecture.md
+  - Internal Architecture: internal_architecture.md
+  - Audit Report: AUDIT.md
   - API Reference: api.md
   - Track Markers: markers.md
   - Sonoma Track Intelligence: sonoma_track_intelligence.md
   - "T-Rod Sonoma Session": trod_sonoma_session.md
+  - "Sonoma Maneuvers": sonoma_maneuvers.md
+  - "LiteRT Termux Validation": litert_termux_validation.md
   - Telemetry Pipeline: telemetry-pipeline.md
   - Coaching Engine: coaching-engine.md
   - Pedagogy: pedagogy.md

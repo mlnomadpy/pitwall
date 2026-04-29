@@ -42,12 +42,24 @@ def _frames_to_payload(frames):
     } for f in frames]
 
 
+_SID_COUNTER = [0]
+
+
 def _start_session(client, **body):
-    payload = {"driver": "Taha", "driver_level": "intermediate",
-               "car": "M3", **body}
-    r = client.post("/session/start", json=payload)
-    assert r.status_code == 200
-    return r.get_json()["session_id"]
+    """Generate a synthetic session_id.
+
+    Master removed the explicit /session/start lifecycle in favour of an
+    implicit model: any string can be a session_id, and per-frame /
+    per-burst endpoints accept it as-is. This helper preserves the
+    previous test-suite shape while matching the new API.
+    """
+    _SID_COUNTER[0] += 1
+    return f"test-sid-{_SID_COUNTER[0]:03d}"
+
+
+_LIFECYCLE_REMOVED = pytest.mark.skip(
+    reason="endpoint removed in master; sessions are implicit (POST /session/reset to clear)",
+)
 
 
 # ─── /health ─────────────────────────────────────────────────────────────────
@@ -66,54 +78,29 @@ def test_health_ok(client):
 # ─── /session/start, /sessions, /session/<sid>, /end ─────────────────────────
 
 
+@_LIFECYCLE_REMOVED
 def test_session_start_returns_id(client):
-    r = client.post(
-        "/session/start",
-        json={"driver": "Taha", "driver_level": "intermediate", "car": "M3"},
-    )
-    assert r.status_code == 200
-    body = r.get_json()
-    assert body["started"] is True
-    assert isinstance(body["session_id"], str)
-    assert len(body["session_id"]) > 0
+    pass
 
 
+@_LIFECYCLE_REMOVED
 def test_sessions_list_includes_new_session(client):
-    sid = _start_session(client)
-    r = client.get("/sessions")
-    assert r.status_code == 200
-    body = r.get_json()
-    ids = [s["session_id"] for s in body["sessions"]]
-    assert sid in ids
+    pass
 
 
+@_LIFECYCLE_REMOVED
 def test_sessions_active_only_filters_ended(client):
-    """active_only=true should drop sessions with ended_at stamped."""
-    sid_active = _start_session(client, driver="A")
-    sid_done = _start_session(client, driver="B")
-    client.post(f"/session/{sid_done}/end")
-
-    r = client.get("/sessions?active_only=true")
-    assert r.status_code == 200
-    ids = [s["session_id"] for s in r.get_json()["sessions"]]
-    assert sid_active in ids
-    assert sid_done not in ids
+    pass
 
 
+@_LIFECYCLE_REMOVED
 def test_session_end_idempotent(client):
-    sid = _start_session(client)
-    r1 = client.post(f"/session/{sid}/end")
-    r2 = client.post(f"/session/{sid}/end")
-    assert r1.status_code == 200
-    assert r2.status_code == 200
-    assert r1.get_json()["ended"] is True
-    assert r2.get_json()["ended"] is True
+    pass
 
 
+@_LIFECYCLE_REMOVED
 def test_session_detail_unknown_returns_404(client):
-    r = client.get("/session/nonexistent-sid-xyz")
-    assert r.status_code == 404
-    assert "error" in r.get_json()
+    pass
 
 
 # ─── /session/<sid>/frames ───────────────────────────────────────────────────

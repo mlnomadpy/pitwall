@@ -32,14 +32,17 @@ def test_sample_reference_line_interpolates_midpoint():
     assert abs(lon - (-73.785)) < 0.001
 
 
-def test_sample_reference_line_out_of_range_returns_last():
+def test_sample_reference_line_wraps_modulo():
+    """Closed-loop track: a distance past the last sample wraps modulo
+    track_length and returns the interpolated lat/lon at the wrapped position."""
     rl = [
         {"distance": 0,   "lat": 23.49, "lon": -73.78},
         {"distance": 100, "lat": 23.50, "lon": -73.79},
     ]
+    # 999 % 100 = 99 → very close to the last sample
     lat, lon = enrich_mod._sample_reference_line(rl, 999)
-    assert lat == rl[-1]["lat"]
-    assert lon == rl[-1]["lon"]
+    assert abs(lat - 23.4999) < 0.001
+    assert abs(lon - (-73.7899)) < 0.001
 
 
 def test_enrich_populates_known_corner():

@@ -43,7 +43,22 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": -0.2
+      "elevation_change_m": -0.2,
+      "nicknames": [],
+      "coaching_tip": "carry throttle through, swing tight to the K-wall bend",
+      "markers": [
+        {
+          "id": "T1_kwall_bend",
+          "kind": "apex_ref",
+          "label": "the K-wall bend",
+          "at_offset_m_from_entry": -10,
+          "source": "kanga",
+          "distance": 66.0,
+          "lat": 23.493804,
+          "lon": -73.786948,
+          "corner": "Turn 1"
+        }
+      ]
     },
     {
       "name": "Turn 2",
@@ -75,7 +90,34 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": 9.2
+      "elevation_change_m": 9.2,
+      "nicknames": [],
+      "coaching_tip": "you can brake less than you think; carry speed uphill",
+      "markers": [
+        {
+          "id": "T2_bridge",
+          "kind": "brake_ref",
+          "label": "the bridge",
+          "at_offset_m_from_entry": 60,
+          "source": "kanga",
+          "distance": 476.0,
+          "lat": 23.495457,
+          "lon": -73.790151,
+          "corner": "Turn 2"
+        },
+        {
+          "id": "T2_pavement_cracks",
+          "kind": "brake_ref",
+          "label": "the pavement cracks",
+          "at_offset_m_from_entry": 30,
+          "source": "kanga",
+          "note": "alt to bridge",
+          "distance": 506.0,
+          "lat": 23.49543,
+          "lon": -73.790442,
+          "corner": "Turn 2"
+        }
+      ]
     },
     {
       "name": "Turn 3",
@@ -107,7 +149,33 @@
         "distance_before_entry": 50.0,
         "pressure_bar": 11.6
       },
-      "elevation_change_m": 10.8
+      "elevation_change_m": 10.8,
+      "nicknames": [],
+      "coaching_tip": "give-away corner — sacrifice T3 entry to win T3a and T4",
+      "markers": [
+        {
+          "id": "T3_right_curbing",
+          "kind": "apex_ref",
+          "label": "the right-hand curbing",
+          "at_offset_m_from_entry": 0,
+          "source": "kanga",
+          "distance": 668.0,
+          "lat": 23.494661,
+          "lon": -73.79173,
+          "corner": "Turn 3"
+        },
+        {
+          "id": "T3_light_poles",
+          "kind": "visual",
+          "label": "the light poles in the stands",
+          "at_offset_m_from_entry": 60,
+          "source": "kanga",
+          "distance": 608.0,
+          "lat": 23.495061,
+          "lon": -73.791334,
+          "corner": "Turn 3"
+        }
+      ]
     },
     {
       "name": "Turn 4",
@@ -139,7 +207,22 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": 3.0
+      "elevation_change_m": 3.0,
+      "nicknames": [],
+      "coaching_tip": "downhill, off-camber — back the brake up by one marker",
+      "markers": [
+        {
+          "id": "T4_left_wall_step",
+          "kind": "brake_ref",
+          "label": "where the left wall steps up",
+          "at_offset_m_from_entry": 40,
+          "source": "kanga",
+          "distance": 936.0,
+          "lat": 23.495385,
+          "lon": -73.793841,
+          "corner": "Turn 4"
+        }
+      ]
     },
     {
       "name": "Turn 5",
@@ -171,7 +254,10 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": 4.4
+      "elevation_change_m": 4.4,
+      "nicknames": [],
+      "coaching_tip": "throwaway corner — preserve T6 entry, breathe the throttle",
+      "markers": []
     },
     {
       "name": "Turn 6",
@@ -203,7 +289,46 @@
         "distance_before_entry": 86.0,
         "pressure_bar": 29.3
       },
-      "elevation_change_m": -10.6
+      "elevation_change_m": -10.6,
+      "nicknames": [
+        "the Carousel"
+      ],
+      "coaching_tip": "smooth exit — speed here carries the long straight; no early throttle",
+      "markers": [
+        {
+          "id": "T6_crest",
+          "kind": "brake_ref",
+          "label": "just after the slight crest",
+          "at_offset_m_from_entry": 30,
+          "source": "kanga",
+          "distance": 1264.0,
+          "lat": 23.496849,
+          "lon": -73.796423,
+          "corner": "Turn 6"
+        },
+        {
+          "id": "T6_tires_left",
+          "kind": "brake_ref",
+          "label": "the tire stacks on the left",
+          "at_offset_m_from_entry": 50,
+          "source": "kanga",
+          "distance": 1244.0,
+          "lat": 23.496706,
+          "lon": -73.796303,
+          "corner": "Turn 6"
+        },
+        {
+          "id": "T6_corner_station",
+          "kind": "visual",
+          "label": "the corner station on the right",
+          "at_offset_m_from_entry": 0,
+          "source": "kanga",
+          "distance": 1294.0,
+          "lat": 23.497069,
+          "lon": -73.796583,
+          "corner": "Turn 6"
+        }
+      ]
     },
     {
       "name": "Turn 7",
@@ -235,7 +360,22 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": -0.8
+      "elevation_change_m": -0.8,
+      "nicknames": [],
+      "coaching_tip": "eyes up — late turn-in, late apex; second apex matters more",
+      "markers": [
+        {
+          "id": "T7_300_board",
+          "kind": "brake_ref",
+          "label": "the 300 board",
+          "at_offset_m_from_entry": 80,
+          "source": "blayze",
+          "distance": 1460.0,
+          "lat": 23.497833,
+          "lon": -73.795696,
+          "corner": "Turn 7"
+        }
+      ]
     },
     {
       "name": "Turn 8",
@@ -267,7 +407,12 @@
         "distance_before_entry": 0,
         "pressure_bar": 0
       },
-      "elevation_change_m": -0.8
+      "elevation_change_m": -0.8,
+      "nicknames": [
+        "the Esses"
+      ],
+      "coaching_tip": "smooth, don't pinch — apexes all slightly late, throttle on exit",
+      "markers": []
     },
     {
       "name": "Turn 9",
@@ -299,7 +444,10 @@
         "distance_before_entry": 66.0,
         "pressure_bar": 24.8
       },
-      "elevation_change_m": -15.8
+      "elevation_change_m": -15.8,
+      "nicknames": [],
+      "coaching_tip": "setup for T10 — exit T8a at full throttle",
+      "markers": []
     },
     {
       "name": "Turn 10",
@@ -331,7 +479,33 @@
         "distance_before_entry": 124.0,
         "pressure_bar": 46.9
       },
-      "elevation_change_m": 0.1
+      "elevation_change_m": 0.1,
+      "nicknames": [],
+      "coaching_tip": "lift, don't brake — fastest corner; carry full throttle past apex",
+      "markers": [
+        {
+          "id": "T10_toyota_sign",
+          "kind": "visual",
+          "label": "the Toyota sign letters",
+          "at_offset_m_from_entry": 0,
+          "source": "kanga",
+          "distance": 2556.0,
+          "lat": 23.49919,
+          "lon": -73.795558,
+          "corner": "Turn 10"
+        },
+        {
+          "id": "T10_left_berm",
+          "kind": "apex_ref",
+          "label": "the left berm",
+          "at_offset_m_from_entry": -10,
+          "source": "kanga",
+          "distance": 2566.0,
+          "lat": 23.499238,
+          "lon": -73.795636,
+          "corner": "Turn 10"
+        }
+      ]
     },
     {
       "name": "Turn 11",
@@ -363,7 +537,60 @@
         "distance_before_entry": 134.0,
         "pressure_bar": 34.2
       },
-      "elevation_change_m": -0.1
+      "elevation_change_m": -0.1,
+      "nicknames": [
+        "Calamity Corner",
+        "the hairpin"
+      ],
+      "coaching_tip": "wait for the bump to settle, trail to the apex, all the road on exit",
+      "markers": [
+        {
+          "id": "T11_bump",
+          "kind": "brake_ref",
+          "label": "the bump where the road widens left",
+          "at_offset_m_from_entry": 100,
+          "source": "blayze",
+          "note": "best brake reference — wait for the car to compress and settle",
+          "distance": 4000.0,
+          "lat": 23.493322,
+          "lon": -73.785621,
+          "corner": "Turn 11"
+        },
+        {
+          "id": "T11_pit_entry",
+          "kind": "brake_ref",
+          "label": "the pit-entry lines on the left",
+          "at_offset_m_from_entry": 70,
+          "source": "kanga",
+          "note": "alt to bump",
+          "distance": 4030.0,
+          "lat": 23.493066,
+          "lon": -73.785521,
+          "corner": "Turn 11"
+        },
+        {
+          "id": "T11_tire_stack_3",
+          "kind": "apex_ref",
+          "label": "the third tire stack",
+          "at_offset_m_from_entry": -20,
+          "source": "blayze",
+          "distance": 4120.0,
+          "lat": 23.492318,
+          "lon": -73.7853,
+          "corner": "Turn 11"
+        },
+        {
+          "id": "T11_tire_stacks_turnin",
+          "kind": "turn_in_ref",
+          "label": "the start of the tire stacks on the left",
+          "at_offset_m_from_entry": 0,
+          "source": "blayze",
+          "distance": 4100.0,
+          "lat": 23.492471,
+          "lon": -73.785318,
+          "corner": "Turn 11"
+        }
+      ]
     }
   ],
   "sectors": [
@@ -7414,6 +7641,203 @@
       "distance": 4256.0,
       "lat": 23.492483,
       "lon": -73.78606
+    }
+  ],
+  "intel_notes": {
+    "elevation_change_m": 49,
+    "real_centroid_lat": 38.1601,
+    "real_centroid_lon": -122.4594,
+    "real_finish_line_lat": 38.16152,
+    "real_finish_line_lon": -122.45472,
+    "weather_pattern": "morning fog burns off mid-morning; cool damp surface in first session of an HPDE day",
+    "common_strategy_notes": [
+      "T3 is a give-away — sacrifice T3 to win T3a and T4",
+      "T5 is throwaway — preserve T6 entry",
+      "T6 carousel punishes early throttle (off-camber + downhill)",
+      "T10 is fastest — most drivers brake when they only need a lift",
+      "T11 has no painted brake marker — use the bump in the road"
+    ],
+    "intel_source": "docs/sonoma_track_intelligence.md (compiled 2026-04-28)"
+  },
+  "markers": [
+    {
+      "id": "T1_kwall_bend",
+      "kind": "apex_ref",
+      "label": "the K-wall bend",
+      "at_offset_m_from_entry": -10,
+      "source": "kanga",
+      "distance": 66.0,
+      "lat": 23.493804,
+      "lon": -73.786948,
+      "corner": "Turn 1"
+    },
+    {
+      "id": "T2_bridge",
+      "kind": "brake_ref",
+      "label": "the bridge",
+      "at_offset_m_from_entry": 60,
+      "source": "kanga",
+      "distance": 476.0,
+      "lat": 23.495457,
+      "lon": -73.790151,
+      "corner": "Turn 2"
+    },
+    {
+      "id": "T2_pavement_cracks",
+      "kind": "brake_ref",
+      "label": "the pavement cracks",
+      "at_offset_m_from_entry": 30,
+      "source": "kanga",
+      "note": "alt to bridge",
+      "distance": 506.0,
+      "lat": 23.49543,
+      "lon": -73.790442,
+      "corner": "Turn 2"
+    },
+    {
+      "id": "T3_light_poles",
+      "kind": "visual",
+      "label": "the light poles in the stands",
+      "at_offset_m_from_entry": 60,
+      "source": "kanga",
+      "distance": 608.0,
+      "lat": 23.495061,
+      "lon": -73.791334,
+      "corner": "Turn 3"
+    },
+    {
+      "id": "T3_right_curbing",
+      "kind": "apex_ref",
+      "label": "the right-hand curbing",
+      "at_offset_m_from_entry": 0,
+      "source": "kanga",
+      "distance": 668.0,
+      "lat": 23.494661,
+      "lon": -73.79173,
+      "corner": "Turn 3"
+    },
+    {
+      "id": "T4_left_wall_step",
+      "kind": "brake_ref",
+      "label": "where the left wall steps up",
+      "at_offset_m_from_entry": 40,
+      "source": "kanga",
+      "distance": 936.0,
+      "lat": 23.495385,
+      "lon": -73.793841,
+      "corner": "Turn 4"
+    },
+    {
+      "id": "T6_tires_left",
+      "kind": "brake_ref",
+      "label": "the tire stacks on the left",
+      "at_offset_m_from_entry": 50,
+      "source": "kanga",
+      "distance": 1244.0,
+      "lat": 23.496706,
+      "lon": -73.796303,
+      "corner": "Turn 6"
+    },
+    {
+      "id": "T6_crest",
+      "kind": "brake_ref",
+      "label": "just after the slight crest",
+      "at_offset_m_from_entry": 30,
+      "source": "kanga",
+      "distance": 1264.0,
+      "lat": 23.496849,
+      "lon": -73.796423,
+      "corner": "Turn 6"
+    },
+    {
+      "id": "T6_corner_station",
+      "kind": "visual",
+      "label": "the corner station on the right",
+      "at_offset_m_from_entry": 0,
+      "source": "kanga",
+      "distance": 1294.0,
+      "lat": 23.497069,
+      "lon": -73.796583,
+      "corner": "Turn 6"
+    },
+    {
+      "id": "T7_300_board",
+      "kind": "brake_ref",
+      "label": "the 300 board",
+      "at_offset_m_from_entry": 80,
+      "source": "blayze",
+      "distance": 1460.0,
+      "lat": 23.497833,
+      "lon": -73.795696,
+      "corner": "Turn 7"
+    },
+    {
+      "id": "T10_toyota_sign",
+      "kind": "visual",
+      "label": "the Toyota sign letters",
+      "at_offset_m_from_entry": 0,
+      "source": "kanga",
+      "distance": 2556.0,
+      "lat": 23.49919,
+      "lon": -73.795558,
+      "corner": "Turn 10"
+    },
+    {
+      "id": "T10_left_berm",
+      "kind": "apex_ref",
+      "label": "the left berm",
+      "at_offset_m_from_entry": -10,
+      "source": "kanga",
+      "distance": 2566.0,
+      "lat": 23.499238,
+      "lon": -73.795636,
+      "corner": "Turn 10"
+    },
+    {
+      "id": "T11_bump",
+      "kind": "brake_ref",
+      "label": "the bump where the road widens left",
+      "at_offset_m_from_entry": 100,
+      "source": "blayze",
+      "note": "best brake reference — wait for the car to compress and settle",
+      "distance": 4000.0,
+      "lat": 23.493322,
+      "lon": -73.785621,
+      "corner": "Turn 11"
+    },
+    {
+      "id": "T11_pit_entry",
+      "kind": "brake_ref",
+      "label": "the pit-entry lines on the left",
+      "at_offset_m_from_entry": 70,
+      "source": "kanga",
+      "note": "alt to bump",
+      "distance": 4030.0,
+      "lat": 23.493066,
+      "lon": -73.785521,
+      "corner": "Turn 11"
+    },
+    {
+      "id": "T11_tire_stacks_turnin",
+      "kind": "turn_in_ref",
+      "label": "the start of the tire stacks on the left",
+      "at_offset_m_from_entry": 0,
+      "source": "blayze",
+      "distance": 4100.0,
+      "lat": 23.492471,
+      "lon": -73.785318,
+      "corner": "Turn 11"
+    },
+    {
+      "id": "T11_tire_stack_3",
+      "kind": "apex_ref",
+      "label": "the third tire stack",
+      "at_offset_m_from_entry": -20,
+      "source": "blayze",
+      "distance": 4120.0,
+      "lat": 23.492318,
+      "lon": -73.7853,
+      "corner": "Turn 11"
     }
   ]
 }
