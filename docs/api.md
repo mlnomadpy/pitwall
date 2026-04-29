@@ -15,8 +15,8 @@ See [ADR-010](adr/010-http-bridge-warm-path.md) for the design rationale.
 ## Run
 
 ```bash
-pip3 install flask duckdb requests          # one-time
-python3 tools/pitwall_bridge.py             # uses default track + auto coach
+pip3 install flask duckdb requests python-can cantools     # one-time
+python3 tools/pitwall_bridge.py                            # uses default track + auto coach
 ```
 
 Common variants:
@@ -38,6 +38,40 @@ Emulator tunnel:
 ```bash
 ~/Library/Android/sdk/platform-tools/adb reverse tcp:8765 tcp:8765
 ```
+
+### CAN ingest (ADR-016)
+
+The bridge can spawn an in-process [python-can](https://python-can.readthedocs.io/) reader on startup. When `--can-channel` is provided, frames decoded via [`cantools`](https://cantools.readthedocs.io/) using `data/dbc/pitwall.dbc` (default) flow into the same DuckDB the HTTP API serves: wide-table canonicals into `telemetry`, everything else into `telemetry_signals` (ADR-015 sink).
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--can-channel` | unset (no reader) | python-can channel (e.g. `pitwall_dev`, `/dev/ttyACM0`, `vcan0`) |
+| `--can-interface` | `virtual` | python-can interface (`virtual` \| `socketcan` \| `slcan` \| `pcan` \| `kvaser`) |
+| `--can-bitrate` | `500000` | bitrate for slcan/socketcan/pcan/kvaser |
+| `--can-dbc` | `data/dbc/pitwall.dbc` | DBC file(s) to load. Repeat to layer multiple. |
+| `--can-session-id` | auto-generated `<track-slug>-<UTC>` | session id to tag rows with |
+| `--can-flush-ms` | `100` | wide-table flush cadence (default 100 = 10 Hz) |
+
+```bash
+# Cross-platform dev / CI: virtual bus, no kernel modules required
+python3 tools/pitwall_bridge.py --can-channel pitwall_dev
+
+# In another terminal — replay a real VBO as CAN frames at 2× realtime
+python3 tools/can_simulator.py \
+    --vbo "/path/Sonoma Intermediate - 1_47.5.vbo" \
+    --channel pitwall_dev --speed 2.0
+
+# Linux dev with virtual CAN kernel module
+sudo modprobe vcan && sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
+python3 tools/pitwall_bridge.py --can-interface socketcan --can-channel vcan0
+
+# Production: USB-CAN adapter (CANable Pro / Macchina M2) on the Pixel via Termux
+python3 tools/pitwall_bridge.py \
+    --can-interface slcan --can-channel /dev/ttyACM0 \
+    --can-dbc data/dbc/pitwall.dbc --can-dbc data/dbc/bmw_e46_m3.dbc
+```
+
+When the reader is running, posting frames over HTTP via `POST /session/<sid>/frames` continues to work — both ingest paths land in the same wide table. CAN is the *primary* path for live sessions; HTTP frames are kept for VBO post-import (`POST /session/import`) and for unit tests.
 
 ---
 
@@ -321,7 +355,9 @@ Several endpoints (all the lap-time and sector ones) need to slice the per-frame
 2. For each frame `f`, project its (lat, lon) onto a local XY plane centred at S/F (small-angle approximation):
    $$x = (\text{lon}_f - \text{lon}_{\text{SF}}) \cdot \cos(\text{lat}_{\text{SF}}) \cdot R,\quad y = (\text{lat}_f - \text{lat}_{\text{SF}}) \cdot R,\quad R = 111{,}320\text{ m}$$
 3. Compute signed perpendicular distance to the S/F line (line orientation = `SF_HEADING_DEG`):
-   $$d_f = -x \sin(\theta) + y \cos(\theta),\quad \theta = \text{SF\_HEADING\_DEG}$$
+   $$d_f = -x \sin\theta + y \cos\theta$$
+
+   where θ is `SF_HEADING_DEG` (degrees from North, clockwise; 354.2° for Sonoma).
 4. A lap boundary is a frame where `d` changes from negative to non-negative, **and** the radial distance to the S/F point $\sqrt{x^2 + y^2} < 50$ m. The 50 m gate excludes crossings of the *infinite* perpendicular line that occur far from the physical S/F marker (e.g. parallel sections of the back straight).
 5. Only complete crossing-to-crossing intervals are counted as laps. The pre-first-crossing segment (out-lap) and the post-last-crossing segment (in-lap) are discarded.
 
@@ -722,7 +758,7 @@ ls data/tracks/
 
 **Math.** The track JSON's `reference_line` is sampled at every `step_m` (default 10 m, configurable via `?step_m=20`):
 
-$$\text{samples}_k = (d_k = k \cdot \text{step},\ z_k = \text{interp}(\text{reference\_line.elevation}, d_k))$$
+$$d_k = k \cdot \mathrm{step},\quad z_k = \mathrm{interp}(\mathit{reference\_line}, d_k)$$
 
 If the JSON has no per-sample elevation (legacy data), the bridge falls back to `[null]` for `elevation_m` and the response carries `"elevation_source": "missing"`.
 

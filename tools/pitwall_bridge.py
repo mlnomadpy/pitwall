@@ -3387,12 +3387,68 @@ def save_lap():
     return jsonify({"saved": True})
 
 
+# ── CAN reader hookup (ADR-015 + ADR-016) ──────────────────────────────────
+
+# Module-level reference so a shutdown hook can stop the reader cleanly.
+_can_reader = None
+
+
+def _start_can_reader(*, session_id: str, interface: str, channel: str,
+                      bitrate: int, dbc_paths: list, flush_ms: int):
+    """Start a CanReader thread that pumps CAN frames into pitwall's stores.
+
+    Called from the bridge entrypoint when --can-channel is set. Returns the
+    reader (or None if can_reader couldn't be imported / bus failed to open).
+    """
+    global _can_reader
+    try:
+        from can_reader import CanReader  # noqa: F401
+    except ImportError as e:
+        print(f"⚠  CAN reader unavailable ({e}); install python-can + cantools")
+        return None
+
+    try:
+        from can_reader import CanReader
+        _can_reader = CanReader(
+            session_id=session_id,
+            interface=interface,
+            channel=channel,
+            bitrate=bitrate,
+            dbc_paths=dbc_paths,
+            flush_ms=flush_ms,
+            bridge=sys.modules[__name__],
+        )
+        _can_reader.start()
+        print(f"✓  CAN reader started (interface={interface} "
+              f"channel={channel} session={session_id})")
+        return _can_reader
+    except Exception as e:
+        print(f"⚠  CAN reader failed to start: {e}")
+        return None
+
+
 # ── Entrypoint ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pitwall Bridge Server")
     parser.add_argument("--track", default=os.path.join(SIM_DIR, "sonoma.json"),
                         help="Path to track JSON (default: src/simulator/sonoma.json)")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--can-channel", default=None,
+                        help="Start CAN reader on this channel (e.g. 'pitwall_dev', "
+                             "'/dev/ttyACM0', 'vcan0'). When unset, no reader runs.")
+    parser.add_argument("--can-interface", default="virtual",
+                        help="python-can interface (virtual | socketcan | slcan | "
+                             "pcan | kvaser …). Default: virtual.")
+    parser.add_argument("--can-bitrate", type=int, default=500_000,
+                        help="Bitrate for slcan/socketcan/pcan/kvaser interfaces.")
+    parser.add_argument("--can-dbc", action="append", default=None,
+                        help="DBC file(s) to load for decoding. Repeat to layer "
+                             "multiple. Default: data/dbc/pitwall.dbc")
+    parser.add_argument("--can-session-id", default=None,
+                        help="session_id to tag CAN-ingested rows with. "
+                             "Default: auto-generated from track + UTC stamp.")
+    parser.add_argument("--can-flush-ms", type=int, default=100,
+                        help="Wide-table flush cadence in ms (default 100 = 10 Hz).")
     args = parser.parse_args()
 
     if HAS_SONIC and os.path.exists(args.track):
@@ -3409,10 +3465,35 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"⚠  signal_registry seed skipped: {e}")
 
+    # Optional CAN reader — when --can-channel is provided, spawn a thread
+    # that consumes the bus and ingests into the same DuckDB this bridge owns.
+    if args.can_channel:
+        sid = args.can_session_id or _new_session_id(_track.name if _track else None)
+        _ensure_session_row(
+            sid,
+            track=(_track.name if _track else None),
+            note="auto-created by bridge --can-channel",
+        )
+        _start_can_reader(
+            session_id=sid,
+            interface=args.can_interface,
+            channel=args.can_channel,
+            bitrate=args.can_bitrate,
+            dbc_paths=args.can_dbc,
+            flush_ms=args.can_flush_ms,
+        )
+        print(f"    CAN session: {sid}")
+
     port = args.port
     print(f"\n🏁  Pitwall Bridge v2 on http://127.0.0.1:{port}")
     print(f"    Engine: {'sonic_model (real cues)' if HAS_SONIC else 'rule fallback'}")
     print(f"    DuckDB: {'enabled → ' + DB_PATH if HAS_DUCKDB else 'disabled'}")
+    if args.can_channel:
+        print(f"    CAN:    {args.can_interface}/{args.can_channel}")
     print(f"\n    Emulator tunnel:")
     print(f"    ~/Library/Android/sdk/platform-tools/adb reverse tcp:{port} tcp:{port}\n")
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    try:
+        app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    finally:
+        if _can_reader is not None:
+            _can_reader.stop()
