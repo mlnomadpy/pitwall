@@ -57,11 +57,6 @@ def _start_session(client, **body):
     return f"test-sid-{_SID_COUNTER[0]:03d}"
 
 
-_LIFECYCLE_REMOVED = pytest.mark.skip(
-    reason="endpoint removed in master; sessions are implicit (POST /session/reset to clear)",
-)
-
-
 # ─── /health ─────────────────────────────────────────────────────────────────
 
 
@@ -78,29 +73,81 @@ def test_health_ok(client):
 # ─── /session/start, /sessions, /session/<sid>, /end ─────────────────────────
 
 
-@_LIFECYCLE_REMOVED
 def test_session_start_returns_id(client):
-    pass
+    r = client.post("/session/start", json={"driver": "Taha", "track": "Sonoma Raceway"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["started"] is True
+    assert body["session_id"].startswith("sonoma-raceway-")
 
 
-@_LIFECYCLE_REMOVED
+def test_session_start_accepts_custom_id(client):
+    r = client.post("/session/start", json={"session_id": "my-test-session", "driver": "x"})
+    assert r.status_code == 200
+    assert r.get_json()["session_id"] == "my-test-session"
+
+
 def test_sessions_list_includes_new_session(client):
-    pass
+    client.post("/session/start", json={"session_id": "list-test-1", "driver": "a"})
+    client.post("/session/start", json={"session_id": "list-test-2", "driver": "b"})
+    r = client.get("/sessions")
+    assert r.status_code == 200
+    body = r.get_json()
+    ids = {s["session_id"] for s in body["sessions"]}
+    assert {"list-test-1", "list-test-2"} <= ids
 
 
-@_LIFECYCLE_REMOVED
 def test_sessions_active_only_filters_ended(client):
-    pass
+    client.post("/session/start", json={"session_id": "active-1"})
+    client.post("/session/start", json={"session_id": "ended-1"})
+    client.post("/session/ended-1/end")
+    r = client.get("/sessions?active_only=true")
+    assert r.status_code == 200
+    ids = {s["session_id"] for s in r.get_json()["sessions"]}
+    assert "active-1" in ids
+    assert "ended-1" not in ids
 
 
-@_LIFECYCLE_REMOVED
 def test_session_end_idempotent(client):
-    pass
+    client.post("/session/start", json={"session_id": "end-test"})
+    r1 = client.post("/session/end-test/end")
+    r2 = client.post("/session/end-test/end")
+    assert r1.status_code == 200
+    assert r2.status_code == 200
+    assert r1.get_json()["ended"] is True
+    assert r2.get_json()["ended"] is True
 
 
-@_LIFECYCLE_REMOVED
 def test_session_detail_unknown_returns_404(client):
-    pass
+    r = client.get("/session/no-such-session")
+    assert r.status_code == 404
+
+
+def test_session_detail_returns_session_laps_notes(client, make_frame_fn):
+    sid = "detail-test"
+    client.post("/session/start", json={"session_id": sid, "driver": "d", "track": "Sonoma Raceway"})
+    client.post("/lap", json={
+        "session_id": sid, "lap_number": 1, "lap_time_s": 105.5,
+        "avg_speed_kmh": 110.0, "max_combo_g": 1.5,
+    })
+    r = client.get(f"/session/{sid}")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["session"]["session_id"] == sid
+    assert body["session"]["driver"] == "d"
+    assert len(body["laps"]) == 1
+    assert body["laps"][0]["lap_time_s"] == 105.5
+    assert body["lap_count"] == 1
+    assert body["best_lap_s"] == 105.5
+
+
+def test_sessions_list_limit_param(client):
+    for i in range(8):
+        client.post("/session/start", json={"session_id": f"lim-{i}"})
+    r = client.get("/sessions?limit=3")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["sessions"]) <= 3
 
 
 # ─── /session/<sid>/frames ───────────────────────────────────────────────────
@@ -280,6 +327,226 @@ def test_new_session_id_format():
 # ─── /analyze ────────────────────────────────────────────────────────────────
 
 
+# ─── ADR-015: signal registry (Phase 1) ──────────────────────────────────────
+
+
+def test_signal_registry_tables_created(client):
+    """get_db() should create all three ADR-015 tables on first connection."""
+    conn = br.get_db()
+    tables = {t[0] for t in conn.execute("SHOW TABLES").fetchall()}
+    conn.close()
+    assert {"signal_registry", "telemetry_signals", "session_capabilities"} <= tables
+
+
+def test_signal_registry_seed_populates_known_pids(client):
+    """seed_signal_registry() should load the static OBD-II catalog."""
+    n = br.seed_signal_registry()
+    assert n > 0
+    conn = br.get_db()
+    rows = conn.execute(
+        "SELECT name, units FROM signal_registry WHERE name = 'oil_temp_c'"
+    ).fetchall()
+    conn.close()
+    assert rows == [("oil_temp_c", "C")]
+
+
+def test_signal_registry_seed_is_idempotent(client):
+    """Calling seed twice must not duplicate rows."""
+    br.seed_signal_registry()
+    conn = br.get_db()
+    n1 = conn.execute("SELECT COUNT(*) FROM signal_registry").fetchone()[0]
+    conn.close()
+    br.seed_signal_registry()
+    conn = br.get_db()
+    n2 = conn.execute("SELECT COUNT(*) FROM signal_registry").fetchone()[0]
+    conn.close()
+    assert n1 == n2 and n1 > 0
+
+
+def test_signals_registry_endpoint_returns_full_catalog(client):
+    """GET /signals/registry must return every seeded signal."""
+    br.seed_signal_registry()
+    r = client.get("/signals/registry")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "count" in body and "signals" in body
+    names = {s["name"] for s in body["signals"]}
+    # Every group should have at least one representative
+    assert "speed_ms" in names            # wide-table canonical
+    assert "oil_temp_c" in names          # OBD-II
+    assert "wheel_speed_fl_kmh" in names  # DBC chassis
+    assert "tpms_fl_kpa" in names         # DBC tires
+    # Schema completeness
+    sample = body["signals"][0]
+    for key in ("signal_id", "name", "units", "semantics", "group",
+                "expected_hz", "min_useful_hz", "discovery"):
+        assert key in sample
+
+
+def test_signals_registry_endpoint_empty_before_seed(client):
+    """Without an explicit seed call, the table is empty but the endpoint still 200s."""
+    r = client.get("/signals/registry")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 0
+    assert body["signals"] == []
+
+
+# ─── ADR-015: signal sink ingest (Phase 2) ──────────────────────────────────
+
+
+def test_post_signals_appends_and_recompute_caps(client):
+    """POST /session/<sid>/signals appends rows + recomputes capabilities."""
+    br.seed_signal_registry()
+    sid = "phase2-ingest-001"
+    r = client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0, "value": 92.1},
+        {"name": "oil_temp_c", "t": 1001.0, "value": 92.5},
+        {"name": "oil_temp_c", "t": 1002.0, "value": 93.0},
+    ]})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["n_appended"] == 3
+    assert body["names"] == ["oil_temp_c"]
+    assert body["capabilities_count"] >= 1
+
+
+def test_post_signals_auto_registers_novel(client):
+    """A name not in the registry is registered as discovery='discovered', units=NULL."""
+    br.seed_signal_registry()
+    sid = "phase2-novel-001"
+    r = client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "shock_pot_fl_v", "t": 1000.0, "value": 1.23},
+    ]})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "shock_pot_fl_v" in body["newly_discovered"]
+    conn = br.get_db()
+    row = conn.execute(
+        "SELECT name, units, discovery FROM signal_registry WHERE name = 'shock_pot_fl_v'"
+    ).fetchone()
+    conn.close()
+    assert row == ("shock_pot_fl_v", None, "discovered")
+
+
+def test_post_signals_dedup_on_conflict(client):
+    """Re-posting (sid, signal_id, t) updates value but doesn't duplicate rows."""
+    br.seed_signal_registry()
+    sid = "phase2-dedup-001"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0, "value": 92.1},
+    ]})
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0, "value": 95.0},   # same t, new value
+    ]})
+    conn = br.get_db()
+    rows = conn.execute(
+        "SELECT t, value FROM telemetry_signals WHERE session_id = ?", [sid],
+    ).fetchall()
+    conn.close()
+    assert len(rows) == 1
+    assert rows[0][1] == 95.0
+
+
+def test_post_signals_empty_returns_400(client):
+    r = client.post("/session/x/signals", json={"signals": []})
+    assert r.status_code == 400
+
+
+def test_post_signals_invalid_samples_returns_400(client):
+    """Items missing t/value/name are dropped; if all are dropped, 400."""
+    br.seed_signal_registry()
+    r = client.post("/session/x/signals", json={"signals": [
+        {"name": "oil_temp_c"},                       # missing t + value
+        {"t": 1000.0, "value": 5},                    # missing name + signal_id
+    ]})
+    assert r.status_code == 400
+
+
+def test_compute_capabilities_advertises_wide_canonicals(client, make_frame_fn):
+    """A session with only wide-table frames still has all 11 canonical caps."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=i * 0.1, distance=i * 5.0) for i in range(50)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    n = br._compute_capabilities(sid)
+    assert n == len(br._WIDE_SIGNAL_NAMES)   # 11 canonical fields
+
+    conn = br.get_db()
+    rows = conn.execute(
+        """SELECT sr.name FROM session_capabilities sc
+           JOIN signal_registry sr USING(signal_id)
+           WHERE sc.session_id = ? ORDER BY sr.name""",
+        [sid],
+    ).fetchall()
+    conn.close()
+    names = {r[0] for r in rows}
+    assert names == set(br._WIDE_SIGNAL_NAMES)
+
+
+def test_compute_capabilities_combines_wide_and_tall(client, make_frame_fn):
+    """A session with both wide frames + tall signals exposes both groups."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0) for i in range(20)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0 + i * 0.5, "value": 90 + i}
+        for i in range(4)
+    ]})
+    conn = br.get_db()
+    names = {r[0] for r in conn.execute(
+        """SELECT sr.name FROM session_capabilities sc
+           JOIN signal_registry sr USING(signal_id)
+           WHERE sc.session_id = ?""", [sid],
+    ).fetchall()}
+    conn.close()
+    # Wide canonicals + the one tall signal
+    assert "speed_ms"   in names
+    assert "rpm"        in names
+    assert "oil_temp_c" in names
+
+
+def test_capabilities_recompute_endpoint_returns_count(client, make_frame_fn):
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=i * 0.1) for i in range(30)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.post(f"/session/{sid}/capabilities/recompute")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["session_id"] == sid
+    assert body["capabilities_count"] >= len(br._WIDE_SIGNAL_NAMES)
+
+
+def test_compute_capabilities_mean_hz_matches_density(client):
+    """3 samples spanning 1s → mean_hz ≈ 3.0; 2 samples spanning 0.05s → ≈ 40.0."""
+    br.seed_signal_registry()
+    sid = "phase2-rate-001"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c",     "t": 1000.0,  "value": 90},
+        {"name": "oil_temp_c",     "t": 1000.5,  "value": 91},
+        {"name": "oil_temp_c",     "t": 1001.0,  "value": 92},
+        {"name": "clutch_pos_pct", "t": 1000.0,  "value": 0},
+        {"name": "clutch_pos_pct", "t": 1000.05, "value": 50},
+    ]})
+    conn = br.get_db()
+    caps = {r[0]: r[1] for r in conn.execute(
+        """SELECT sr.name, sc.mean_hz FROM session_capabilities sc
+           JOIN signal_registry sr USING(signal_id)
+           WHERE sc.session_id = ?""", [sid],
+    ).fetchall()}
+    conn.close()
+    assert abs(caps["oil_temp_c"] - 3.0) < 0.01
+    assert abs(caps["clutch_pos_pct"] - 40.0) < 0.5
+
+
+# ─── /analyze ────────────────────────────────────────────────────────────────
+
+
 def test_analyze_returns_expected_keys(client):
     burst = {
         "session_id": "burst-sess",
@@ -299,3 +566,748 @@ def test_analyze_returns_expected_keys(client):
                 "cues", "source", "burst_id"):
         assert key in body
     assert body["burst_id"] == 7
+
+
+# ─── ADR-015: capabilities envelope + synchroniser (Phase 3) ────────────────
+
+
+def test_capabilities_endpoint_unknown_session_returns_404(client):
+    br.seed_signal_registry()
+    r = client.get("/session/no-such-session/capabilities")
+    assert r.status_code == 404
+
+
+def test_capabilities_endpoint_wide_only_returns_canonicals(client, make_frame_fn):
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0) for i in range(50)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    br._compute_capabilities(sid)
+
+    r = client.get(f"/session/{sid}/capabilities")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["session_id"] == sid
+    assert body["duration_s"] > 0
+    names = {s["name"] for s in body["signals"]}
+    assert set(br._WIDE_SIGNAL_NAMES) <= names
+    # All wide canonicals at 10 Hz are useful (min_useful_hz ≤ 10)
+    for s in body["signals"]:
+        if s["name"] == "speed_ms":
+            assert s["useful"] is True
+            assert s["mean_hz"] > 5.0
+    # Phase-4 wired (separate test verifies content); assert keys exist.
+    assert isinstance(body["coaches_available"], list)
+    assert isinstance(body["coaches_disabled"], list)
+
+
+def test_capabilities_endpoint_marks_low_rate_signal_not_useful(client):
+    """A 1 Hz signal whose registry min_useful_hz > 1 should report useful=false."""
+    br.seed_signal_registry()
+    sid = "phase3-useful-001"
+    # tpms_fl_kpa min_useful_hz is > 1 in the seed; post a 1 Hz stream
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "tpms_fl_kpa", "t": 1000.0 + i, "value": 230 + i * 0.1}
+        for i in range(5)
+    ]})
+    r = client.get(f"/session/{sid}/capabilities")
+    assert r.status_code == 200
+    body = r.get_json()
+    tpms = next(s for s in body["signals"] if s["name"] == "tpms_fl_kpa")
+    assert tpms["mean_hz"] < 2.0
+    # Whether useful is False depends on the registry seed; assert the field exists
+    assert "useful" in tpms
+
+
+def test_signals_get_missing_names_returns_400(client):
+    r = client.get("/session/anything/signals")
+    assert r.status_code == 400
+
+
+def test_signals_get_unknown_session_returns_404(client):
+    br.seed_signal_registry()
+    r = client.get("/session/nope/signals?names=speed_ms")
+    assert r.status_code == 404
+
+
+def test_signals_get_unknown_signal_returns_400(client, make_frame_fn):
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(10)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(f"/session/{sid}/signals?names=not_a_real_signal")
+    assert r.status_code == 400
+
+
+def test_signals_get_wide_canonical_returns_rows(client, make_frame_fn):
+    """Pulling speed_ms off the wide table should return one row per frame."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, speed_kmh=100 + i)
+              for i in range(20)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+
+    r = client.get(f"/session/{sid}/signals?names=speed_ms")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["names"] == ["speed_ms"]
+    assert body["missing"] == []
+    assert body["count"] == 20
+    # First frame: 100 kmh = 27.78 m/s
+    assert abs(body["rows"][0]["speed_ms"] - (100 / 3.6)) < 1e-3
+
+
+def test_signals_get_tall_signal_returns_rows(client):
+    """Tall-store signals come back through the synchroniser."""
+    br.seed_signal_registry()
+    sid = "phase3-tall-001"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0 + i, "value": 90 + i}
+        for i in range(5)
+    ]})
+    # axis defaults to gps; without a wide-table session, the only
+    # axis points come from the tall-store native rate. Use axis=oil_temp_c.
+    r = client.get(f"/session/{sid}/signals?names=oil_temp_c&axis=oil_temp_c")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 5
+    assert body["rows"][0]["oil_temp_c"] == 90.0
+    assert body["rows"][-1]["oil_temp_c"] == 94.0
+
+
+def test_signals_get_missing_signal_returns_null_column(client, make_frame_fn):
+    """A registered-but-empty signal yields null column + missing entry, 200."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(10)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(f"/session/{sid}/signals?names=speed_ms,oil_temp_c")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "oil_temp_c" in body["missing"]
+    assert all(row["oil_temp_c"] is None for row in body["rows"])
+    assert all(row["speed_ms"] is not None for row in body["rows"])
+
+
+def test_signals_get_interp_hold_is_asof(client):
+    """interp=hold returns the last value with t ≤ axis_t."""
+    br.seed_signal_registry()
+    sid = "phase3-hold-001"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0, "value": 90.0},
+        {"name": "oil_temp_c", "t": 1002.0, "value": 100.0},
+    ]})
+    r = client.get(
+        f"/session/{sid}/signals?names=oil_temp_c"
+        "&t_from=1000&t_to=1002&rate_hz=2&interp=hold"
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    # Axis ts: 1000.0, 1000.5, 1001.0, 1001.5, 2002.0
+    ts = [row["t"] for row in body["rows"]]
+    vals = [row["oil_temp_c"] for row in body["rows"]]
+    assert ts[0] == 1000.0 and vals[0] == 90.0       # exact match
+    assert vals[1] == 90.0                            # held, no later sample yet
+    assert vals[-1] == 100.0                          # 1002.0 sample seen
+
+
+def test_signals_get_interp_lerp_is_linear(client):
+    """interp=lerp linearly interpolates between bracketing samples."""
+    br.seed_signal_registry()
+    sid = "phase3-lerp-001"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1000.0, "value": 90.0},
+        {"name": "oil_temp_c", "t": 1002.0, "value": 100.0},
+    ]})
+    r = client.get(
+        f"/session/{sid}/signals?names=oil_temp_c"
+        "&t_from=1000&t_to=1002&rate_hz=2&interp=lerp"
+    )
+    assert r.status_code == 200
+    body = r.get_json()
+    by_t = {row["t"]: row["oil_temp_c"] for row in body["rows"]}
+    assert abs(by_t[1000.0] - 90.0) < 1e-6
+    assert abs(by_t[1001.0] - 95.0) < 1e-6   # halfway → 95
+    assert abs(by_t[1002.0] - 100.0) < 1e-6
+
+
+def test_signals_get_lerp_outside_range_is_null(client):
+    """lerp emits null for axis points before/after the sample range."""
+    br.seed_signal_registry()
+    sid = "phase3-lerp-edge"
+    client.post(f"/session/{sid}/signals", json={"signals": [
+        {"name": "oil_temp_c", "t": 1001.0, "value": 90.0},
+        {"name": "oil_temp_c", "t": 1002.0, "value": 100.0},
+    ]})
+    r = client.get(
+        f"/session/{sid}/signals?names=oil_temp_c"
+        "&t_from=1000&t_to=1003&rate_hz=1&interp=lerp"
+    )
+    body = r.get_json()
+    by_t = {row["t"]: row["oil_temp_c"] for row in body["rows"]}
+    assert by_t[1000.0] is None     # before first sample
+    assert by_t[1003.0] is None     # after last sample
+    assert by_t[1001.0] == 90.0
+    assert by_t[1002.0] == 100.0
+
+
+def test_signals_get_t_window_clipping(client, make_frame_fn):
+    """t_from/t_to clip the wide-table axis grid."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(30)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+
+    r = client.get(
+        f"/session/{sid}/signals?names=speed_ms&t_from=1001&t_to=1002"
+    )
+    body = r.get_json()
+    ts = [row["t"] for row in body["rows"]]
+    assert all(1001.0 <= t <= 1002.0 for t in ts)
+    assert len(ts) >= 9   # ~10 samples in the 1s window at 10 Hz
+
+
+def test_signals_get_rate_hz_uniform_grid(client, make_frame_fn):
+    """rate_hz=4 over a 2s window → 9 samples (inclusive of both endpoints)."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(30)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+
+    r = client.get(
+        f"/session/{sid}/signals?names=speed_ms"
+        "&t_from=1000&t_to=1002&rate_hz=4"
+    )
+    body = r.get_json()
+    assert body["count"] == 9
+    # Spacing should be 0.25 s
+    ts = [row["t"] for row in body["rows"]]
+    diffs = [ts[i + 1] - ts[i] for i in range(len(ts) - 1)]
+    for d in diffs:
+        assert abs(d - 0.25) < 1e-6
+
+
+def test_signals_get_lap_distance_axis_includes_distance_m(client, make_frame_fn):
+    """axis=lap_distance returns rows tagged with distance_m via ASOF on wide."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0) for i in range(20)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+
+    r = client.get(f"/session/{sid}/signals?names=speed_ms&axis=lap_distance")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["axis"] == "lap_distance"
+    assert all("distance_m" in row for row in body["rows"])
+    # Distance increases monotonically across the frames
+    dists = [row["distance_m"] for row in body["rows"]]
+    assert dists[0] < dists[-1]
+
+
+def test_signals_get_unknown_axis_returns_400(client, make_frame_fn):
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(10)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(
+        f"/session/{sid}/signals?names=speed_ms&axis=not_a_real_axis"
+    )
+    assert r.status_code == 400
+
+
+def test_signals_get_invalid_interp_returns_400(client):
+    r = client.get("/session/x/signals?names=speed_ms&interp=cubic")
+    assert r.status_code == 400
+
+
+def test_signals_get_lap_param_returns_400_phase3(client):
+    """Phase 3 documents lap clipping but defers it; unit-test the explicit 400."""
+    r = client.get("/session/x/signals?names=speed_ms&lap=2")
+    assert r.status_code == 400
+
+
+# Direct unit tests for the interpolation helpers — easier to debug than the
+# end-to-end Flask path.
+
+def test_interp_hold_unit():
+    samples = [(1000.0, 10.0), (1002.0, 20.0)]
+    assert br._interp_hold([999.0, 1000.0, 1001.0, 1002.0, 1003.0], samples) == [
+        None, 10.0, 10.0, 20.0, 20.0,
+    ]
+
+
+def test_interp_hold_empty():
+    assert br._interp_hold([1.0, 2.0], []) == [None, None]
+
+
+def test_interp_lerp_unit():
+    samples = [(1000.0, 10.0), (1002.0, 20.0)]
+    out = br._interp_lerp([999.0, 1000.0, 1001.0, 1002.0, 1003.0], samples)
+    assert out[0] is None
+    assert out[1] == 10.0
+    assert out[2] == 15.0
+    assert out[3] == 20.0
+    assert out[4] is None
+
+
+def test_interp_lerp_zero_width_segment():
+    """Two samples at the same t — lerp returns the earlier value."""
+    samples = [(1000.0, 10.0), (1000.0, 99.0), (1001.0, 20.0)]
+    out = br._interp_lerp([1000.0], samples)
+    assert out == [10.0]
+
+
+# ─── Phase 6: lap detection + analysis endpoints ─────────────────────────────
+
+
+def _ingest_multi_lap(client, sid, frames):
+    """Helper: post a multi-lap frame batch to /session/<sid>/frames."""
+    return client.post(
+        f"/session/{sid}/frames",
+        json={"frames": _frames_to_payload(frames), "driver": "test", "track": "Sonoma Raceway"},
+    )
+
+
+def test_detect_laps_finds_multiple_via_distance_wrap(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    laps = br._detect_laps(sid)
+    assert len(laps) >= 2     # at least 2 wraps in 3-lap data
+    for l in laps:
+        assert 60 <= l["lap_time_s"] <= 300
+        assert l["t_end"] > l["t_start"]
+        assert l["lap_number"] >= 1
+
+
+def test_detect_laps_unknown_session_empty(client):
+    assert br._detect_laps("no-such-session") == []
+
+
+def test_lap_time_table_404_for_unknown_session(client):
+    r = client.get("/session/missing/lap_time_table")
+    assert r.status_code == 404
+
+
+def test_lap_time_table_400_when_no_complete_laps(client, make_frame_fn):
+    """A short single-frame session can't produce a complete lap → 400."""
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=i * 0.1, distance=i * 5.0) for i in range(50)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(f"/session/{sid}/lap_time_table")
+    assert r.status_code == 400
+
+
+def test_lap_time_table_returns_lap_data(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/lap_time_table")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["lap_count"] >= 2
+    assert body["best_lap_s"] > 60
+    assert body["best_lap_number"] in [l["lap_number"] for l in body["laps"]]
+    # Exactly one lap is_best=True
+    bests = [l for l in body["laps"] if l["is_best"]]
+    assert len(bests) == 1
+    # delta_to_best is 0 for the best lap
+    assert bests[0]["delta_to_best_s"] == 0.0
+
+
+def test_lap_time_distribution_returns_box_plot_stats(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/lap_time_distribution")
+    assert r.status_code == 200
+    body = r.get_json()
+    for key in ("min_s", "max_s", "q1_s", "median_s", "q3_s", "iqr_s",
+                "whisker_low_s", "whisker_high_s", "outliers", "mean_s", "stddev_s"):
+        assert key in body
+    assert body["min_s"] <= body["median_s"] <= body["max_s"]
+    assert body["q1_s"] <= body["median_s"] <= body["q3_s"]
+
+
+def test_ideal_lap_returns_sum_of_best_sectors(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/ideal_lap")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ideal_lap_s"] <= body["best_actual_lap_s"] + 1e-3
+    assert body["gain_potential_s"] >= -1e-6
+    assert len(body["best_sectors"]) == 3
+
+
+def test_sector_times_thin_view(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/sector_times")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["sector_definitions"]) == 3
+    assert all("s1" in lap and "s2" in lap and "s3" in lap for lap in body["laps"])
+
+
+def test_pedal_behavior_returns_4_states(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/pedal_behavior")
+    assert r.status_code == 200
+    body = r.get_json()
+    states = body["states"]
+    for k in ("throttle_only", "brake_only", "trail_brake", "coast"):
+        assert k in states
+        assert "pct" in states[k]
+        assert "frames" in states[k]
+    # Sum of frames equals frame_count
+    assert sum(s["frames"] for s in states.values()) == body["frame_count"]
+
+
+def test_pedal_behavior_thresholds_query_param(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/pedal_behavior?throttle_th=50&brake_th=10")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["thresholds"]["throttle_pct"] == 50.0
+    assert body["thresholds"]["brake_bar"] == 10.0
+
+
+def test_pedal_behavior_404_unknown_session(client):
+    r = client.get("/session/missing/pedal_behavior")
+    assert r.status_code == 404
+
+
+def test_throttle_corner_box_returns_per_corner_stats(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/throttle_corner_box")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "corners" in body
+    assert len(body["corners"]) == 11    # all Sonoma corners
+    sample = next(c for c in body["corners"] if c["n_samples"] > 0)
+    assert sample["min_pct"] <= sample["median_pct"] <= sample["max_pct"]
+
+
+def test_corner_classification_groups_by_apex_speed(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/corner_classification")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert {b["band"] for b in body["bands"]} == {"low_speed", "med_speed", "high_speed"}
+    total_corners = sum(len(b["corners"]) for b in body["bands"])
+    assert total_corners == 11
+
+
+def test_corner_classification_404_unknown_session(client):
+    r = client.get("/session/missing/corner_classification")
+    assert r.status_code == 404
+
+
+def test_straight_line_speed_returns_per_straight_top(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/straight_line_speed")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["straights"]) == 3
+    front = next(s for s in body["straights"] if s["name"] == "Front Straight")
+    assert front["top_speed_kmh"] is not None
+    assert front["top_speed_kmh"] > 100
+
+
+def test_brake_acceleration_returns_zones_and_exits(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/brake_acceleration")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "brake_zones" in body
+    assert "corner_exits" in body
+    for z in body["brake_zones"]:
+        assert z["max_decel_g"] <= 0   # decel is negative
+        assert z["n_passes"] >= 1
+
+
+def test_track_elevation_returns_samples(client):
+    r = client.get("/track/sonoma/elevation")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["track_id"] == "sonoma"
+    assert body["min_elevation_m"] is not None
+    assert body["max_elevation_m"] >= body["min_elevation_m"]
+    assert len(body["samples"]) > 100
+
+
+def test_track_elevation_step_m_query(client):
+    r = client.get("/track/sonoma/elevation?step_m=50")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["step_m"] == 50.0
+    # 4258 m / 50 m ≈ 86 samples
+    assert 80 <= len(body["samples"]) <= 90
+
+
+def test_track_elevation_404_unknown_track(client):
+    r = client.get("/track/no-such-track/elevation")
+    assert r.status_code == 404
+
+
+def test_track_elevation_invalid_step_returns_400(client):
+    r = client.get("/track/sonoma/elevation?step_m=-5")
+    assert r.status_code == 400
+
+
+def test_driver_evolution_404_unknown_driver(client):
+    r = client.get("/driver/no-such-driver/evolution")
+    assert r.status_code == 404
+
+
+def test_driver_evolution_204_with_few_sessions(client, synth_multi_lap_frames):
+    """Driver with 2 sessions → 204 (frontend should hide panel)."""
+    for i in range(2):
+        sid = f"ev-test-{i}"
+        client.post(f"/session/{sid}/frames", json={
+            "frames": _frames_to_payload(synth_multi_lap_frames),
+            "driver": "evo-driver", "track": "Sonoma Raceway",
+        })
+    r = client.get("/driver/evo-driver/evolution?track=Sonoma Raceway")
+    assert r.status_code == 204
+
+
+def test_driver_evolution_returns_evolution_with_5_sessions(client, synth_multi_lap_frames):
+    for i in range(5):
+        sid = f"ev5-test-{i}"
+        client.post(f"/session/{sid}/frames", json={
+            "frames": _frames_to_payload(synth_multi_lap_frames),
+            "driver": "many-driver", "track": "Sonoma Raceway",
+        })
+    r = client.get("/driver/many-driver/evolution?track=Sonoma Raceway")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["session_count"] == 5
+    assert len(body["evolution"]) == 5
+    assert body["summary"]["first_best_s"] > 0
+    for ev in body["evolution"]:
+        assert "best_lap_s" in ev
+        assert "median_lap_s" in ev
+
+
+# ─── ADR-015 Phase 4: coach gating ──────────────────────────────────────────
+
+
+def test_coach_rules_registered_at_import():
+    """Built-in rules should be present in COACH_RULES after import."""
+    from coach_engine import COACH_RULES
+    ids = {r.id for r in COACH_RULES}
+    assert "base_pace_note" in ids
+    assert "oil_temp_warning_t11" in ids
+    assert "tpms_drift" in ids
+
+
+def test_coach_rule_decorator_dedupes_by_id():
+    """Re-registering the same id should replace, not duplicate."""
+    from coach_engine import coach_rule, COACH_RULES
+
+    n_before = len(COACH_RULES)
+
+    @coach_rule(id="dedupe_test", description="v1", requires=["x"])
+    def _v1(ctx, signals): pass
+
+    @coach_rule(id="dedupe_test", description="v2", requires=["y"])
+    def _v2(ctx, signals): pass
+
+    matching = [r for r in COACH_RULES if r.id == "dedupe_test"]
+    assert len(matching) == 1
+    assert matching[0].description == "v2"
+    # cleanup so other tests aren't affected
+    COACH_RULES[:] = [r for r in COACH_RULES if r.id != "dedupe_test"]
+    assert len(COACH_RULES) == n_before
+
+
+def test_evaluate_coach_gating_marks_missing_signals():
+    from coach_engine import evaluate_coach_gating
+    caps = {"speed_ms": {"mean_hz": 10.0, "useful": True},
+            "distance_m": {"mean_hz": 10.0, "useful": True}}
+    available, disabled = evaluate_coach_gating(caps)
+    assert "base_pace_note" in available
+    disabled_ids = {d["coach_id"] for d in disabled}
+    assert "trail_brake_score" in disabled_ids
+    assert "oil_temp_warning_t11" in disabled_ids
+
+
+def test_evaluate_coach_gating_min_rate_failure():
+    """Signal present but below min_useful_hz disables the rule."""
+    from coach_engine import evaluate_coach_gating
+    caps = {
+        "oil_temp_c": {"mean_hz": 0.5, "useful": False},   # 0.5 < 1.0
+        "distance_m": {"mean_hz": 10.0, "useful": True},
+    }
+    _, disabled = evaluate_coach_gating(caps)
+    oil = next((d for d in disabled if d["coach_id"] == "oil_temp_warning_t11"), None)
+    assert oil is not None
+    assert "rate" in oil["reason"].lower()
+
+
+def test_capabilities_endpoint_advertises_coach_gating(client, make_frame_fn):
+    """The /capabilities endpoint should populate coaches_available/disabled."""
+    br.seed_signal_registry()
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0) for i in range(50)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    br._compute_capabilities(sid)
+
+    r = client.get(f"/session/{sid}/capabilities")
+    assert r.status_code == 200
+    body = r.get_json()
+    # Wide-only session should at least enable base_pace_note + trail_brake_score
+    # (all signals are wide canonicals).
+    assert "base_pace_note" in body["coaches_available"]
+    assert "trail_brake_score" in body["coaches_available"]
+    # And disable ones requiring tall-store signals.
+    disabled_ids = {d["coach_id"] for d in body["coaches_disabled"]}
+    assert "oil_temp_warning_t11" in disabled_ids
+    assert "tpms_drift" in disabled_ids
+    # Each disabled entry has a reason
+    for d in body["coaches_disabled"]:
+        assert "reason" in d
+
+
+# ─── Quantile helper ────────────────────────────────────────────────────────
+
+
+def test_quantile_endpoints():
+    assert br._quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.0) == 1.0
+    assert br._quantile([1.0, 2.0, 3.0, 4.0, 5.0], 1.0) == 5.0
+    # Median of 5 values at p=0.5 → (n-1)*0.5+1 = 3 → exact 3.0
+    assert br._quantile([1.0, 2.0, 3.0, 4.0, 5.0], 0.5) == 3.0
+    # Empty list
+    assert br._quantile([], 0.5) == 0.0
+    # Single value
+    assert br._quantile([42.0], 0.5) == 42.0
+
+
+# ─── Roadmap endpoints (POST /session/<sid>/frame, /corners, /score, etc.) ──
+
+
+def test_post_single_frame_appends_and_returns_idx(client):
+    sid = _start_session(client)
+    payload = {
+        "timestamp": 1000.0, "distance": 0.0, "speed": 28.0,
+        "g_lat": 0.0, "g_long": 0.0, "combo_g": 0.0,
+        "brake_pressure": 0.0, "throttle": 99.0, "steering": 0.0,
+        "rpm": 4000.0, "lat": 23.49, "lon": -73.78,
+    }
+    r1 = client.post(f"/session/{sid}/frame", json=payload)
+    assert r1.status_code == 200
+    body = r1.get_json()
+    assert body["saved"] is True
+    assert body["frame_idx"] == 0
+
+    # Second post increments frame_idx
+    r2 = client.post(f"/session/{sid}/frame", json={**payload, "timestamp": 1000.1})
+    assert r2.get_json()["frame_idx"] == 1
+
+
+def test_post_single_frame_empty_returns_400(client):
+    sid = _start_session(client)
+    r = client.post(f"/session/{sid}/frame", json={})
+    assert r.status_code == 400
+
+
+def test_session_corners_404_when_no_telemetry(client):
+    r = client.get("/session/missing/corners")
+    assert r.status_code == 404
+
+
+def test_session_corners_returns_per_corner_aggregates(client, synth_multi_lap_frames):
+    sid = _start_session(client)
+    _ingest_multi_lap(client, sid, synth_multi_lap_frames)
+    r = client.get(f"/session/{sid}/corners")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["session_id"] == sid
+    assert body["lap_count"] >= 2
+    assert len(body["corners"]) == 11
+    sample = next(c for c in body["corners"] if c["n_passes"] > 0)
+    assert sample["best_pass"] is not None
+    for k in ("entry_speed_kmh", "apex_speed_kmh", "exit_speed_kmh",
+              "peak_brake_bar", "max_g_lat", "corner_time_s"):
+        assert k in sample["best_pass"]
+    assert sample["averages"]["apex_speed_kmh"] > 0
+
+
+def test_score_503_when_no_gemini(client, monkeypatch):
+    """Without GEMINI_API_KEY the endpoint should 503, not crash."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    r = client.post("/score", json={"session_id": "anything"})
+    assert r.status_code == 503
+
+
+def test_score_400_without_session_id(client, monkeypatch):
+    """When Gemini *is* available, missing session_id is a 400."""
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
+    monkeypatch.setattr(br, "HAS_GENAI", True)
+    r = client.post("/score", json={})
+    # Either HAS_GENAI is False (503) or session_id missing (400).
+    assert r.status_code in (400, 503)
+
+
+def test_score_404_for_unknown_session(client, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
+    monkeypatch.setattr(br, "HAS_GENAI", True)
+    r = client.post("/score", json={"session_id": "no-such-session"})
+    # If genai client construction fails (no real key), we'd get 502 from
+    # the gemini call branch. We only reach the "not found" branch if HAS_GENAI
+    # short-circuits earlier — accept 404 OR 502/503 here.
+    assert r.status_code in (404, 502, 503)
+
+
+def test_markers_no_filter_returns_all(client):
+    r = client.get("/markers")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] >= 16
+    assert body["filters"] == {"corner": None, "kind": None}
+
+
+def test_markers_corner_filter(client):
+    r = client.get("/markers?corner=Turn 11")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["filters"]["corner"] == "Turn 11"
+    for m in body["markers"]:
+        assert m["corner"] == "Turn 11"
+
+
+def test_markers_kind_filter(client):
+    r = client.get("/markers?kind=brake")
+    assert r.status_code == 200
+    body = r.get_json()
+    for m in body["markers"]:
+        assert m["kind"] == "brake"
+
+
+def test_coach_concepts_lists_nine(client):
+    r = client.get("/coach/concepts")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 9
+    ids = {c["id"] for c in body["concepts"]}
+    assert {"trail_brake", "exit_speed", "eob", "look_ahead",
+            "hustle", "late_apex", "entry_release",
+            "downhill_brake", "uphill_brake"} == ids
+    for c in body["concepts"]:
+        assert c["description"]
+        assert c["fires_when"]

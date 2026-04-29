@@ -279,19 +279,20 @@ The bridge runs the full `sonic_model` + `coach_engine` pipeline locally. With `
 
 - Flutter Pixel 10 app (`flutter/lib/platform/pitwall_channel.dart` → Kotlin `MessageArbiter`).
 - `python3 tools/pitwall_bridge.py` smoke test: 5 synthetic bursts produce one valid pace note before the 3-second arbiter cooldown silences the rest (works as designed).
+- `python3 tools/smoke_test_endpoints.py` end-to-end: ingests the Sonoma Intermediate VBO (8273 frames, 6.83 cumulative laps), streams 4 tall-store CAN-style signals into the ADR-015 sink, and asserts shape on every documented endpoint. 51/51 assertions green.
 - `pitwall_app.py --simple --replay <vbo>` runs the same `coach_engine` in-process for development without the bridge.
 
 ---
 
-## Roadmap (proposed, not yet built)
+## Roadmap endpoints — shipped 2026-04-29
 
 | Endpoint | Purpose | ADR |
 |---|---|---|
-| `POST /session/<sid>/frame` | Append a single telemetry frame (per-corner replay foundation) | TBD |
-| `GET /session/<sid>/corners` | Per-corner aggregates: best pass, grade A–F, gold-standard delta | TBD |
-| `POST /score` | Gemini-graded session score (0–100 + one-sentence why) | TBD |
-| `GET /markers?corner=Turn+11` | Track marker lookup (replaces hard-coded corner data on Flutter side) | [ADR-011](adr/011-named-marker-schema.md) |
-| `GET /coach/concepts` | List active pedagogical-vector concepts the coach can fire | [ADR-012](adr/012-coach-engine-adapter.md) |
+| `POST /session/<sid>/frame` | Append a single telemetry frame (per-corner replay foundation); returns assigned `frame_idx` | — |
+| `GET /session/<sid>/corners` | Per-corner aggregates: best pass + averages over all passes, optional A–F grade + gold-standard delta when `data/reference/sonoma_gold.json` is loadable | — |
+| `POST /score` | Gemini-graded session score (0–100 + one-sentence why); 503 when `GEMINI_API_KEY` unset | — |
+| `GET /markers?corner=&kind=` | Filterable view over the track JSON's marker list | [ADR-011](adr/011-named-marker-schema.md) |
+| `GET /coach/concepts` | The 9 Bentley pedagogical concepts the coach can fire, with description + when-fires hint | [ADR-012](adr/012-coach-engine-adapter.md) |
 
 ---
 
@@ -308,15 +309,23 @@ All eleven of these endpoints follow a common contract:
 
 ### Lap detection model
 
-Several endpoints (all the lap-time and sector ones) need to slice the per-frame stream into laps. The backend uses **start/finish line perpendicular projection with sign-change detection**:
+Several endpoints (all the lap-time and sector ones) need to slice the per-frame stream into laps. The backend (`tools/pitwall_bridge.py:_detect_laps`) tries three strategies in order, picking the first that yields any laps. This handles the three real shapes of session data: cumulative-distance Racelogic VBOs, per-lap-resetting synthetic frames, and any data without reliable distance integration.
 
-1. Take the S/F coordinate from `sonoma.py` (`SF_LAT = 38.16152`, `SF_LON = -122.45472`, `SF_HEADING_DEG`).
+**Strategy 1 — cumulative distance (Racelogic VBO, default).** Used when the final frame's `distance_m > 1.5 × track_length`. Lap boundary = `floor(d / track_length)` increments. Each multiple of `track_length` is one full lap; the pre-first-boundary segment (out-lap from pit lane) is discarded.
+
+**Strategy 2 — distance wraparound (synthetic / per-lap data).** Used when distance never exceeds `~1.5 × track_length` (i.e. `distance_m` resets toward 0 each lap). Lap boundary = a drop in `distance_m` greater than half the track length. The first segment is treated as lap 1 (synthetic data starts at distance 0, no out-lap).
+
+**Strategy 3 — GPS perpendicular S/F crossing (fallback).** Used when neither distance pattern is present:
+
+1. Take the S/F coordinate from the loaded track JSON's `start_finish` field (anonymized to match the dataset's GPS frame), falling back to `sonoma.py` constants (`SF_LAT = 38.16152`, `SF_LON = -122.45472`, `SF_HEADING_DEG = 354.2`) if the JSON has none.
 2. For each frame `f`, project its (lat, lon) onto a local XY plane centred at S/F (small-angle approximation):
    $$x = (\text{lon}_f - \text{lon}_{\text{SF}}) \cdot \cos(\text{lat}_{\text{SF}}) \cdot R,\quad y = (\text{lat}_f - \text{lat}_{\text{SF}}) \cdot R,\quad R = 111{,}320\text{ m}$$
 3. Compute signed perpendicular distance to the S/F line (line orientation = `SF_HEADING_DEG`):
-   $$d_f = -x \sin(\theta) + y \cos(\theta),\quad \theta = \text{SF_HEADING_DEG}$$
-4. A lap boundary is a frame where `d` changes sign in the canonical lap direction (negative→positive crossing within ±5 m of the line).
-5. Lap time = `t_end - t_start`. Laps shorter than 60 s or longer than 300 s are rejected as parser noise.
+   $$d_f = -x \sin(\theta) + y \cos(\theta),\quad \theta = \text{SF\_HEADING\_DEG}$$
+4. A lap boundary is a frame where `d` changes from negative to non-negative, **and** the radial distance to the S/F point $\sqrt{x^2 + y^2} < 50$ m. The 50 m gate excludes crossings of the *infinite* perpendicular line that occur far from the physical S/F marker (e.g. parallel sections of the back straight).
+5. Only complete crossing-to-crossing intervals are counted as laps. The pre-first-crossing segment (out-lap) and the post-last-crossing segment (in-lap) are discarded.
+
+**Final filter (all strategies):** lap time = `t_end - t_start`. Laps shorter than 60 s or longer than 300 s are rejected as parser noise. Accepted laps are renumbered 1..N in time order.
 
 Sector boundaries come from `sonoma.SECTORS`:
 
@@ -836,10 +845,20 @@ final chart = LineChart.fromSeries(r['evolution'], xKey: 'session_index', ySerie
 | coach | `/analyze` | POST | per-burst coaching |
 | coach | `/coach/brief` | GET | pre-session narrative |
 | coach | `/coach/debrief` | POST | post-session bundle |
+| lifecycle | `/session/start` | POST | open a session row (custom `session_id` optional) |
+| lifecycle | `/session/<sid>/end` | POST | stamp `ended_at = now()` (idempotent) |
+| lifecycle | `/sessions` | GET | list sessions; `?active_only=true` hides ended |
+| lifecycle | `/session/<sid>` | GET | full detail: session + laps + recent notes |
 | ingest | `/session/<sid>/frames` | POST | append telemetry batch |
+| ingest | `/session/<sid>/frame` | POST | **NEW** append a single frame; returns `frame_idx` |
 | ingest | `/session/<sid>/video_frames` | POST | append video frame metadata |
+| ingest | `/session/<sid>/signals` | POST | **ADR-015** append (name, t, value) tuples to tall sink |
 | ingest | `/session/import` | POST | parse VBO + persist |
 | ingest | `/session/reset` | POST | clear in-memory bundles |
+| sink | `/signals/registry` | GET | **ADR-015** full signal catalog (54 seeded + discovered) |
+| sink | `/session/<sid>/capabilities` | GET | **ADR-015** per-session signals + `coaches_available`/`disabled` (Phase 4) |
+| sink | `/session/<sid>/capabilities/recompute` | POST | **ADR-015** trigger capability recomputation |
+| sink | `/session/<sid>/signals` | GET | **ADR-015** synchroniser: `?names=&axis=&rate_hz=&interp=&t_from=&t_to=` |
 | analysis | `/session/<sid>/sync` | GET | telemetry × video at ±50ms |
 | analysis | `/session/<sid>/scorecard` | GET | A–F per corner |
 | analysis | `/session/<sid>/highlights` | GET | top 8 moments |
@@ -859,7 +878,11 @@ final chart = LineChart.fromSeries(r['evolution'], xKey: 'session_index', ySerie
 | analysis | `/session/<sid>/corner_classification` | GET | **NEW** low/med/high speed bands |
 | analysis | `/session/<sid>/straight_line_speed` | GET | **NEW** top speed per straight |
 | analysis | `/session/<sid>/brake_acceleration` | GET | **NEW** decel + exit-accel scatter |
+| analysis | `/session/<sid>/corners` | GET | **NEW** per-corner aggregates + best pass + optional gold delta |
 | profile | `/driver/<id>/profile` | GET | event-sourced profile |
-| profile | `/driver/<id>/evolution` | GET | **NEW** multi-session time-series |
+| profile | `/driver/<id>/evolution` | GET | **NEW** multi-session time-series (204 if <5 sessions) |
 | laps | `/lap` | POST | save a completed lap |
 | laps | `/laps` | GET | list laps |
+| roadmap | `/score` | POST | **NEW** Gemini-graded session score (503 without `GEMINI_API_KEY`) |
+| roadmap | `/markers` | GET | **NEW** filterable markers `?corner=&kind=` |
+| roadmap | `/coach/concepts` | GET | **NEW** 9 Bentley pedagogical concepts with description + `fires_when` |
