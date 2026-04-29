@@ -14,3 +14,7 @@ flutter/android/local.properties
 local.properties
 *.keystore
 *.jks
+
+android/app/build/
+build/
+.gradle/
