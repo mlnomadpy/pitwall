@@ -55,6 +55,7 @@ data class PitwallUiState(
     val insightsError: Boolean = false,
     val trackOutline: TrackOutline? = null,
     val cornerStats: Map<String, CornerSessionStats> = emptyMap(),
+    val useMph: Boolean = false,
 )
 
 /**
@@ -150,6 +151,8 @@ class PitwallViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun setDriverLevel(level: String) = _ui.update { it.copy(driverLevel = level) }
+    
+    fun setUseMph(useMph: Boolean) = _ui.update { it.copy(useMph = useMph) }
 
     /**
      * Probes real Bluetooth bonded-device state and pushes [HardwareStatus] entries
