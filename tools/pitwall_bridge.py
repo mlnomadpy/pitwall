@@ -86,6 +86,14 @@ try:
     HAS_DUCKDB = True
 except ImportError:
     HAS_DUCKDB = False
+
+# coach_engine integration — track whether the coach hooks loaded
+HAS_COACH = False
+try:
+    from coach_engine import make_coach as _make_coach   # noqa: F401
+    HAS_COACH = True
+except ImportError:
+    pass
     print("⚠  duckdb not installed — lap history disabled. pip3 install duckdb")
 
 # ── Global state ───────────────────────────────────────────────────────────────
@@ -639,6 +647,18 @@ def session_reset():
         count = len(_session_bursts)
         _session_bursts.clear()
     return jsonify({"cleared_bursts": count, "status": "ok"})
+
+
+def _new_session_id(track_name: str | None = None) -> str:
+    """Stable session id derived from the track + UTC stamp.
+
+    Used by /coach/debrief and /session/import when the caller doesn't
+    supply their own session_id. Lives at module scope so unit tests can
+    import it directly (test_bridge.test_new_session_id_format).
+    """
+    slug = (track_name or "session").lower().replace(" ", "-")
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    return f"{slug}-{stamp}"
 
 
 # ── Per-frame telemetry ingestion ─────────────────────────────────────────────
