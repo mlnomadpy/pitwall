@@ -4,131 +4,109 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.os.Bundle
 import android.os.IBinder
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.pitwall.app.service.PitwallService
-import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.MethodChannel
+import com.pitwall.app.ui.PitwallApp
+import com.pitwall.app.ui.PitwallViewModel
+import com.pitwall.app.ui.SessionCommand
+import kotlinx.coroutines.launch
+
+private const val TAG = "MainActivity"
 
 /**
- * MainActivity — FlutterActivity host.
+ * MainActivity — thin Compose host + service lifecycle owner.
  *
- * Sets up two Platform Channels between Flutter UI and the native Kotlin engine:
- *
- *   METHOD CHANNEL  "com.pitwall.app/control"
- *     → startSession(replayPath?)   start the foreground service
- *     → stopSession()               stop the service
- *     → setDriverLevel(level)       "beginner" | "intermediate" | "pro"
- *     → isOnline()                  check 5G/Network connectivity
- *
- *   EVENT CHANNEL   "com.pitwall.app/telemetry"
- *     ← TelemetryFrame map (every 10Hz frame)
- *
- *   EVENT CHANNEL   "com.pitwall.app/coaching"
- *     ← CoachingMessage map (on delivery from arbiter)
+ * The ViewModel emits [SessionCommand] events; this Activity executes them
+ * using Activity context (required for foreground service on API 31+).
+ * The ViewModel never touches Context or Service directly.
  */
-class MainActivity : FlutterActivity() {
+class MainActivity : ComponentActivity() {
 
-    private var pitwallService: PitwallService? = null
-    private var serviceConnection: ServiceConnection? = null
+    private val viewModel: PitwallViewModel by viewModels()
 
-    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
-        super.configureFlutterEngine(flutterEngine)
+    private var isBound = false
 
-        // ── Method Channel: session control ───────────────────────────────────
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL_CONTROL
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "startSession" -> {
-                    val replayPath = call.argument<String?>("replayPath")
-                    startPitwallService(replayPath)
-                    result.success(null)
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            Log.i(TAG, "PitwallService connected")
+            val svc = (binder as PitwallService.LocalBinder).service
+            isBound = true
+            viewModel.onServiceConnected(svc)
+            viewModel.onSessionStarted()
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Log.i(TAG, "PitwallService disconnected")
+            isBound = false
+            viewModel.onServiceDisconnected()
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+
+        // Observe ViewModel commands and execute them with Activity context
+        lifecycleScope.launch {
+            viewModel.commands.collect { cmd ->
+                when (cmd) {
+                    is SessionCommand.Start -> startAndBindService(cmd.replayPath, cmd.level)
+                    is SessionCommand.Stop  -> stopAndUnbindService()
                 }
-                "stopSession" -> {
-                    pitwallService?.stopSession()
-                    result.success(null)
-                }
-                "setDriverLevel" -> {
-                    val level = call.argument<String>("level") ?: "intermediate"
-                    pitwallService?.setDriverLevel(level)
-                    result.success(null)
-                }
-                "getSessionStats" -> {
-                    result.success(pitwallService?.getSessionStats())
-                }
-                "isOnline" -> {
-                    result.success(isOnline())
-                }
-                else -> result.notImplemented()
             }
         }
 
-        // ── Event Channel: telemetry frames ───────────────────────────────────
-        EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL_TELEMETRY
-        ).setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
-                pitwallService?.setTelemetrySink(events)
-            }
-            override fun onCancel(arguments: Any?) {
-                pitwallService?.setTelemetrySink(null)
-            }
-        })
-
-        // ── Event Channel: coaching messages ──────────────────────────────────
-        EventChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            CHANNEL_COACHING
-        ).setStreamHandler(object : EventChannel.StreamHandler {
-            override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
-                pitwallService?.setCoachingSink(events)
-            }
-            override fun onCancel(arguments: Any?) {
-                pitwallService?.setCoachingSink(null)
-            }
-        })
+        setContent {
+            PitwallApp(viewModel)
+        }
     }
 
-    private fun isOnline(): Boolean {
-        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val cap = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
+    private fun startAndBindService(replayPath: String?, level: String) {
+        // Take a persistent read permission for content:// URIs (file picker).
+        // Without this the ContentResolver in PitwallService (a different context) can't read the file.
+        if (replayPath != null && replayPath.startsWith("content://")) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    android.net.Uri.parse(replayPath),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Could not take persistable URI permission: ${e.message}")
+            }
+        }
 
-    private fun startPitwallService(replayPath: String?) {
         val intent = Intent(this, PitwallService::class.java).apply {
             replayPath?.let { putExtra(PitwallService.EXTRA_REPLAY_PATH, it) }
+            putExtra(PitwallService.EXTRA_DRIVER_LEVEL, level)
         }
+        // Must use Activity context for startForegroundService on API 31+
         startForegroundService(intent)
-
-        val conn = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-                pitwallService = (binder as PitwallService.LocalBinder).service
-                // Register any pending event sinks
-            }
-            override fun onServiceDisconnected(name: ComponentName?) {
-                pitwallService = null
-            }
+        if (!isBound) {
+            bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
-        bindService(intent, conn, BIND_AUTO_CREATE)
-        serviceConnection = conn
+        Log.i(TAG, "Started foreground service (replay=$replayPath, level=$level)")
+    }
+
+    private fun stopAndUnbindService() {
+        if (isBound) {
+            unbindService(serviceConnection)
+            isBound = false
+        }
+        stopService(Intent(this, PitwallService::class.java))
+        Log.i(TAG, "Stopped service")
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        serviceConnection?.let { unbindService(it) }
-    }
-
-    companion object {
-        const val CHANNEL_CONTROL = "com.pitwall.app/control"
-        const val CHANNEL_TELEMETRY = "com.pitwall.app/telemetry"
-        const val CHANNEL_COACHING = "com.pitwall.app/coaching"
+        if (isBound) {
+            try { unbindService(serviceConnection) } catch (_: Exception) {}
+            isBound = false
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.pitwall.app.service
 
+import android.net.Uri
 import android.util.Log
 import com.pitwall.app.data.RawFrame
 import com.pitwall.app.fusion.SensorFusion
@@ -7,7 +8,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.io.File
+import java.io.BufferedReader
+import java.io.InputStreamReader
 
 private const val TAG = "ReplayService"
 
@@ -24,19 +26,19 @@ private const val TAG = "ReplayService"
  */
 class ReplayService(
     private val context: android.content.Context,
-    private val vboFile: File,
+    private val vboUri: Uri,
     private val fusion: SensorFusion,
     private val speedMultiplier: Float = 1f,
 ) {
     fun start(scope: CoroutineScope) = scope.launch(Dispatchers.IO) {
-        Log.i(TAG, "Replaying ${vboFile.name} (${vboFile.length() / 1024}KB) at ${speedMultiplier}x")
+        Log.i(TAG, "Replaying $vboUri at ${speedMultiplier}x")
 
-        val frames = parseVbo(vboFile)
+        val frames = parseVbo(vboUri)
         if (frames.isEmpty()) {
             Log.e(TAG, "No frames parsed — check VBO format")
             return@launch
         }
-        Log.i(TAG, "Parsed ${frames.size} frames from ${vboFile.name}")
+        Log.i(TAG, "Parsed ${frames.size} frames")
 
         for ((i, frame) in frames.withIndex()) {
             fusion.onRacelogicFrame(frame)
@@ -96,14 +98,18 @@ class ReplayService(
         "distance"                          to "distance",
     )
 
-    private fun parseVbo(file: File): List<RawFrame> {
+    private fun parseVbo(uri: Uri): List<RawFrame> {
         val frames = mutableListOf<RawFrame>()
         var inData = false
         var inColumnNames = false
         val colIndex = mutableMapOf<String, Int>()  // canonical name → column index
         var startTimeSecs: Double? = null
 
-        file.forEachLine { raw ->
+        val inputStream = context.contentResolver.openInputStream(uri)
+            ?: run { Log.e(TAG, "Cannot open URI: $uri"); return emptyList() }
+
+        BufferedReader(InputStreamReader(inputStream)).use { reader ->
+            reader.forEachLine { raw ->
             val line = raw.trim()
             when {
                 // Section markers
@@ -190,7 +196,8 @@ class ReplayService(
                     )
                 }
             }
-        }
+            }  // end forEachLine
+        }  // end BufferedReader.use
 
         return frames
     }

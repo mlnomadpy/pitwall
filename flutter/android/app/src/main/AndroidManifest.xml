@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
-    <!-- Network for Antigravity / Vertex AI warm path -->
+    <!-- Network for Python bridge warm path -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
@@ -26,58 +26,39 @@
     <!-- Audio output to Pixel Earbuds -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
-    <!-- Storage access for VBO replay files (READ_EXTERNAL_STORAGE for API ≤32,
-         READ_MEDIA_VIDEO/AUDIO not needed — VBO is a document; use file_picker below) -->
+    <!-- Storage access for VBO replay files -->
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
-    <!-- API 33+ scoped storage: file_picker uses ACTION_OPEN_DOCUMENT, no extra permission needed -->
 
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
 
     <application
-        android:name="${applicationName}"
         android:label="Pitwall"
         android:icon="@mipmap/ic_launcher"
         android:hardwareAccelerated="true"
-        android:networkSecurityConfig="@xml/network_security_config">
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/Theme.Pitwall">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:screenOrientation="landscape"
-            android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustNothing">
-            <meta-data
-                android:name="io.flutter.embedding.android.NormalTheme"
-                android:resource="@style/NormalTheme" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <!-- Pitwall foreground service — continuous telemetry + coaching engine -->
+        <!-- Pitwall foreground service — VBO relay + Python bridge -->
         <service
             android:name=".service.PitwallService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Required by Flutter tool -->
-        <meta-data
-            android:name="flutterEmbedding"
-            android:value="2" />
     </application>
 
-    <!-- Required by Flutter engine for text processing -->
-    <queries>
-        <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT" />
-            <data android:mimeType="text/plain" />
-        </intent>
-    </queries>
 </manifest>
-
