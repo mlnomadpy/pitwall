@@ -54,6 +54,8 @@
           "at_offset_m_from_entry": -10,
           "source": "kanga",
           "distance": 66.0,
+          "lat": 23.493804,
+          "lon": -73.786948,
           "corner": "Turn 1"
         }
       ]
@@ -99,6 +101,8 @@
           "at_offset_m_from_entry": 60,
           "source": "kanga",
           "distance": 476.0,
+          "lat": 23.495457,
+          "lon": -73.790151,
           "corner": "Turn 2"
         },
         {
@@ -109,6 +113,8 @@
           "source": "kanga",
           "note": "alt to bridge",
           "distance": 506.0,
+          "lat": 23.49543,
+          "lon": -73.790442,
           "corner": "Turn 2"
         }
       ]
@@ -154,6 +160,8 @@
           "at_offset_m_from_entry": 0,
           "source": "kanga",
           "distance": 668.0,
+          "lat": 23.494661,
+          "lon": -73.79173,
           "corner": "Turn 3"
         },
         {
@@ -163,6 +171,8 @@
           "at_offset_m_from_entry": 60,
           "source": "kanga",
           "distance": 608.0,
+          "lat": 23.495061,
+          "lon": -73.791334,
           "corner": "Turn 3"
         }
       ]
@@ -208,6 +218,8 @@
           "at_offset_m_from_entry": 40,
           "source": "kanga",
           "distance": 936.0,
+          "lat": 23.495385,
+          "lon": -73.793841,
           "corner": "Turn 4"
         }
       ]
@@ -290,6 +302,8 @@
           "at_offset_m_from_entry": 30,
           "source": "kanga",
           "distance": 1264.0,
+          "lat": 23.496849,
+          "lon": -73.796423,
           "corner": "Turn 6"
         },
         {
@@ -299,6 +313,8 @@
           "at_offset_m_from_entry": 50,
           "source": "kanga",
           "distance": 1244.0,
+          "lat": 23.496706,
+          "lon": -73.796303,
           "corner": "Turn 6"
         },
         {
@@ -308,6 +324,8 @@
           "at_offset_m_from_entry": 0,
           "source": "kanga",
           "distance": 1294.0,
+          "lat": 23.497069,
+          "lon": -73.796583,
           "corner": "Turn 6"
         }
       ]
@@ -353,6 +371,8 @@
           "at_offset_m_from_entry": 80,
           "source": "blayze",
           "distance": 1460.0,
+          "lat": 23.497833,
+          "lon": -73.795696,
           "corner": "Turn 7"
         }
       ]
@@ -470,6 +490,8 @@
           "at_offset_m_from_entry": 0,
           "source": "kanga",
           "distance": 2556.0,
+          "lat": 23.49919,
+          "lon": -73.795558,
           "corner": "Turn 10"
         },
         {
@@ -479,6 +501,8 @@
           "at_offset_m_from_entry": -10,
           "source": "kanga",
           "distance": 2566.0,
+          "lat": 23.499238,
+          "lon": -73.795636,
           "corner": "Turn 10"
         }
       ]
@@ -528,6 +552,8 @@
           "source": "blayze",
           "note": "best brake reference — wait for the car to compress and settle",
           "distance": 4000.0,
+          "lat": 23.493322,
+          "lon": -73.785621,
           "corner": "Turn 11"
         },
         {
@@ -538,6 +564,8 @@
           "source": "kanga",
           "note": "alt to bump",
           "distance": 4030.0,
+          "lat": 23.493066,
+          "lon": -73.785521,
           "corner": "Turn 11"
         },
         {
@@ -547,6 +575,8 @@
           "at_offset_m_from_entry": -20,
           "source": "blayze",
           "distance": 4120.0,
+          "lat": 23.492318,
+          "lon": -73.7853,
           "corner": "Turn 11"
         },
         {
@@ -556,6 +586,8 @@
           "at_offset_m_from_entry": 0,
           "source": "blayze",
           "distance": 4100.0,
+          "lat": 23.492471,
+          "lon": -73.785318,
           "corner": "Turn 11"
         }
       ]
@@ -7635,6 +7667,8 @@
       "at_offset_m_from_entry": -10,
       "source": "kanga",
       "distance": 66.0,
+      "lat": 23.493804,
+      "lon": -73.786948,
       "corner": "Turn 1"
     },
     {
@@ -7644,6 +7678,8 @@
       "at_offset_m_from_entry": 60,
       "source": "kanga",
       "distance": 476.0,
+      "lat": 23.495457,
+      "lon": -73.790151,
       "corner": "Turn 2"
     },
     {
@@ -7654,6 +7690,8 @@
       "source": "kanga",
       "note": "alt to bridge",
       "distance": 506.0,
+      "lat": 23.49543,
+      "lon": -73.790442,
       "corner": "Turn 2"
     },
     {
@@ -7663,6 +7701,8 @@
       "at_offset_m_from_entry": 60,
       "source": "kanga",
       "distance": 608.0,
+      "lat": 23.495061,
+      "lon": -73.791334,
       "corner": "Turn 3"
     },
     {
@@ -7672,6 +7712,8 @@
       "at_offset_m_from_entry": 0,
       "source": "kanga",
       "distance": 668.0,
+      "lat": 23.494661,
+      "lon": -73.79173,
       "corner": "Turn 3"
     },
     {
@@ -7681,6 +7723,8 @@
       "at_offset_m_from_entry": 40,
       "source": "kanga",
       "distance": 936.0,
+      "lat": 23.495385,
+      "lon": -73.793841,
       "corner": "Turn 4"
     },
     {
@@ -7690,6 +7734,8 @@
       "at_offset_m_from_entry": 50,
       "source": "kanga",
       "distance": 1244.0,
+      "lat": 23.496706,
+      "lon": -73.796303,
       "corner": "Turn 6"
     },
     {
@@ -7699,6 +7745,8 @@
       "at_offset_m_from_entry": 30,
       "source": "kanga",
       "distance": 1264.0,
+      "lat": 23.496849,
+      "lon": -73.796423,
       "corner": "Turn 6"
     },
     {
@@ -7708,6 +7756,8 @@
       "at_offset_m_from_entry": 0,
       "source": "kanga",
       "distance": 1294.0,
+      "lat": 23.497069,
+      "lon": -73.796583,
       "corner": "Turn 6"
     },
     {
@@ -7717,6 +7767,8 @@
       "at_offset_m_from_entry": 80,
       "source": "blayze",
       "distance": 1460.0,
+      "lat": 23.497833,
+      "lon": -73.795696,
       "corner": "Turn 7"
     },
     {
@@ -7726,6 +7778,8 @@
       "at_offset_m_from_entry": 0,
       "source": "kanga",
       "distance": 2556.0,
+      "lat": 23.49919,
+      "lon": -73.795558,
       "corner": "Turn 10"
     },
     {
@@ -7735,6 +7789,8 @@
       "at_offset_m_from_entry": -10,
       "source": "kanga",
       "distance": 2566.0,
+      "lat": 23.499238,
+      "lon": -73.795636,
       "corner": "Turn 10"
     },
     {
@@ -7745,6 +7801,8 @@
       "source": "blayze",
       "note": "best brake reference — wait for the car to compress and settle",
       "distance": 4000.0,
+      "lat": 23.493322,
+      "lon": -73.785621,
       "corner": "Turn 11"
     },
     {
@@ -7755,6 +7813,8 @@
       "source": "kanga",
       "note": "alt to bump",
       "distance": 4030.0,
+      "lat": 23.493066,
+      "lon": -73.785521,
       "corner": "Turn 11"
     },
     {
@@ -7764,6 +7824,8 @@
       "at_offset_m_from_entry": 0,
       "source": "blayze",
       "distance": 4100.0,
+      "lat": 23.492471,
+      "lon": -73.785318,
       "corner": "Turn 11"
     },
     {
@@ -7773,6 +7835,8 @@
       "at_offset_m_from_entry": -20,
       "source": "blayze",
       "distance": 4120.0,
+      "lat": 23.492318,
+      "lon": -73.7853,
       "corner": "Turn 11"
     }
   ]

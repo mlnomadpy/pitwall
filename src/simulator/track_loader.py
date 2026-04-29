@@ -265,7 +265,8 @@ def find_nearest_marker(
         if corner and m.corner != corner:
             continue
         gap = (m.distance - track_dist) % track.track_length if track.track_length else m.distance - track_dist
-        if 0 < gap < lookahead and gap < best_gap:
+        # gap=0 means the marker is right at the car's position — accept it
+        if 0 <= gap < lookahead and gap < best_gap:
             best = m
             best_gap = gap
     return best

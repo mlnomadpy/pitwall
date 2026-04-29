@@ -45,6 +45,7 @@ class TelemetryFrame:
     corner_severity: int = 0
     lap: int = 0
     lap_time: float = 0.0
+    avitime: float = 0.0        # synced video time in seconds (from VBO avitime column)
 
 
 def parse_vbo_coord(value: float) -> float:
@@ -173,6 +174,7 @@ def parse_vbo(filepath: object) -> tuple[VBOMetadata, list[TelemetryFrame]]:
             oil_temp=row.get("Oil_Temperature", 0),
             fuel_level=row.get("Fuel_Level", 0),
             distance=cumulative_distance,
+            avitime=row.get("avitime", 0),
         )
         frames.append(frame)
 
