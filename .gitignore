@@ -14,3 +14,14 @@ flutter/android/local.properties
 local.properties
 *.keystore
 *.jks
+
+android/app/build/
+build/
+.gradle/
+bridge.log
+
+android/.idea/caches/
+android/.idea/workspace.xml
+android/.idea/tasks.xml
+models/gemma-4-E2B-it.task
+
