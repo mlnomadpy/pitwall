@@ -174,5 +174,5 @@ Things we considered and rejected.
 - [`01-visual-language.md`](01-visual-language.md) — palette + typography
 - [`02-sprite-sheet-spec.md`](02-sprite-sheet-spec.md) — frame inventory
 - [`03-character-bible.md`](03-character-bible.md) — the cast
-- [`screens/`](screens/) — every screen in the journey
+- [`screens/00-title.md`](screens/00-title.md) — first screen; the rest live alongside it under `screens/`
 - [ADR-013 — Frontend visualises, backend reasons](../adr/013-frontend-backend-boundary.md)
