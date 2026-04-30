@@ -28,6 +28,7 @@ from __future__ import annotations
 import enum
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -499,6 +500,21 @@ _SYSTEM_PROMPTS_BY_MODE = {
 }
 
 
+VALID_EMOTIONS = frozenset({
+    "neutral", "thinking", "analyzing", "encouraging", "proud",
+    "excited", "serious", "concerned", "disappointed", "intense",
+    "relaxed", "tired",
+})
+
+_EMOTION_TAG_INSTRUCTION = (
+    "At the START of your reply, emit exactly one tag in the form "
+    "[EMOTION: <name>] where <name> is one of: "
+    + ", ".join(sorted(VALID_EMOTIONS))
+    + ". Then a single newline, then your normal coaching response. "
+    "Do not emit the tag anywhere else in the reply."
+)
+
+
 def build_system_prompt(driver_level: str, track_name: str = "",
                         mode: CoachMode = CoachMode.DURING_DRIVE) -> str:
     """Compose the full system prompt for any LLM coach.
@@ -516,7 +532,32 @@ def build_system_prompt(driver_level: str, track_name: str = "",
         )
     if track_name and track_name in _TRACK_LORE:
         parts.append(_TRACK_LORE[track_name].strip())
+    # Emotion-tag contract — LLM declares its mood for the avatar.
+    parts.append(_EMOTION_TAG_INSTRUCTION)
     return "\n\n".join(parts)
+
+
+_EMOTION_TAG_RE = re.compile(r"^\s*\[EMOTION:\s*(\w+)\s*\]\s*\n?", re.IGNORECASE)
+
+
+def _extract_emotion(text: str) -> tuple[str, str]:
+    """Strip a leading `[EMOTION: ...]` tag and return (cleaned_text, emotion).
+
+    Falls back to `neutral` if no tag is present, or the tag's value isn't
+    in VALID_EMOTIONS. The Gemma 4 E2B model is small enough that occasional
+    tag drift is expected; failing safely to neutral keeps the avatar
+    rendering even when the LLM forgets.
+    """
+    if not text:
+        return "", "neutral"
+    m = _EMOTION_TAG_RE.match(text)
+    if not m:
+        return text, "neutral"
+    emotion = m.group(1).lower()
+    cleaned = text[m.end():]
+    if emotion not in VALID_EMOTIONS:
+        emotion = "neutral"
+    return cleaned, emotion
 
 
 def build_pre_brief_user_prompt(
@@ -866,8 +907,15 @@ class LitertCoach(CoachEngine):
               biggest_recent_improvement: Optional[dict] = None,
               danger_zones_today: Optional[list[str]] = None,
               goal: str = "personal best lap",
-              driver_level: Optional[str] = None) -> tuple[str, list[str]]:
-        """PRE_BRIEF mode. Returns (narrative_md, focus_list)."""
+              driver_level: Optional[str] = None
+              ) -> tuple[str, list[str], str]:
+        """PRE_BRIEF mode. Returns (narrative_md, focus_list, emotion).
+
+        `emotion` is one of `coach_engine.VALID_EMOTIONS`; defaults to
+        'neutral' when no LLM, when the response lacks the [EMOTION:]
+        tag, or when the tag's value is unknown. The PWA's coach
+        sprite reads it to pick the matching animation.
+        """
         level = driver_level or self.driver_level
         track = "Sonoma Raceway"
         sys_p = build_system_prompt(level, track, mode=CoachMode.PRE_BRIEF)
@@ -881,38 +929,44 @@ class LitertCoach(CoachEngine):
             goal=goal,
         )
         if self._llm is None:
-            # No LLM — fall back to a templated brief
-            return _templated_pre_brief(
+            narr, focus = _templated_pre_brief(
                 driver_id=driver_id, weather_phase=weather_phase,
                 surface_state=surface_state, markers_selected=markers_selected,
                 weakest_recent_corner=weakest_recent_corner,
                 danger_zones_today=danger_zones_today or [],
             )
+            return narr, focus, "neutral"
         try:
-            text = self._generate(sys_p, usr_p)
-            return _split_brief_narrative_and_focus(text)
+            raw = self._generate(sys_p, usr_p)
+            cleaned, emotion = _extract_emotion(raw)
+            narr, focus = _split_brief_narrative_and_focus(cleaned)
+            return narr, focus, emotion
         except Exception:
-            return _templated_pre_brief(
+            narr, focus = _templated_pre_brief(
                 driver_id=driver_id, weather_phase=weather_phase,
                 surface_state=surface_state, markers_selected=markers_selected,
                 weakest_recent_corner=weakest_recent_corner,
                 danger_zones_today=danger_zones_today or [],
             )
+            return narr, focus, "neutral"
 
     def debrief(self, bundle: dict,
-                *, driver_level: Optional[str] = None) -> tuple[str, list[str]]:
-        """POST_SESSION mode. Returns (narrative_md, next_focus_list)."""
+                *, driver_level: Optional[str] = None
+                ) -> tuple[str, list[str], str]:
+        """POST_SESSION mode. Returns (narrative_md, next_focus_list, emotion)."""
         level = driver_level or self.driver_level
         track = bundle.get("track", "Sonoma Raceway")
         sys_p = build_system_prompt(level, track, mode=CoachMode.POST_SESSION)
         usr_p = build_post_session_user_prompt(bundle)
         if self._llm is None:
-            return "", []   # caller falls through to templated narrative
+            return "", [], "neutral"
         try:
-            text = self._generate(sys_p, usr_p)
-            return _split_debrief_narrative_and_focus(text)
+            raw = self._generate(sys_p, usr_p)
+            cleaned, emotion = _extract_emotion(raw)
+            narr, focus = _split_debrief_narrative_and_focus(cleaned)
+            return narr, focus, emotion
         except Exception:
-            return "", []
+            return "", [], "neutral"
 
 
 # ─── litert-lm helpers (module scope so brief/debrief stay class methods) ───

@@ -94,9 +94,10 @@ def test_propose_falls_through_to_rule_per_three_tier_scope(litert_coach):
 
 
 def test_brief_returns_real_narrative(litert_coach):
-    """End-to-end: pre-brief generates narrative + focus list with content."""
+    """End-to-end: pre-brief generates narrative + focus list + emotion."""
+    from coach_engine import VALID_EMOTIONS
     t0 = time.time()
-    narrative, focus = litert_coach.brief(
+    narrative, focus, emotion = litert_coach.brief(
         driver_id="taha", today_iso="2026-04-29",
         weather_phase="peak_grip", surface_state="dry",
         markers_selected=["the bump", "the K-wall bend"],
@@ -111,6 +112,7 @@ def test_brief_returns_real_narrative(litert_coach):
     assert isinstance(narrative, str)
     assert len(narrative) > 50, f"narrative too short: {narrative!r}"
     assert isinstance(focus, list)
+    assert emotion in VALID_EMOTIONS, f"unexpected emotion: {emotion!r}"
 
 
 def test_debrief_returns_real_narrative(litert_coach):
@@ -129,8 +131,9 @@ def test_debrief_returns_real_narrative(litert_coach):
             "max_combo_g":   1.7,
         },
     }
+    from coach_engine import VALID_EMOTIONS
     t0 = time.time()
-    narrative, focus = litert_coach.debrief(bundle)
+    narrative, focus, emotion = litert_coach.debrief(bundle)
     elapsed = time.time() - t0
     assert elapsed < 30.0, f"debrief() too slow: {elapsed:.1f}s"
     assert isinstance(narrative, str)
@@ -138,6 +141,7 @@ def test_debrief_returns_real_narrative(litert_coach):
     # Empty allowed only if the prompt was malformed; we should at least get
     # *some* output back from a healthy model.
     assert len(narrative) > 20, f"debrief narrative too short: {narrative!r}"
+    assert emotion in VALID_EMOTIONS, f"unexpected emotion: {emotion!r}"
 
 
 def test_repeat_calls_share_engine(litert_coach):

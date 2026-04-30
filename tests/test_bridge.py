@@ -392,6 +392,176 @@ def test_signals_registry_endpoint_empty_before_seed(client):
     assert body["signals"] == []
 
 
+def test_signals_registry_can_state_when_no_reader(client):
+    """?include_can_state=true must produce a placeholder block when no
+    CAN reader is running — the PWA renders ✗ rows from this shape."""
+    r = client.get("/signals/registry?include_can_state=true")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "can_state" in body
+    cs = body["can_state"]
+    assert cs["loaded"] is False
+    assert cs["connected"] is False
+    assert cs["frames_per_second"] == 0.0
+    assert cs["unknown_ids"] == []
+    assert cs["last_frame_age_s"] is None
+    for k in ("interface", "channel", "bitrate", "session_id",
+              "frames_total", "frames_unknown", "usb_devices"):
+        assert k in cs
+
+
+def test_session_export_parquet_404_when_no_session(client):
+    r = client.get("/session/no-such/export.parquet")
+    assert r.status_code == 404
+
+
+def test_session_export_parquet_400_for_unknown_table(client, make_frame_fn):
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1) for i in range(10)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(f"/session/{sid}/export.parquet?table=garbage")
+    assert r.status_code == 400
+
+
+def test_session_export_parquet_streams_telemetry(client, make_frame_fn):
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0)
+              for i in range(20)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.get(f"/session/{sid}/export.parquet")
+    assert r.status_code == 200
+    assert r.headers["Content-Type"] == "application/octet-stream"
+    assert "X-Pitwall-Rows" in r.headers
+    assert int(r.headers["X-Pitwall-Rows"]) == 20
+    # Parquet file magic number: "PAR1" at the start AND end
+    body = r.data
+    assert body[:4] == b"PAR1"
+    assert body[-4:] == b"PAR1"
+
+
+def test_cues_stream_400_without_session_id(client):
+    r = client.get("/cues/stream")
+    assert r.status_code == 400
+
+
+def test_cues_stream_emits_hello_then_published_cue(client):
+    """Subscribe to /cues/stream, publish via _cue_bus directly,
+    confirm the SSE stream surfaces both the hello event + the cue."""
+    import threading
+    sid = "stream-test-001"
+    received: list[bytes] = []
+
+    def reader():
+        with client.get(f"/cues/stream?session_id={sid}",
+                        buffered=False) as resp:
+            assert resp.status_code == 200
+            assert resp.mimetype == "text/event-stream"
+            # Read up to ~6 chunks then bail
+            for i, chunk in enumerate(resp.response):
+                received.append(chunk)
+                if len(received) >= 6:
+                    break
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    import time; time.sleep(0.3)
+    br._cue_bus.publish(sid, {"text": "Distance is king.", "emotion": "encouraging"})
+    t.join(timeout=2.0)
+
+    blob = b"".join(received)
+    assert b"event: hello" in blob
+    assert b"Distance is king" in blob
+
+
+def test_spectator_token_create_validate_revoke(client):
+    """Token lifecycle: create → validate → revoke."""
+    r = client.post("/spectator/token", json={"session_id": "spec-001"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "token" in body
+    assert body["session_id"] == "spec-001"
+    assert body["url"].startswith("/spectator/spec-001")
+    token = body["token"]
+    # Validate via the helper
+    assert br._validate_spectator_token(token) == "spec-001"
+    # Revoke
+    rev = client.delete(f"/spectator/token/{token}")
+    assert rev.status_code == 200
+    assert rev.get_json()["revoked"] is True
+    assert br._validate_spectator_token(token) is None
+
+
+def test_spectator_token_400_without_session_id(client):
+    r = client.post("/spectator/token", json={})
+    assert r.status_code == 400
+
+
+def test_notifications_emit_and_stream(client):
+    """emit_notification publishes; SSE streams the event."""
+    import threading
+    received: list[bytes] = []
+
+    def reader():
+        with client.get("/notifications?driver=evo-driver",
+                        buffered=False) as resp:
+            assert resp.status_code == 200
+            for i, chunk in enumerate(resp.response):
+                received.append(chunk)
+                if len(received) >= 6:
+                    break
+
+    t = threading.Thread(target=reader, daemon=True)
+    t.start()
+    import time; time.sleep(0.3)
+    br.emit_notification("evo-driver", "medal-earned", medal="trail_brake_apprentice")
+    t.join(timeout=2.0)
+
+    blob = b"".join(received)
+    assert b"event: hello" in blob
+    assert b"medal-earned" in blob
+
+
+def test_session_export_parquet_handles_capabilities_table(client, make_frame_fn):
+    sid = _start_session(client)
+    br.seed_signal_registry()
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0)
+              for i in range(50)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    br._compute_capabilities(sid)
+    r = client.get(f"/session/{sid}/export.parquet?table=capabilities")
+    assert r.status_code == 200
+    assert r.data[:4] == b"PAR1"
+    assert int(r.headers["X-Pitwall-Rows"]) >= len(br._WIDE_SIGNAL_NAMES)
+
+
+def test_signals_registry_lists_usb_devices(client):
+    """The can_state block must include a `usb_devices` array. It can be
+    empty (no adapter plugged in) or contain dicts — but the field must
+    exist so the PWA can render a "no adapter detected" message
+    deterministically."""
+    r = client.get("/signals/registry?include_can_state=true")
+    body = r.get_json()
+    devices = body["can_state"]["usb_devices"]
+    assert isinstance(devices, list)
+    # Each device (if any) has the expected schema
+    for d in devices:
+        for k in ("device", "vid", "pid", "description", "manufacturer",
+                  "model", "kind", "is_known"):
+            assert k in d, f"missing key {k} in device {d!r}"
+
+
+def test_signals_registry_no_can_state_block_by_default(client):
+    """Without ?include_can_state=true the response must NOT include the block —
+    keeps the default response cheap (PWA caches it once at app launch)."""
+    r = client.get("/signals/registry")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert "can_state" not in body
+
+
 # ─── ADR-015: signal sink ingest (Phase 2) ──────────────────────────────────
 
 
