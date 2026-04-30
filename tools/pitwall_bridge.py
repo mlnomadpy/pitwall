@@ -28,11 +28,10 @@ import sys
 import threading
 import json
 from datetime import datetime
-try:
-    from google import genai
-    HAS_GENAI = True
-except ImportError:
-    HAS_GENAI = False
+# Cloud Gemini was removed 2026-04-29 — every LLM call now goes through
+# coach_engine.LitertCoach (on-device Gemma 4 E2B via litert-lm). The flag
+# is kept only so older code paths can short-circuit cleanly.
+HAS_GENAI = False
 
 # Load .env file
 env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
@@ -1118,108 +1117,16 @@ def _score_insights(bursts: list) -> list:
     return insights[:3]
 
 
-def _gemini_insights(bursts: list, lap: int = None) -> list:
-    if not bursts: return []
-    if not HAS_GENAI or not os.environ.get("GEMINI_API_KEY"):
-        return _score_insights(bursts)
-    
-    base_dir = os.path.dirname(__file__)
-    repo_dir = os.path.abspath(os.path.join(base_dir, ".."))
-    
-    try:
-        with open(os.path.join(repo_dir, "docs/transcript.txt"), "r") as f:
-            transcript = f.read()
-    except Exception:
-        transcript = ""
-        
-    try:
-        with open(os.path.join(repo_dir, "docs/Performance-Driving-Illustrated-2-23-24.txt"), "r") as f:
-            pedagogy = f.read()[:5000]
-    except Exception:
-        pedagogy = ""
-
-    gold_standard = """
-    Sonoma Raceway Gold Standard (Turn, Speed, Gear):
-    Turn 1: Entry 111 km/h, Apex 113 km/h, Exit 117 km/h, Gear 2
-    Turn 3: Entry 104 km/h, Apex 87 km/h, Exit 102 km/h, Gear 4
-    Turn 6: Entry 92 km/h, Apex 77 km/h, Exit 105 km/h, Gear 5
-    Turn 9: Entry 121 km/h, Apex 116 km/h, Exit 132 km/h, Gear 3
-    Turn 10: Entry 106 km/h, Apex 73 km/h, Exit 108 km/h, Gear 6
-    Turn 11: Entry 88 km/h, Apex 64 km/h, Exit 95 km/h, Gear 5
-    """
-    driver_level = bursts[0].get("driver_level", "intermediate") if bursts else "intermediate"
-
-    prompt = f"""
-    You are an expert racing coach. Provide exactly 3 actionable racing insights for a {driver_level} driver who just completed{' lap ' + str(lap) if lap is not None else ' a lap'} at Sonoma Raceway.
-    Compare their telemetry with the Gold Standard lap. Use the coaching pedagogy provided. Adjust the tone, terminology, and complexity of your feedback to suit a {driver_level} driver.
-
-    ## Pedagogy
-    {pedagogy}
-    
-    ## Transcript
-    {transcript}
-
-    ## Gold Standard
-    {gold_standard}
-
-    ## Driver Lap Telemetry
-    """
-    
-    for i, b in enumerate(bursts):
-        prompt += f"Burst {i+1}:\n"
-        prompt += f"- Corners Visited: {b.get('corners_visited', [])}\n"
-        prompt += f"- Avg Speed: {b.get('avg_speed_kmh', 0):.0f} km/h\n"
-        prompt += f"- Max Combo G: {b.get('max_combo_g', 0):.2f} G\n"
-        prompt += f"- Coasting Frames: {b.get('coast_frames', 0)} / {b.get('frame_count', 1)}\n"
-        prompt += f"- Trail Braking Frames: {b.get('trail_brake_frames', 0)}\n\n"
-
-    prompt += """
-    Output ONLY a valid JSON array of 3 objects with exactly this structure:
-    [
-      {
-        "id": "insight_id_like_brake_late",
-        "title": "Short Title (max 4 words)",
-        "detail": "Actionable coaching advice. Mention specific corners.",
-        "corners": ["Turn 3"],
-        "metric_label": "Short label (e.g. Avg Speed)",
-        "metric_value": "Value (e.g. 104 km/h)",
-        "effort": 1,
-        "est_gain_s": 0.5
-      }
-    ]
-    effort should be 1, 2, or 3.
-    est_gain_s should be a float.
-    Make the advice sound professional, encouraging, and highly specific to the corners.
-    """
-
-    client = genai.Client()
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
-        
-        text = response.text
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-            
-        data = json.loads(text.strip())
-        
-        for i, item in enumerate(data):
-            item["rank"] = i + 1
-            
-        insights = data[:3]
-        print(f"\\n🏁 Gemini Insights Generated Successfully:\\n{json.dumps(insights, indent=2)}\\n")
-        return insights
-    except Exception as e:
-        print(f"Gemini generation failed: {e}")
-        return _score_insights(bursts)
-
 @app.route("/insights", methods=["GET"])
 def get_insights():
-    """Return top-3 prioritised driver insights from the current session bursts."""
+    """Return top-3 prioritised driver insights from the current session bursts.
+
+    Mid-session (in-drive) endpoint — fires every burst, must be sub-100ms.
+    Per the three-tier coach architecture (ADR-016 follow-up), in-drive
+    coaching MUST NOT call any LLM. We use the deterministic
+    `_score_insights` scorer here and let the LLM handle paddock-time
+    pre-brief / debrief.
+    """
     lap_param = request.args.get("lap")
     lap = int(lap_param) if lap_param else None
 
@@ -1229,7 +1136,7 @@ def get_insights():
     if lap is not None:
         bursts_snapshot = [b for b in bursts_snapshot if b.get("lap") == lap]
 
-    insights = _gemini_insights(bursts_snapshot, lap=lap)
+    insights = _score_insights(bursts_snapshot)
     return jsonify({
         "insights":       insights,
         "session_bursts": len(bursts_snapshot),
@@ -2710,17 +2617,20 @@ def session_corners(sid: str):
 
 
 @app.route("/score", methods=["POST"])
-def gemini_score():
-    """Gemini-graded session score: 0–100 + one-sentence why.
+def llm_score():
+    """Local-Gemma-graded session score: 0–100 + one-sentence why.
 
-    Body: {session_id, focus?: <corner name>, driver_level?: "intermediate"}.
-    Returns 503 when Gemini is unavailable; 400 when the session has no
-    telemetry; 200 with `{score, why, model}` otherwise.
+    Paddock-time endpoint. Calls the on-device Gemma 4 E2B via litert-lm
+    (no cloud dependency). Body: {session_id, focus?, driver_level?}.
+
+    Status codes:
+      400  missing session_id
+      404  session has no telemetry
+      503  no LLM coach loaded (LitertCoach unavailable; user can re-run
+           after `litert-lm import …` populates the model file)
+      502  LLM call raised
+      200  {session_id, score, why, model, focus}
     """
-    if not HAS_GENAI or not os.environ.get("GEMINI_API_KEY"):
-        return jsonify({
-            "error": "gemini not available — set GEMINI_API_KEY and install google.genai",
-        }), 503
     body = request.get_json(force=True, silent=True) or {}
     sid = body.get("session_id")
     focus = body.get("focus", "")
@@ -2729,6 +2639,14 @@ def gemini_score():
         return jsonify({"error": "session_id required"}), 400
     if not _session_has_telemetry(sid):
         return jsonify({"error": "session not found", "session_id": sid}), 404
+
+    coach = _coach
+    if coach is None or getattr(coach, "name", "") != "litert" or getattr(coach, "_engine", None) is None:
+        return jsonify({
+            "error":  "local Gemma coach not loaded — install litert-lm and "
+                      "import the .litertlm model (see README §Quick start)",
+            "engine": getattr(coach, "name", None),
+        }), 503
 
     laps = _detect_laps(sid)
     best_lap_s = min((l["lap_time_s"] for l in laps), default=None)
@@ -2744,51 +2662,54 @@ def gemini_score():
         conn.close()
     avg_speed_ms, max_combo_g, max_brake_bar, avg_throttle = (agg or (0, 0, 0, 0))
 
-    prompt = (
-        f"You are an expert racing coach grading a {driver_level} driver "
-        f"after a session at Sonoma Raceway. Score the session 0–100 "
-        f"(100 = textbook fast lap, 50 = average track-day, 0 = unsafe). "
-        f"Ground your judgement in Ross Bentley's pedagogy "
-        f"(trail-brake quality, exit speed > corner speed, look ahead).\n\n"
-        f"Session stats:\n"
-        f"- best lap: {best_lap_s:.2f}s\n"
-        if best_lap_s else "- no complete lap\n"
-    )
-    prompt += (
-        f"- lap count: {len(laps)}\n"
-        f"- average speed: {(avg_speed_ms or 0) * 3.6:.0f} km/h\n"
-        f"- peak combined G: {(max_combo_g or 0):.2f}\n"
-        f"- peak brake: {(max_brake_bar or 0):.0f} bar\n"
-        f"- average throttle: {(avg_throttle or 0):.0f}%\n"
-    )
-    if focus:
-        prompt += f"- focus corner: {focus}\n"
-    prompt += (
-        '\nReturn ONLY one JSON object: '
-        '{"score": <int 0-100>, "why": "<one sentence>"}'
+    system_prompt = (
+        f"You are an expert race coach grading a {driver_level} driver after "
+        f"a Sonoma Raceway session. Score 0–100 (100 = textbook fast lap, "
+        f"50 = average track-day, 0 = unsafe). Ground judgement in Ross "
+        f"Bentley's pedagogy: trail-brake quality, exit-speed beats "
+        f"corner-speed, look-ahead. Respond with ONE JSON object only, "
+        f'no preface: {{"score": <int 0-100>, "why": "<one sentence>"}}.'
     )
 
+    user_prompt_lines = ["Session stats:"]
+    if best_lap_s is not None:
+        user_prompt_lines.append(f"- best lap: {best_lap_s:.2f}s")
+    else:
+        user_prompt_lines.append("- no complete lap")
+    user_prompt_lines += [
+        f"- lap count: {len(laps)}",
+        f"- average speed: {(avg_speed_ms or 0) * 3.6:.0f} km/h",
+        f"- peak combined G: {(max_combo_g or 0):.2f}",
+        f"- peak brake: {(max_brake_bar or 0):.0f} bar",
+        f"- average throttle: {(avg_throttle or 0):.0f}%",
+    ]
+    if focus:
+        user_prompt_lines.append(f"- focus corner: {focus}")
+    user_prompt = "\n".join(user_prompt_lines)
+
     try:
-        client = genai.Client()
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt,
-        )
-        text = resp.text or ""
+        text = coach._generate(system_prompt, user_prompt) or ""
+        # Strip any code-fence Gemma may add around the JSON
         if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
+            text = text.split("```json", 1)[1].split("```", 1)[0]
         elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-        data = json.loads(text.strip())
+            text = text.split("```", 1)[1].split("```", 1)[0]
+        # Keep only the first JSON object
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError(f"no JSON object in model output: {text[:200]!r}")
+        data = json.loads(text[start:end + 1])
         score = int(data.get("score", 0))
         why = str(data.get("why", "")).strip()
     except Exception as e:
-        return jsonify({"error": f"gemini call failed: {e}"}), 502
+        return jsonify({"error": f"llm call failed: {e}"}), 502
 
     return jsonify({
         "session_id": sid,
         "score":      max(0, min(100, score)),
         "why":        why,
-        "model":      "gemini-2.5-flash",
+        "model":      "gemma-4-e2b (litert-lm)",
         "focus":      focus or None,
     })
 

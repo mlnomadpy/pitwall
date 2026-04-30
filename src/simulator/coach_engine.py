@@ -665,37 +665,57 @@ def build_user_prompt(ctx) -> str:
 
 
 class LitertCoach(CoachEngine):
-    """Backend-owned on-device LLM inference via MediaPipe Genai's
-    `LlmInference` API. Targets the Gemma 4 LiteRT-LM `.task` artifact published
-    at `litert-community/gemma-4-E2B-it-litert-lm` on Hugging Face.
+    """Backend-owned on-device LLM inference via Google's `litert-lm` package.
+    Targets the Gemma 4 LiteRT-LM `.litertlm` artifact published at
+    `litert-community/gemma-4-E2B-it-litert-lm` on Hugging Face.
 
-    Why MediaPipe Genai (not tflite_runtime):
-      - Gemma 4 ships as a `.task` file (LiteRT-LM format), not a raw `.tflite`.
-        The `.task` bundle includes the model, tokenizer, KV-cache config, and
-        prompt template — all handled by the LlmInference API.
-      - On supported devices, the API picks the best backend (XNNPack on CPU,
-        ML Drift on GPU, Tensor TPU when available).
-      - One call: `llm.generate_response(prompt)` instead of a manual decode
-        loop. No tokenizer juggling, no tensor shape gymnastics.
+    Why litert-lm (not mediapipe.tasks.python.genai.inference):
+      - The `.litertlm` bundle format includes the model, tokenizer, KV-cache
+        config, chat template, and platform-specific accelerators all in one
+        file. Loaded via `litert_lm.Engine`.
+      - The PyPI mediapipe wheel for desktop Python (macOS/Linux) does NOT
+        ship the `genai.inference` submodule — that's Android/iOS only. The
+        `litert-lm` package is Google's cross-platform replacement.
+      - Same model file, same C++ runtime underneath; different Python wrapper.
+      - Backends: CPU works on Apple Silicon and Linux; GPU on supported
+        devices. We default to CPU and let the model metadata pick the
+        accelerator backend.
 
-    On a Pixel running Termux:
-        pkg install python
-        pip install mediapipe
-        # Push the .task file to ~/storage/shared/Pitwall/models/
-        # (the canonical path is gemma-4-E2B-it.task)
+    Install on a dev machine:
+        pip install litert-lm
+        litert-lm import --from-huggingface-repo \\
+            litert-community/gemma-4-E2B-it-litert-lm \\
+            gemma-4-E2B-it.litertlm gemma-4-e2b
+        # Model now at ~/.litert-lm/models/gemma-4-e2b/model.litertlm
 
-    If MediaPipe isn't available, the model file is missing, or any runtime
-    error occurs, this coach falls through to RuleCoach so the bridge stays
-    useful. Backend keeps a single source of truth for system instructions
-    via build_system_prompt / build_user_prompt per ADR-013.
+    On Termux (Pixel): same `litert-lm` package; same import command.
+
+    Coaching scope (per the three-tier architecture):
+      - `brief()` — pre-session paddock narrative. LLM-driven. 2-4 s OK.
+      - `debrief()` — post-session paddock narrative. LLM-driven. 8-15 s OK.
+      - `propose()` — DEPRECATED for LLM use. Returns None to defer to the
+        canonical-phrase path (RuleCoach + pre-rendered audio). LLMs are
+        too slow (>1 s) for sub-corner cues.
+
+    If `litert-lm` isn't installed, the model file is missing, or any runtime
+    error occurs, the LLM-driven methods (brief/debrief) fall back to
+    templated narratives. Backend keeps a single source of truth for system
+    instructions via build_system_prompt / build_user_prompt per ADR-013.
     """
 
     name = "litert"
 
+    # Search order for the .litertlm model file. Adjusted to match the
+    # `litert-lm import` CLI's storage layout + repo-local + Termux paths.
     DEFAULT_MODEL_PATHS = [
-        # Termux on Pixel — shared storage that both Kotlin and Python can read
-        "~/storage/shared/Pitwall/models/gemma-4-E2B-it.task",
+        # Default location used by `litert-lm import <ref>`
+        "~/.litert-lm/models/gemma-4-e2b/model.litertlm",
+        # Termux on Pixel — shared storage readable from any process
+        "~/storage/shared/Pitwall/models/gemma-4-E2B-it.litertlm",
         # Repo-local fallback for dev machines
+        "models/gemma-4-E2B-it.litertlm",
+        # Legacy .task path — kept so a stale install doesn't 100% silently fail
+        "~/storage/shared/Pitwall/models/gemma-4-E2B-it.task",
         "models/gemma-4-E2B-it.task",
     ]
 
@@ -704,18 +724,22 @@ class LitertCoach(CoachEngine):
         model_path: str = "",
         *,
         driver_level: str = "intermediate",
-        max_tokens: int = 32,
+        max_tokens: int = 256,
         temperature: float = 0.4,
+        backend: str = "cpu",
     ):
         self.driver_level = driver_level
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.backend = backend
         self._fallback = RuleCoach(driver_level)
         self._llm = None
+        self._engine = None
+        self._engine_ctx = None       # context-manager handle (for clean close)
         self._init_error: Optional[str] = None
 
         # All heavy imports are lazy + caught — LitertCoach must construct
-        # cleanly on machines without mediapipe so make_coach("auto") can
+        # cleanly on machines without litert-lm so make_coach("auto") can
         # probe + fall back without crashing the bridge.
         try:
             self._init_runtime(model_path)
@@ -726,26 +750,52 @@ class LitertCoach(CoachEngine):
 
     def _init_runtime(self, model_path: str):
         try:
-            from mediapipe.tasks.python.genai import inference  # type: ignore
+            import litert_lm  # type: ignore
         except ImportError as e:
             raise RuntimeError(
-                f"mediapipe not installed ({e}). "
-                f"On Termux: pip install mediapipe"
+                f"litert-lm not installed ({e}). "
+                f"Run: pip install litert-lm"
             )
 
         path = self._resolve_model_path(model_path)
         if path is None:
             raise FileNotFoundError(
-                f"no Gemma 4 .task file found in {self.DEFAULT_MODEL_PATHS}"
+                f"no Gemma .litertlm file found in {self.DEFAULT_MODEL_PATHS}"
             )
 
-        opts = inference.LlmInferenceOptions(
+        backend_enum = (litert_lm.Backend.GPU
+                        if self.backend.lower() == "gpu"
+                        else litert_lm.Backend.CPU)
+
+        # Engine is a context manager; entering it loads the model + native
+        # libs. We keep the entered handle on `self` for the lifetime of the
+        # coach and release it via close().
+        engine_factory = litert_lm.Engine(
             model_path=str(path),
-            max_tokens=self.max_tokens,
-            temperature=self.temperature,
-            top_k=40,
+            backend=backend_enum,
+            max_num_tokens=4096,
         )
-        self._llm = inference.LlmInference.create_from_options(opts)
+        self._engine_ctx = engine_factory
+        self._engine = engine_factory.__enter__()
+        # Sentinel used by callers + tests to confirm the model loaded.
+        self._llm = self._engine
+
+    def close(self):
+        """Release the engine's native resources. Safe to call repeatedly."""
+        if self._engine_ctx is not None:
+            try:
+                self._engine_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+            self._engine_ctx = None
+            self._engine = None
+            self._llm = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _resolve_model_path(self, model_path: str) -> Optional[Path]:
         candidates = [model_path] if model_path else self.DEFAULT_MODEL_PATHS
@@ -767,58 +817,46 @@ class LitertCoach(CoachEngine):
         }
 
     def propose(self, ctx: CoachContext) -> Optional[CoachingMessage]:
-        # Gating mirrors RuleCoach: skip the inference when there's nothing
-        # worth voicing. Saves TPU/CPU cycles when on a long straight.
-        if not ctx.next_corner_name and ctx.bentley_concept in ("look_ahead", ""):
-            return None
-        if not (0 < ctx.meters_to_entry < 250 or ctx.bentley_concept in (
-            "hustle", "entry_release", "exit_speed", "downhill_brake",
-        )):
-            return None
+        """In-drive coaching path is intentionally NOT LLM-driven.
 
-        # If runtime didn't load, behave exactly like RuleCoach
-        if self._llm is None:
-            return self._fallback.propose(ctx)
+        Three-tier coach architecture (set 2026-04-29):
+          - pre-brief / post-session debrief → LLM (this class, brief/debrief)
+          - in-drive sub-corner cues          → canonical-phrase library +
+                                                 pre-rendered audio (RuleCoach)
 
-        try:
-            text = self._infer(ctx)
-        except Exception:
-            return self._fallback.propose(ctx)
-
-        text = (text or "").strip().strip('"').strip("'")
-        if not text:
-            return None
-        text = text.splitlines()[0].strip()
-        if not text:
-            return None
-
-        prio = 2 if ctx.bentley_concept == "entry_release" else 1
-        return CoachingMessage(
-            text=text,
-            priority=prio,
-            reason=f"litert:{ctx.bentley_concept}",
-        )
-
-    # ---- inference ----------------------------------------------------------
-
-    def _infer(self, ctx: CoachContext) -> str:
-        """One-shot generation via MediaPipe Genai. Combines the system and
-        user prompts into the Gemma chat template the .task file expects.
+        LLM latency on Apple Silicon CPU ≈ 3.5 s for ~30 tokens; on Pixel CPU
+        2-4 s. Both are useless for an apex window. Forwarding to RuleCoach
+        keeps the in-drive contract honest while preserving all the gating
+        logic in one place.
         """
-        system_prompt = build_system_prompt(self.driver_level, ctx.track_name)
-        user_prompt = build_user_prompt(ctx)
-        return self._generate(system_prompt, user_prompt)
+        return self._fallback.propose(ctx)
+
+    # ---- inference (used by brief() + debrief() only) -----------------------
 
     def _generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Lower-level: generate from already-built system+user prompts."""
-        if self._llm is None:
+        """One-shot generation via litert-lm Engine + Conversation.
+
+        The .litertlm bundle ships its own chat template; we use the
+        Conversation API's `messages` preface to inject the system prompt
+        and `send_message` for the user turn. The runtime applies Gemma's
+        chat template internally — no manual <start_of_turn> tokens needed.
+
+        Response shape: `{'role': 'assistant', 'content': [{'text': '...',
+        'type': 'text'}, …]}` — content is a list of typed parts. We
+        concatenate every part with type=='text'.
+        """
+        if self._engine is None:
             return ""
-        full = (
-            f"<start_of_turn>system\n{system_prompt}<end_of_turn>\n"
-            f"<start_of_turn>user\n{user_prompt}<end_of_turn>\n"
-            f"<start_of_turn>model\n"
-        )
-        return self._llm.generate_response(full) or ""
+        try:
+            conv = self._engine.create_conversation(
+                messages=[{"role": "system", "content": system_prompt}],
+            )
+            response = conv.send_message(
+                {"role": "user", "content": user_prompt},
+            )
+        except Exception:
+            return ""
+        return _extract_assistant_text(response)
 
     # ---- multi-mode entry points (PRE_BRIEF + POST_SESSION) ----------------
 
@@ -875,6 +913,36 @@ class LitertCoach(CoachEngine):
             return _split_debrief_narrative_and_focus(text)
         except Exception:
             return "", []
+
+
+# ─── litert-lm helpers (module scope so brief/debrief stay class methods) ───
+
+
+def _extract_assistant_text(response) -> str:
+    """Extract the concatenated text body from a litert-lm send_message reply.
+
+    Response shape: `{'role': 'assistant', 'content': [{'text': '...',
+    'type': 'text'}, ...]}`. The `content` is a list of typed parts; we
+    concatenate every part with type=='text'.
+    """
+    if isinstance(response, str):
+        return response
+    if not isinstance(response, dict):
+        return ""
+    content = response.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                t = part.get("text")
+                if isinstance(t, str):
+                    parts.append(t)
+            elif isinstance(part, str):
+                parts.append(part)
+        return "\n".join(parts).strip()
+    return ""
 
 
 # ─── Templated fallbacks (used when no LLM is loaded) ────────────────────────

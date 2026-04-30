@@ -83,3 +83,4 @@ nav:
       - "014: Sonoma is the Product": adr/014-sonoma-as-the-product.md
       - "015: Universal Telemetry Sink": adr/015-universal-telemetry-sink.md
       - "016: USB-CAN Ingest + Vue PWA Frontend": adr/016-can-bus-ingest-and-frontend-pivot.md
+      - "017: Three-Tier Coach Architecture": adr/017-three-tier-coach-architecture.md
