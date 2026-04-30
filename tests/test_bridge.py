@@ -1483,3 +1483,149 @@ def test_coach_concepts_lists_nine(client):
     for c in body["concepts"]:
         assert c["description"]
         assert c["fires_when"]
+
+
+# ─── ADR-018: LLM friction sink + diagnostics endpoint ──────────────────────
+
+def _seed_friction_rows(rows: list[dict]) -> None:
+    """Helper — write fake llm_friction rows so the diagnostics endpoint has
+    something to aggregate. Uses bridge's own writer so schema stays canonical."""
+    for r in rows:
+        br._log_llm_friction(r)
+
+
+def test_diagnostics_llm_friction_empty_returns_zero_aggregates(client):
+    r = client.get("/diagnostics/llm_friction")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 0
+    assert body["rows"] == []
+    assert body["by_role"] == []
+    assert body["fallback_rate"] == 0.0
+
+
+def test_diagnostics_llm_friction_logs_and_aggregates(client):
+    _seed_friction_rows([
+        {"session_id": "s1", "role": "brief", "mode": "pre_brief",
+         "backend": "cpu", "prompt_chars": 1200, "completion_chars": 600,
+         "latency_ms": 7000.0, "truncated": False, "fell_back": False,
+         "error": "", "emotion": "encouraging"},
+        {"session_id": "s1", "role": "brief", "mode": "pre_brief",
+         "backend": "cpu", "prompt_chars": 1100, "completion_chars": 0,
+         "latency_ms": 0.0, "truncated": False, "fell_back": True,
+         "error": "engine_not_loaded", "emotion": "neutral"},
+        {"session_id": "s1", "role": "debrief", "mode": "post_session",
+         "backend": "cpu", "prompt_chars": 3000, "completion_chars": 1500,
+         "latency_ms": 11000.0, "truncated": True, "fell_back": False,
+         "error": "", "emotion": "serious"},
+    ])
+    r = client.get("/diagnostics/llm_friction")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 3
+    assert len(body["rows"]) == 3
+    # 1 of 3 fell back, 1 of 3 truncated
+    assert abs(body["fallback_rate"] - 1/3) < 1e-6
+    assert abs(body["truncation_rate"] - 1/3) < 1e-6
+    # Per-role aggregation
+    roles = {r["role"]: r for r in body["by_role"]}
+    assert roles["brief"]["count"] == 2
+    assert roles["debrief"]["count"] == 1
+    assert abs(roles["brief"]["fallback_rate"] - 0.5) < 1e-6
+
+
+def test_diagnostics_llm_friction_filters_by_session(client):
+    _seed_friction_rows([
+        {"session_id": "s1", "role": "brief", "fell_back": False,
+         "latency_ms": 5000, "prompt_chars": 100, "completion_chars": 50,
+         "backend": "cpu", "mode": "pre_brief"},
+        {"session_id": "s2", "role": "brief", "fell_back": True,
+         "latency_ms": 0, "prompt_chars": 100, "completion_chars": 0,
+         "backend": "cpu", "mode": "pre_brief"},
+    ])
+    r = client.get("/diagnostics/llm_friction?session_id=s1")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 1
+    assert body["rows"][0]["session_id"] == "s1"
+    assert body["fallback_rate"] == 0.0
+
+
+def test_diagnostics_llm_friction_filters_by_role(client):
+    _seed_friction_rows([
+        {"session_id": "s1", "role": "brief", "fell_back": False,
+         "latency_ms": 5000, "prompt_chars": 100, "completion_chars": 50,
+         "backend": "cpu", "mode": "pre_brief"},
+        {"session_id": "s1", "role": "debrief", "fell_back": False,
+         "latency_ms": 9000, "prompt_chars": 200, "completion_chars": 800,
+         "backend": "cpu", "mode": "post_session"},
+    ])
+    r = client.get("/diagnostics/llm_friction?role=debrief")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["count"] == 1
+    assert body["rows"][0]["role"] == "debrief"
+
+
+def test_estimate_tts_ms_floors_short_phrases():
+    # Single safety word still ducks the full 800 ms minimum.
+    assert br._estimate_tts_ms("Brake!") == 800
+
+
+def test_estimate_tts_ms_scales_with_word_count():
+    # 11 words × 150 ms = 1650 ms, above the 800 ms floor.
+    text = "Wait for the bump then trail to the third tire stack."
+    assert text.split() == ["Wait", "for", "the", "bump", "then", "trail",
+                            "to", "the", "third", "tire", "stack."]
+    assert br._estimate_tts_ms(text) == 11 * 150
+
+
+def test_estimate_tts_ms_zero_for_empty():
+    assert br._estimate_tts_ms("") == 0
+    # Whitespace-only hits the floor — split() returns [] but max(1, 0) keeps
+    # word count at 1 so the duck still engages for the safe minimum.
+    assert br._estimate_tts_ms("   ") == 800
+
+
+def test_analyze_publishes_cue_with_expected_tts_ms(client, monkeypatch):
+    """Audio-ducker contract: every /analyze cue carries the expected_tts_ms
+    hint so the PWA can hold the tactical-tone duck for the right window."""
+    captured: list[dict] = []
+    real_publish = br._cue_bus.publish
+    def _spy(sid, event):
+        captured.append({"sid": sid, **event})
+        return real_publish(sid, event)
+    monkeypatch.setattr(br._cue_bus, "publish", _spy)
+
+    burst = {
+        "session_id": "ducker-sess", "burst_id": 1,
+        "avg_speed_kmh": 90.0, "max_combo_g": 1.0,
+        "max_lateral_g": 0.5, "max_long_g": -0.3,
+        "max_brake_bar": 12.0, "avg_throttle_pct": 50.0,
+        "avg_steering_deg": 5.0, "coast_frames": 0,
+        "trail_brake_frames": 0, "frame_count": 50,
+        "corners_visited": [], "distance_m": 800.0,
+        "in_corner": False, "past_apex": False,
+    }
+    r = client.post("/analyze", json=burst)
+    assert r.status_code == 200
+    assert len(captured) == 1
+    cue = captured[0]
+    assert "expected_tts_ms" in cue
+    # Must be either 0 (no coaching text) or floored at 800.
+    assert cue["expected_tts_ms"] in (0,) or cue["expected_tts_ms"] >= 800
+
+
+def test_diagnostics_llm_friction_respects_limit(client):
+    _seed_friction_rows([
+        {"session_id": f"s{i}", "role": "brief", "fell_back": False,
+         "latency_ms": 1000.0 * i, "prompt_chars": 100, "completion_chars": 50,
+         "backend": "cpu", "mode": "pre_brief"}
+        for i in range(1, 6)
+    ])
+    r = client.get("/diagnostics/llm_friction?limit=2")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert len(body["rows"]) == 2
+    # count is the unfiltered total; limit only caps `rows`
+    assert body["count"] == 5

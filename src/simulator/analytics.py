@@ -297,6 +297,76 @@ def slip_angle_band(frames, max_combo_g_observed: float = 2.29) -> dict:
     }
 
 
+# ─── ADR-018: slip-angle oscillation detector ────────────────────────────────
+
+
+def slip_oscillation_events(frames, *, window_s: float = 3.0,
+                            min_band_crossings: int = 4,
+                            stride_s: float = 0.5) -> list[dict]:
+    """Detect intermediate-driver "ego oscillation" — rapid swings between
+    `at_peak` / `over_driving` and back down. Signals a driver chasing the
+    limit by overshoot rather than building up to it; the canonical cue is
+    'smooth is fast, dial it back to 90 percent.'
+
+    Returns a list of ``{t_start, t_end, crossings, peak_combo_g, severity}``
+    events where a sliding `window_s` second window saw at least
+    `min_band_crossings` changes between adjacent friction bands.
+
+    The detector is intentionally coarse — at HPDE level we don't need to
+    distinguish under-→approach noise; we want the case where the driver
+    keeps blowing past peak grip and reining it back in, repeatedly.
+    """
+    if not frames or len(frames) < 4:
+        return []
+
+    # Reuse the band classifier's thresholds for consistency.
+    max_g = max((f.combo_g for f in frames), default=2.29) or 2.29
+
+    def _band(f) -> int:
+        util = f.combo_g / max_g
+        if util < 0.55: return 0
+        if util < 0.80: return 1
+        if util < 0.95: return 2
+        return 3
+
+    # Collect (t, band) pairs.
+    series = [(f.timestamp, _band(f)) for f in frames]
+    events: list[dict] = []
+    n = len(series)
+    i = 0
+    last_event_end = -1.0
+    while i < n:
+        t0 = series[i][0]
+        # Find window end
+        j = i
+        while j < n and series[j][0] - t0 <= window_s:
+            j += 1
+        # Count band crossings inside [i, j)
+        crossings = 0
+        peak_g = 0.0
+        for k in range(i + 1, j):
+            if series[k][1] != series[k - 1][1]:
+                crossings += 1
+            if frames[k].combo_g > peak_g:
+                peak_g = frames[k].combo_g
+        if crossings >= min_band_crossings and t0 > last_event_end:
+            events.append({
+                "t_start":       round(float(t0), 3),
+                "t_end":         round(float(series[min(j, n) - 1][0]), 3),
+                "crossings":     int(crossings),
+                "peak_combo_g":  round(float(peak_g), 3),
+                "severity":      "high" if crossings >= min_band_crossings + 2 else "medium",
+            })
+            last_event_end = series[min(j, n) - 1][0]
+        # Slide window forward by ~stride_s
+        target = t0 + stride_s
+        while i < n and series[i][0] < target:
+            i += 1
+        if i == 0:
+            i = 1
+    return events
+
+
 # ─── Bentley change-in-speed problem detector ─────────────────────────────────
 
 
