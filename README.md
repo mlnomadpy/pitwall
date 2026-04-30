@@ -8,6 +8,9 @@
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Termux-1a3a52?style=flat-square)](#hardware)
 [![Field test](https://img.shields.io/badge/Sonoma%20field%20test-May%2023%2C%202026-cb4b16?style=flat-square)](#status)
 [![License](https://img.shields.io/badge/license-TBD-555555?style=flat-square)](#license)
+[![Explainer](https://img.shields.io/badge/explainer-live-0058bd?style=flat-square)](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)
+
+> **[→ Project Explainer](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)** — architecture, cue distribution, Sonoma corner doctrine, team.
 
 A real-time, on-device coaching system for track-day drivers. Runs on a
 Pixel 10 via Termux: ingests CAN telemetry over USB from the car's OBD-II
