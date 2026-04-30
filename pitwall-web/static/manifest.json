@@ -1,0 +1,17 @@
+{
+  "name": "Pitwall — AI Racing Coach",
+  "short_name": "Pitwall",
+  "description": "Real-time on-device coaching for track-day drivers",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0d12",
+  "theme_color": "#0d0d12",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%230d0d12'/><text y='24' x='4' font-size='22'>🏁</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
