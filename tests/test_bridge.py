@@ -1248,30 +1248,32 @@ def test_session_corners_returns_per_corner_aggregates(client, synth_multi_lap_f
     assert sample["averages"]["apex_speed_kmh"] > 0
 
 
-def test_score_503_when_no_gemini(client, monkeypatch):
-    """Without GEMINI_API_KEY the endpoint should 503, not crash."""
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    r = client.post("/score", json={"session_id": "anything"})
-    assert r.status_code == 503
-
-
-def test_score_400_without_session_id(client, monkeypatch):
-    """When Gemini *is* available, missing session_id is a 400."""
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
-    monkeypatch.setattr(br, "HAS_GENAI", True)
+def test_score_400_without_session_id(client):
+    """Missing session_id is a 400 regardless of coach state."""
     r = client.post("/score", json={})
-    # Either HAS_GENAI is False (503) or session_id missing (400).
-    assert r.status_code in (400, 503)
+    assert r.status_code == 400
 
 
-def test_score_404_for_unknown_session(client, monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "fake-test-key")
-    monkeypatch.setattr(br, "HAS_GENAI", True)
+def test_score_404_for_unknown_session(client, make_frame_fn):
+    """Real session_id but no telemetry → 404."""
     r = client.post("/score", json={"session_id": "no-such-session"})
-    # If genai client construction fails (no real key), we'd get 502 from
-    # the gemini call branch. We only reach the "not found" branch if HAS_GENAI
-    # short-circuits earlier — accept 404 OR 502/503 here.
-    assert r.status_code in (404, 502, 503)
+    assert r.status_code == 404
+
+
+def test_score_503_when_no_local_gemma(client, monkeypatch, make_frame_fn):
+    """Session has telemetry but no local Gemma loaded → 503.
+
+    The fixture sets `_coach = None` already (see isolated_bridge), so
+    /score should refuse with a clear error rather than crashing.
+    """
+    sid = _start_session(client)
+    frames = [make_frame_fn(t=1000.0 + i * 0.1, distance=i * 5.0) for i in range(20)]
+    client.post(f"/session/{sid}/frames",
+                json={"frames": _frames_to_payload(frames)})
+    r = client.post("/score", json={"session_id": sid})
+    assert r.status_code == 503
+    body = r.get_json()
+    assert "litert-lm" in (body.get("error") or "").lower()
 
 
 def test_markers_no_filter_returns_all(client):

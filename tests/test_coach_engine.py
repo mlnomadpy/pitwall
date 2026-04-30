@@ -345,12 +345,19 @@ def test_rule_coach_voices_marker_label(real_track, make_frame_fn):
 # ─── LitertCoach ─────────────────────────────────────────────────────────────
 
 
-def test_litert_coach_constructs_without_mediapipe():
-    """No MediaPipe locally — construction should succeed via lazy imports."""
+def test_litert_coach_constructs_without_runtime(monkeypatch):
+    """When the runtime fails to load, construction must still succeed; the
+    coach exposes loaded=False and a non-empty error so callers can decide
+    how to fall back. We force the failure via monkeypatch so the test
+    works regardless of whether litert-lm + Gemma are installed locally."""
+    def _explode(self, _model_path):
+        raise RuntimeError("forced-no-runtime")
+    monkeypatch.setattr(LitertCoach, "_init_runtime", _explode)
+
     c = LitertCoach(driver_level="intermediate")
     h = c.health()
     assert h["loaded"] is False
-    assert h["error"]   # non-empty error description
+    assert "forced-no-runtime" in h["error"]
 
 
 def test_litert_coach_propose_falls_back_to_rule():
@@ -375,8 +382,13 @@ def test_litert_coach_brief_falls_back_to_templated():
     assert isinstance(focus, list)
 
 
-def test_litert_coach_debrief_returns_empty_when_no_llm():
-    """Without LLM, debrief should return ("", []) so caller falls through."""
+def test_litert_coach_debrief_returns_empty_when_no_llm(monkeypatch):
+    """Force-empty engine ⇒ debrief returns ("", []) so callers fall through
+    to a templated narrative. Independent of whether the model is installed."""
+    def _explode(self, _model_path):
+        raise RuntimeError("forced-no-runtime")
+    monkeypatch.setattr(LitertCoach, "_init_runtime", _explode)
+
     c = LitertCoach(driver_level="intermediate")
     text, focus = c.debrief({"track": "Sonoma Raceway", "scorecard": {}})
     assert text == ""
@@ -402,8 +414,11 @@ def test_make_coach_tflite_alias():
     assert c.name == "litert"
 
 
-def test_make_coach_auto_falls_back_to_rule():
-    """No MediaPipe → auto picks RuleCoach."""
+def test_make_coach_auto_falls_back_to_rule(monkeypatch):
+    """Force-fail the runtime ⇒ make_coach('auto') picks RuleCoach."""
+    def _explode(self, _model_path):
+        raise RuntimeError("forced-no-runtime")
+    monkeypatch.setattr(LitertCoach, "_init_runtime", _explode)
     c = make_coach("auto")
     assert c.name == "rule"
 
