@@ -59,6 +59,7 @@ nav:
   - Pedagogy: pedagogy.md
   - Hardware: hardware.md
   - UX: ux.md
+  - "Pitwall-Web (PWA) Design": pitwall-web-design.md
   - Feedback System: feedback-system.md
   - Driver Profile Metrics: metrics.md
   - ML Models: ml-models.md
