@@ -403,6 +403,244 @@ def test_litert_coach_debrief_returns_empty_when_no_llm(monkeypatch):
     assert emotion == "neutral"
 
 
+# ─── ADR-018: LLM friction sink ──────────────────────────────────────────────
+
+
+def test_friction_logger_called_when_llm_unloaded(monkeypatch):
+    """Even when the engine fails to load, brief()/debrief() must emit a
+    friction record so the bridge can see how often we're falling back."""
+    monkeypatch.setattr(
+        LitertCoach, "_init_runtime",
+        lambda self, _p: (_ for _ in ()).throw(RuntimeError("no model")),
+    )
+    captured: list[dict] = []
+    coach_engine.set_friction_logger(captured.append)
+    try:
+        c = LitertCoach(driver_level="intermediate")
+        c.brief(
+            driver_id="Taha", today_iso="2026-05-23",
+            weather_phase="morning_fog", surface_state="cool damp",
+            markers_selected=["Turn 11"],
+            session_id="sonoma-001",
+        )
+        c.debrief({
+            "track": "Sonoma Raceway",
+            "scorecard": {"session_id": "sonoma-001"},
+        })
+    finally:
+        coach_engine.set_friction_logger(None)
+
+    assert len(captured) == 2
+    roles = {r["role"] for r in captured}
+    assert roles == {"brief", "debrief"}
+    for rec in captured:
+        assert rec["fell_back"] is True
+        assert rec["session_id"] == "sonoma-001"
+        assert rec["completion_chars"] == 0
+        assert rec["error"]                    # carries init error
+        assert rec["prompt_chars"] > 0
+
+
+def test_friction_logger_records_successful_generate(monkeypatch):
+    """When _generate runs end-to-end (engine present), the friction record
+    captures latency, prompt length, completion length, and no fallback."""
+    monkeypatch.setattr(LitertCoach, "_init_runtime", lambda self, _p: None)
+    c = LitertCoach(driver_level="intermediate")
+    # Stand in a fake engine so _generate's `self._engine is None` guard passes.
+    class _FakeConv:
+        def send_message(self, _msg):
+            time.sleep(0.005)   # measurable latency
+            return {"role": "assistant",
+                    "content": [{"type": "text", "text": "[EMOTION: focused]\nbrake at the bridge."}]}
+    class _FakeEngine:
+        def create_conversation(self, **_kw):
+            return _FakeConv()
+    c._engine = _FakeEngine()
+    c._llm = c._engine
+
+    captured: list[dict] = []
+    coach_engine.set_friction_logger(captured.append)
+    try:
+        out = c._generate("system prompt here", "user prompt here",
+                          session_id="sonoma-001", role="brief", mode="pre_brief")
+    finally:
+        coach_engine.set_friction_logger(None)
+
+    assert "brake" in out
+    assert len(captured) == 1
+    rec = captured[0]
+    assert rec["role"] == "brief"
+    assert rec["fell_back"] is False
+    assert rec["session_id"] == "sonoma-001"
+    assert rec["latency_ms"] >= 5.0
+    assert rec["completion_chars"] == len(out)
+    assert rec["error"] == ""
+
+
+def test_friction_logger_captures_exception_inside_generate(monkeypatch):
+    """If send_message raises, the record must mark fell_back + carry the error
+    so the operator can see why a coach turn produced no text."""
+    monkeypatch.setattr(LitertCoach, "_init_runtime", lambda self, _p: None)
+    c = LitertCoach(driver_level="intermediate")
+    class _BoomConv:
+        def send_message(self, _msg):
+            raise RuntimeError("boom")
+    class _BoomEngine:
+        def create_conversation(self, **_kw):
+            return _BoomConv()
+    c._engine = _BoomEngine()
+    c._llm = c._engine
+
+    captured: list[dict] = []
+    coach_engine.set_friction_logger(captured.append)
+    try:
+        out = c._generate("sys", "usr", role="cue")
+    finally:
+        coach_engine.set_friction_logger(None)
+
+    assert out == ""
+    assert len(captured) == 1
+    rec = captured[0]
+    assert rec["fell_back"] is True
+    assert "boom" in rec["error"]
+    assert rec["completion_chars"] == 0
+
+
+def test_base_prompt_includes_brake_release_pedagogy():
+    """ADR-018: the base in-drive prompt must coach brake-release shape,
+    not static brake markers."""
+    p = build_system_prompt("intermediate", "Sonoma Raceway",
+                            mode=CoachMode.DURING_DRIVE).lower()
+    assert "trail" in p or "roll the brake" in p
+    # Must explicitly tell the model NOT to spam brake markers
+    assert "static brake markers" in p or "brake markers" in p
+    # Must mention dead-pedal / nothing-time
+    assert "nothing time" in p or "dead-pedal" in p or "pick a pedal" in p
+    # Must mention slip-angle / smooth-is-fast ego management
+    assert "smooth is fast" in p
+
+
+def test_post_session_prompt_demands_lead_with_positive():
+    """ADR-018: the debrief system prompt must instruct the model to OPEN
+    with a validated positive moment before any critique."""
+    p = build_system_prompt("intermediate", "Sonoma Raceway",
+                            mode=CoachMode.POST_SESSION).lower()
+    assert "lead with a positive" in p
+    assert "headline" in p
+    assert "validated positive" in p
+
+
+def test_post_session_user_prompt_includes_highlight_reel():
+    """User-prompt assembly should pre-extract the best corner (and any
+    positive highlight) into a HIGHLIGHT REEL section so the LLM has
+    something concrete to lead with."""
+    bundle = {
+        "scorecard": {
+            "session_id": "s1", "n_laps": 5,
+            "best_lap_s": 105.5, "gold_lap_s": 103.0,
+            "session_grade": "B",
+            "weighted_total_pct": 0.78,
+            "corners": [
+                {"corner": "Turn 1", "grade": "B", "score_pct": 0.81,
+                 "delta_time_s": 0.20, "apex_delta_kmh": -2.0,
+                 "exit_delta_kmh": -1.0, "brake_point_delta_m": 1.0,
+                 "time_loss_attribution": []},
+                {"corner": "Turn 10", "grade": "A", "score_pct": 0.96,
+                 "delta_time_s": 0.05, "apex_delta_kmh": 0.5,
+                 "exit_delta_kmh": 0.2, "brake_point_delta_m": 0.0,
+                 "time_loss_attribution": []},
+            ],
+        },
+        "highlights": [
+            {"severity": "positive", "title": "Clean T10 entry",
+             "narrative_seed": "lap 4 — peak grip use",
+             "kind": "good_corner_score"},
+        ],
+        "stats": {}, "eob": {}, "slip_band": {},
+        "consistency": {}, "slip_oscillations": [],
+    }
+    text = build_post_session_user_prompt(bundle)
+    assert "HIGHLIGHT REEL" in text
+    # Best corner is T10 (score 0.96), it should be named explicitly
+    assert "Turn 10" in text
+    # Positive highlight title should also appear
+    assert "Clean T10 entry" in text
+
+
+def test_post_session_user_prompt_handles_zero_highlights():
+    """Even when there's no positive highlight + no scorecard, the user
+    prompt should still emit a HIGHLIGHT REEL section (empty fallback) so
+    the model isn't tempted to skip the lead-with-positive instruction."""
+    text = build_post_session_user_prompt({"scorecard": {}, "highlights": []})
+    assert "HIGHLIGHT REEL" in text
+
+
+def test_pre_brief_prompt_emphasises_transitions():
+    """ADR-018: pre-brief must frame the session around TRANSITIONS,
+    not corner identification or hard brake markers."""
+    p = build_system_prompt("intermediate", "Sonoma Raceway",
+                            mode=CoachMode.PRE_BRIEF).lower()
+    assert "roll the brake to the apex" in p
+    assert "do not prescribe brake markers" in p or "do not prescribe" in p
+
+
+def test_mid_corner_coasting_rule_registered():
+    """ADR-018 pedagogy rule for the dead-pedal pattern must show up in
+    the registry with the correct capability declaration."""
+    by_id = {r.id: r for r in coach_engine.COACH_RULES}
+    assert "mid_corner_coasting" in by_id
+    rule = by_id["mid_corner_coasting"]
+    assert "brake_bar"    in rule.requires
+    assert "throttle_pct" in rule.requires
+    assert "g_lat"        in rule.requires
+    assert "speed_ms"     in rule.requires
+    rate_lookup = dict(rule.min_rates)
+    # Need fast inputs to detect a 0.4 s coast precisely
+    assert rate_lookup.get("brake_bar", 0)    >= 10.0
+    assert rate_lookup.get("throttle_pct", 0) >= 10.0
+
+
+def test_mid_corner_coasting_rule_gates_on_input_rate():
+    """A session whose throttle/brake stream too slowly to detect 0.4 s
+    coasting must mark the rule disabled in the capability gating."""
+    caps_fast = {
+        "brake_bar":    {"mean_hz": 50.0, "useful": True},
+        "throttle_pct": {"mean_hz": 50.0, "useful": True},
+        "g_lat":        {"mean_hz": 50.0, "useful": True},
+        "speed_ms":     {"mean_hz": 50.0, "useful": True},
+    }
+    available, _ = coach_engine.evaluate_coach_gating(caps_fast)
+    assert "mid_corner_coasting" in available
+
+    caps_slow = {
+        "brake_bar":    {"mean_hz": 5.0, "useful": False},
+        "throttle_pct": {"mean_hz": 5.0, "useful": False},
+        "g_lat":        {"mean_hz": 5.0, "useful": False},
+        "speed_ms":     {"mean_hz": 5.0, "useful": False},
+    }
+    available, disabled = coach_engine.evaluate_coach_gating(caps_slow)
+    assert "mid_corner_coasting" not in available
+    disabled_ids = {d["coach_id"] for d in disabled}
+    assert "mid_corner_coasting" in disabled_ids
+
+
+def test_friction_logger_setter_swallows_errors(monkeypatch):
+    """A misbehaving sink must NEVER bubble out of inference."""
+    monkeypatch.setattr(LitertCoach, "_init_runtime", lambda self, _p: None)
+    c = LitertCoach(driver_level="intermediate")
+    c._engine = None       # force the unloaded path
+
+    def _bad_logger(_rec):
+        raise RuntimeError("sink crashed")
+    coach_engine.set_friction_logger(_bad_logger)
+    try:
+        # Should not raise even though the logger throws.
+        out = c._generate("sys", "usr", role="brief")
+        assert out == ""
+    finally:
+        coach_engine.set_friction_logger(None)
+
+
 # ─── Emotion-tag extractor ───────────────────────────────────────────────────
 
 

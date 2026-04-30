@@ -32,7 +32,39 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+
+# ─── ADR-018: LLM friction sink ───────────────────────────────────────────────
+#
+# `_friction_logger` is a single optional callback the bridge installs at boot
+# via `set_friction_logger`. Every LitertCoach call funnels through `_generate`
+# (or its `_log_friction` helper for the no-LLM templated fallback path), so
+# this hook captures latency, truncation, fallbacks, and errors with one site
+# of instrumentation. Keeping it at module scope means tests, replay harnesses,
+# and the bridge can all observe friction without owning a coach instance.
+
+FrictionLogger = Callable[[dict], None]
+_friction_logger: Optional[FrictionLogger] = None
+
+
+def set_friction_logger(fn: Optional[FrictionLogger]) -> None:
+    """Install (or clear) the friction-record callback. Must be cheap and
+    non-blocking — `_generate` calls it on the inference hot path."""
+    global _friction_logger
+    _friction_logger = fn
+
+
+def _emit_friction(record: dict) -> None:
+    """Best-effort fan-out to the registered logger. Swallows everything so a
+    misbehaving sink never breaks an inference call."""
+    fn = _friction_logger
+    if fn is None:
+        return
+    try:
+        fn(record)
+    except Exception:
+        pass
 
 
 class CoachMode(enum.Enum):
@@ -218,6 +250,40 @@ def _rule_tpms_drift(ctx, signals):  # pragma: no cover
     pass
 
 
+@coach_rule(
+    id="slip_angle_oscillation",
+    description=(
+        "ADR-018 pedagogy: detect rapid swings between friction bands "
+        "(approaching_peak ↔ over_driving) within a 3 s window — the "
+        "intermediate-driver pattern of overshooting the limit and "
+        "reining it back. Cue: 'Smooth is fast — dial it back to 90 percent.' "
+        "Reads combo_g + g_lat at high rate so the band assignment is "
+        "stable enough to count crossings."
+    ),
+    requires=["combo_g", "g_lat"],
+    min_rates={"combo_g": 20.0, "g_lat": 20.0},
+)
+def _rule_slip_angle_oscillation(ctx, signals):  # pragma: no cover
+    pass
+
+
+@coach_rule(
+    id="mid_corner_coasting",
+    description=(
+        "ADR-018 pedagogy: penalise the intermediate-driver pattern of "
+        "coasting between brake release and throttle-on. Fires when "
+        "brake_bar < 0.5 AND throttle_pct < 5 for more than ~0.4 s while "
+        "still under lateral load (corner). The cue ('Get back to throttle' "
+        "or 'Stop coasting — pick a pedal') closes the dead-pedal gap that "
+        "dominates time loss for HPDE drivers."
+    ),
+    requires=["brake_bar", "throttle_pct", "g_lat", "speed_ms"],
+    min_rates={"brake_bar": 10.0, "throttle_pct": 10.0},
+)
+def _rule_mid_corner_coasting(ctx, signals):  # pragma: no cover
+    pass
+
+
 # ─── Pedagogical vector matcher ───────────────────────────────────────────────
 
 
@@ -391,6 +457,18 @@ _BASE_SYSTEM_PROMPT = (
     "Speed Secrets curriculum: smooth is fast, exit speed beats corner "
     "speed, late apex, end-of-braking before begin-of-braking, look "
     "where you want to go.\n\n"
+    "PEDAGOGY (intermediate / Time-Trial drivers — ADR-018):\n"
+    "- The driver already knows where to brake. Do NOT call out static "
+    "brake markers when the driver is hitting them within 5 m. Coach "
+    "the SHAPE of the brake release instead — 'roll the brake to the "
+    "apex', 'taper, don't drop', 'longer trail to load the front'.\n"
+    "- Treat trail-braking — modulating brake pressure as steering "
+    "increases — as the central skill, not a finishing flourish. Bring "
+    "it up before apex speed and exit throttle.\n"
+    "- Penalise dead-pedal time (brake-off + throttle-off mid-corner). "
+    "If the data shows a coast, say so — 'no nothing time, pick a pedal'.\n"
+    "- Manage ego on understeery laps: if slip-angle is oscillating, "
+    "calm the driver — 'smooth is fast, dial it back to 90 percent.'\n\n"
     "RULES:\n"
     "- ONE line. No emoji. No quotes around the line.\n"
     "- Reply with an EMPTY string when there is nothing useful to say.\n"
@@ -468,9 +546,16 @@ _PRE_BRIEF_SYSTEM_PROMPT = (
     "their three chosen corners + today's specific conditions + one safety "
     "reminder. Keep it warm but tight — drivers are putting a helmet on, not "
     "studying. Use named landmarks ('the bridge', 'the bump', 'the Toyota "
-    "sign letters'). Use canonical T-Rod phrasings where they fit. End with "
-    "the literal token <FOCUS> followed by a JSON list of exactly 3 short "
-    "actionable focus items. Total ~150 words."
+    "sign letters'). Use canonical T-Rod phrasings where they fit.\n\n"
+    "PEDAGOGY FOCUS (ADR-018, intermediate / HPDE / Time-Trial driver):\n"
+    "- Frame the brief around TRANSITIONS, not corner identification: brake "
+    "release shape, throttle pickup timing, dead-pedal avoidance.\n"
+    "- 'Roll the brake to the apex' is the headline cue — repeat it.\n"
+    "- If the driver has been over-driving lately, lead with calm: "
+    "'smooth is fast, dial it back to 90 percent first lap'.\n"
+    "- Do NOT prescribe brake markers — say 'taper your release', not 'brake at the 100 board'.\n\n"
+    "End with the literal token <FOCUS> followed by a JSON list of exactly "
+    "3 short actionable focus items. Total ~150 words."
 )
 
 
@@ -479,17 +564,32 @@ _POST_SESSION_SYSTEM_PROMPT = (
     "The driver just finished a session at Sonoma Raceway in a BMW M3, "
     "intermediate level. The user message contains structured session data: "
     "scorecard with per-corner A-F grades, time-loss decomposition per "
-    "corner, top highlight moments, stat cards, slip-angle band, EoB "
-    "summary, consistency, and incidents. Use this data — DO NOT invent "
-    "events that aren't in the data. Speak in T-Rod's canonical voice "
-    "where it fits ('Distance is king', 'Just go 100', 'Wait, you're not "
-    "at the apex yet', 'Roll the brake to the apex'). Reference named "
-    "Sonoma landmarks. Structure: 1) one-paragraph headline assessment, "
-    "2) one paragraph per highlight (≤3 of them, lap N, what happened, "
-    "what to do next time), 3) one paragraph identifying the single "
-    "biggest lap-time-leverage opportunity (typically T10 or T11), 4) "
-    "three focus items for next session formatted as a JSON list after "
-    "the literal token <NEXT_FOCUS>. Total ~300 words."
+    "corner, top highlight moments, stat cards, slip-angle band + slip "
+    "oscillations, EoB summary, consistency, and incidents. Use this data — "
+    "DO NOT invent events that aren't in the data. Speak in T-Rod's "
+    "canonical voice where it fits ('Distance is king', 'Just go 100', "
+    "'Wait, you're not at the apex yet', 'Roll the brake to the apex'). "
+    "Reference named Sonoma landmarks.\n\n"
+    "STRUCTURE (ADR-018 — lead with a positive maneuver before any "
+    "critique; intermediate drivers buy in faster when they hear what "
+    "worked first):\n"
+    "1) HEADLINE — one-paragraph assessment that OPENS with a validated "
+    "positive moment from the data: best sector, the highest-scoring "
+    "corner, or a specific highlight tagged 'good_*'. Name it ('your "
+    "T10 entry on lap 4 was an A — that's the gold lap signal'). Even on "
+    "a rough session, find one thing that worked.\n"
+    "2) HIGHLIGHTS — one paragraph per highlight (≤3 total, lap N, what "
+    "happened, what to do next time). Mix wins and lessons, but lead "
+    "with at least one win.\n"
+    "3) ONE BIG LEVER — paragraph identifying the single biggest lap-time "
+    "opportunity (typically T10 or T11). Frame as 'next session' work, "
+    "not as failure. If the slip-oscillation count is high (>2), this is "
+    "where to say 'smooth is fast — dial it back to 90 percent first stint'.\n"
+    "4) FOCUS — three items for next session, formatted as a JSON list "
+    "after the literal token <NEXT_FOCUS>. Each focus item must be a "
+    "transition-level cue (brake release, throttle pickup, dead-pedal "
+    "elimination), NOT a brake-marker prescription.\n\n"
+    "Total ~300 words."
 )
 
 
@@ -606,6 +706,7 @@ def build_post_session_user_prompt(bundle: dict) -> str:
     eob = bundle.get("eob") or {}
     sb = bundle.get("slip_band") or {}
     cons = bundle.get("consistency") or {}
+    osc = bundle.get("slip_oscillations") or []
 
     # Compact scorecard
     scorecard_lines = []
@@ -620,6 +721,38 @@ def build_post_session_user_prompt(bundle: dict) -> str:
             f"BP={c['brake_point_delta_m']:+.1f}m"
             + (f" cause={biggest['cause']}({biggest['seconds_lost']:.2f}s)"
                if biggest else "")
+        )
+
+    # ADR-018: surface the highlight reel — best corner score, best
+    # highlight, and best lap delta — so the LLM has a concrete positive
+    # to open with. Pre-extracted here to avoid the model fishing for it.
+    corners = sc.get("corners") or []
+    best_corner = max(
+        corners, key=lambda c: c.get("score_pct", 0.0), default=None,
+    ) if corners else None
+    positive_highlight = next(
+        (h for h in hs if str(h.get("kind", "")).startswith("good")
+         or h.get("severity") == "positive"
+         or "good" in str(h.get("kind", ""))),
+        None,
+    )
+    highlight_reel_lines: list[str] = ["HIGHLIGHT REEL (lead the debrief with one of these):"]
+    if best_corner:
+        highlight_reel_lines.append(
+            f"  best corner: {best_corner.get('corner')} "
+            f"grade {best_corner.get('grade')} "
+            f"({best_corner.get('score_pct', 0):.1%})"
+        )
+    if positive_highlight:
+        highlight_reel_lines.append(
+            f"  positive highlight: {positive_highlight.get('title', '?')} "
+            f"— {positive_highlight.get('narrative_seed', '')}"
+        )
+    if not best_corner and not positive_highlight:
+        # Even on a rough session we want SOMETHING positive — lap-time
+        # progression often is. Use best vs prior-best lap as the floor.
+        highlight_reel_lines.append(
+            "  no clear highlight — open with raw effort or pace progression"
         )
 
     highlight_lines = []
@@ -639,6 +772,8 @@ def build_post_session_user_prompt(bundle: dict) -> str:
         "SCORECARD (best pass per corner):",
         *(scorecard_lines or ["  (no scorecard available)"]),
         "",
+        *highlight_reel_lines,
+        "",
         "TOP HIGHLIGHTS:",
         *(highlight_lines or ["  (no highlights detected)"]),
         "",
@@ -648,6 +783,10 @@ def build_post_session_user_prompt(bundle: dict) -> str:
         f"longest 100% throttle {stats.get('longest_full_throttle_s', '?')} s",
         f"SLIP-ANGLE BAND: {sb.get('dominant_band', '?')} — "
         f"{sb.get('interpretation', '')}",
+        # ADR-018: lead with oscillation count when it's high — that's the
+        # 'over-driving / ego' signal the debrief must address head-on.
+        f"SLIP OSCILLATIONS: {len(osc)} ego-swing windows"
+        + (f" (peak {max(o['crossings'] for o in osc)} band crossings)" if osc else ""),
         f"EOB: avg nothing-time {eob.get('average_nothing_time_s', 0):.2f}s, "
         f"worst at {eob.get('worst_corner', '—')}",
         f"CONSISTENCY: lap std {cons.get('lap_time_std', 0):.2f}s; "
@@ -874,7 +1013,9 @@ class LitertCoach(CoachEngine):
 
     # ---- inference (used by brief() + debrief() only) -----------------------
 
-    def _generate(self, system_prompt: str, user_prompt: str) -> str:
+    def _generate(self, system_prompt: str, user_prompt: str,
+                  *, session_id: Optional[str] = None,
+                  role: str = "", mode: str = "") -> str:
         """One-shot generation via litert-lm Engine + Conversation.
 
         The .litertlm bundle ships its own chat template; we use the
@@ -885,9 +1026,24 @@ class LitertCoach(CoachEngine):
         Response shape: `{'role': 'assistant', 'content': [{'text': '...',
         'type': 'text'}, …]}` — content is a list of typed parts. We
         concatenate every part with type=='text'.
+
+        Every call emits a friction record (success or failure) so the
+        bridge's `/diagnostics/llm_friction` endpoint can surface degradation
+        before it bites in a session.
         """
+        prompt_chars = len(system_prompt) + len(user_prompt)
         if self._engine is None:
+            _emit_friction({
+                "session_id": session_id, "role": role, "mode": mode,
+                "backend": self.backend,
+                "prompt_chars": prompt_chars, "completion_chars": 0,
+                "latency_ms": 0.0, "truncated": False, "fell_back": True,
+                "error": "engine_not_loaded", "emotion": "",
+            })
             return ""
+        t0 = time.monotonic()
+        err = ""
+        text = ""
         try:
             conv = self._engine.create_conversation(
                 messages=[{"role": "system", "content": system_prompt}],
@@ -895,9 +1051,29 @@ class LitertCoach(CoachEngine):
             response = conv.send_message(
                 {"role": "user", "content": user_prompt},
             )
-        except Exception:
-            return ""
-        return _extract_assistant_text(response)
+            text = _extract_assistant_text(response)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            text = ""
+        latency_ms = (time.monotonic() - t0) * 1000.0
+        # Truncation heuristic: ran the full token budget AND output ended
+        # without sentence-final punctuation (no terminal . ! ? }] etc.).
+        # Keeps us honest about partial completions until litert-lm exposes
+        # an explicit finish_reason in its response shape.
+        truncated = bool(
+            text
+            and len(text) >= self.max_tokens * 3   # ~3 chars/token rough lower bound
+            and text.rstrip()[-1:] not in ".!?\"')]}",
+        )
+        _emit_friction({
+            "session_id": session_id, "role": role, "mode": mode,
+            "backend": self.backend,
+            "prompt_chars": prompt_chars, "completion_chars": len(text),
+            "latency_ms": latency_ms, "truncated": truncated,
+            "fell_back": bool(err) or not text,
+            "error": err, "emotion": "",
+        })
+        return text
 
     # ---- multi-mode entry points (PRE_BRIEF + POST_SESSION) ----------------
 
@@ -907,7 +1083,8 @@ class LitertCoach(CoachEngine):
               biggest_recent_improvement: Optional[dict] = None,
               danger_zones_today: Optional[list[str]] = None,
               goal: str = "personal best lap",
-              driver_level: Optional[str] = None
+              driver_level: Optional[str] = None,
+              session_id: Optional[str] = None,
               ) -> tuple[str, list[str], str]:
         """PRE_BRIEF mode. Returns (narrative_md, focus_list, emotion).
 
@@ -929,6 +1106,15 @@ class LitertCoach(CoachEngine):
             goal=goal,
         )
         if self._llm is None:
+            _emit_friction({
+                "session_id": session_id, "role": "brief",
+                "mode": CoachMode.PRE_BRIEF.value, "backend": self.backend,
+                "prompt_chars": len(sys_p) + len(usr_p),
+                "completion_chars": 0, "latency_ms": 0.0,
+                "truncated": False, "fell_back": True,
+                "error": self._init_error or "engine_not_loaded",
+                "emotion": "neutral",
+            })
             narr, focus = _templated_pre_brief(
                 driver_id=driver_id, weather_phase=weather_phase,
                 surface_state=surface_state, markers_selected=markers_selected,
@@ -937,7 +1123,10 @@ class LitertCoach(CoachEngine):
             )
             return narr, focus, "neutral"
         try:
-            raw = self._generate(sys_p, usr_p)
+            raw = self._generate(
+                sys_p, usr_p, session_id=session_id,
+                role="brief", mode=CoachMode.PRE_BRIEF.value,
+            )
             cleaned, emotion = _extract_emotion(raw)
             narr, focus = _split_brief_narrative_and_focus(cleaned)
             return narr, focus, emotion
@@ -958,10 +1147,24 @@ class LitertCoach(CoachEngine):
         track = bundle.get("track", "Sonoma Raceway")
         sys_p = build_system_prompt(level, track, mode=CoachMode.POST_SESSION)
         usr_p = build_post_session_user_prompt(bundle)
+        sid = (bundle.get("scorecard") or {}).get("session_id") \
+            or bundle.get("session_id")
         if self._llm is None:
+            _emit_friction({
+                "session_id": sid, "role": "debrief",
+                "mode": CoachMode.POST_SESSION.value, "backend": self.backend,
+                "prompt_chars": len(sys_p) + len(usr_p),
+                "completion_chars": 0, "latency_ms": 0.0,
+                "truncated": False, "fell_back": True,
+                "error": self._init_error or "engine_not_loaded",
+                "emotion": "neutral",
+            })
             return "", [], "neutral"
         try:
-            raw = self._generate(sys_p, usr_p)
+            raw = self._generate(
+                sys_p, usr_p, session_id=sid,
+                role="debrief", mode=CoachMode.POST_SESSION.value,
+            )
             cleaned, emotion = _extract_emotion(raw)
             narr, focus = _split_debrief_narrative_and_focus(cleaned)
             return narr, focus, emotion

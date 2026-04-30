@@ -135,6 +135,7 @@ def analyze_session(
         "trail_brake":  analytics.trail_brake_events(passes),
         "eob":          analytics.eob_summary(passes),
         "slip_band":    analytics.slip_angle_band(frames),
+        "slip_oscillations": analytics.slip_oscillation_events(frames),
         "change_of_speed_events": analytics.change_in_speed_events(
             frames, gold_entry_speeds, track,
         ),
@@ -164,6 +165,7 @@ def _no_gold_bundle(session_id: str, frames, track, err: str) -> dict:
         "trail_brake":  [],
         "eob":          {},
         "slip_band":    analytics.slip_angle_band(frames),
+        "slip_oscillations": analytics.slip_oscillation_events(frames),
         "change_of_speed_events": [],
         "incidents":    analytics.flight_recorder(frames, track=track),
         "narrative_md": (

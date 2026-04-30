@@ -49,6 +49,8 @@ import cantools
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+from dead_reckoning import DeadReckoner, DeadReckonerConfig
+
 # Lazy import — bridge module pulls in flask + sonic_model. Reader works
 # without the bridge when run standalone (it'll POST signals over HTTP).
 _HAS_BRIDGE = False
@@ -121,6 +123,7 @@ class CanReader:
         flush_ms: int = 100,
         bridge=None,
         log: Optional[logging.Logger] = None,
+        dead_reckon: bool = True,
     ):
         self.session_id = session_id
         self.interface = interface
@@ -128,6 +131,13 @@ class CanReader:
         self.bitrate = bitrate
         self.flush_interval_s = flush_ms / 1000.0
         self.log = log or logging.getLogger("pitwall.can_reader")
+        # ADR-018: smooth distance between 10 Hz GPS ticks using CAN speed
+        # + IMU g_long. Wide-table writes use the filtered value; the raw
+        # GPS distance still lands in the tall store as `gps_distance_m`
+        # for diagnostics. Disable via dead_reckon=False on replay paths
+        # that already trust their distance source (legacy VBO).
+        self._dead_reckon = dead_reckon
+        self._dr = DeadReckoner(DeadReckonerConfig()) if dead_reckon else None
 
         if bridge is not None:
             self._bridge = bridge
@@ -301,7 +311,13 @@ class CanReader:
             self._consume(msg.timestamp, decoded)
 
     def _consume(self, t: float, decoded: dict):
-        """Route a decoded frame's signals to wide buffer and/or tall sink."""
+        """Route a decoded frame's signals to wide buffer and/or tall sink.
+
+        When dead-reckoning is enabled (default), CAN speed and IMU g_long
+        feed the Kalman filter, raw GPS distance updates land as a fusion
+        measurement, and the wide-row distance_m is overwritten with the
+        filtered output. The raw GPS distance is preserved in the tall
+        store as `gps_distance_m` so we retain a debugging reference."""
         wide_updates = {}
         tall_signals = []
         for name, value in decoded.items():
@@ -313,6 +329,32 @@ class CanReader:
                 wide_updates[name] = fvalue
             else:
                 tall_signals.append((name, t, fvalue))
+
+        # ADR-018: Kalman fusion for smooth distance. Only synthesize a
+        # `distance_m` value when this frame carries speed/IMU/distance —
+        # frames with only inputs (throttle, brake, steering) leave distance
+        # alone so we don't trigger spurious flushes mid-burst.
+        if self._dr is not None:
+            advanced = False
+            if "g_long" in wide_updates:
+                self._dr.update_imu(t, wide_updates["g_long"])
+                advanced = True
+            if "speed_ms" in wide_updates:
+                self._dr.update_speed(t, wide_updates["speed_ms"])
+                advanced = True
+            if "distance_m" in wide_updates:
+                raw_d = wide_updates["distance_m"]
+                self._dr.update_distance(t, raw_d)
+                # Persist raw GPS distance to the tall store for diagnostics.
+                tall_signals.append(("gps_distance_m", t, raw_d))
+                wide_updates["distance_m"] = self._dr.distance_m
+                advanced = True
+            elif advanced and self._dr.t is not None:
+                # GPS didn't update this frame but speed/IMU did — propagate
+                # the filter and emit the dead-reckoned distance so lap
+                # detection sees motion at CAN rate, not GPS rate.
+                self._dr.predict_to(t)
+                wide_updates["distance_m"] = self._dr.distance_m
 
         if wide_updates:
             with self._wide_lock:

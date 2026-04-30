@@ -186,19 +186,24 @@ def _decompose_time_loss(p: CornerPass, g: GoldCornerPass) -> list[TimeLossAttri
             detail=f"throttle {p.throttle_at_exit_pct:.0f}% at exit vs gold {g.throttle_at_exit_pct:.0f}%",
         ))
 
-    # Coasting in corner — Bentley's #1 wasted-time signal
-    if p.coast_seconds > 0.3:
-        seconds = min(p.coast_seconds * 0.6, delta * 0.4)
+    # Coasting in corner — Bentley's #1 wasted-time signal. ADR-018
+    # pedagogy: intermediates need a hard penalty here, not a fairness
+    # cap. Threshold dropped to 0.2 s and multiplier bumped to 0.85 so a
+    # 0.5 s coast registers ~0.4 s of attributed loss instead of ~0.2 s.
+    if p.coast_seconds > 0.2:
+        seconds = min(p.coast_seconds * 0.85, delta * 0.5)
         attribs.append(TimeLossAttribution(
             cause="coast_in_corner",
             seconds_lost=round(seconds, 3),
             detail=f"{p.coast_seconds:.1f} s coasting (no throttle, no brake)",
         ))
 
-    # Excess "nothing time" between brake-off and throttle-on (Bentley EoB)
+    # Excess "nothing time" between brake-off and throttle-on (Bentley EoB).
+    # ADR-018: bumped from 0.4 to 0.6 so a 1.0 s gap in a 1.0 s delta
+    # claims ~60 % of the attribution, not 40 %.
     nothing_gap = p.nothing_time_s
-    if nothing_gap > 0.4:
-        seconds = min(nothing_gap * 0.4, delta * 0.25)
+    if nothing_gap > 0.3:
+        seconds = min(nothing_gap * 0.6, delta * 0.4)
         attribs.append(TimeLossAttribution(
             cause="nothing_time",
             seconds_lost=round(seconds, 3),
@@ -251,12 +256,20 @@ def grade_corner_pass(p: CornerPass, g: GoldCornerPass) -> CornerGrade:
     s_trail  = 1.0 if g.trail_brake_bar_at_apex == 0 else min(
         p.trail_brake_bar_at_apex / max(g.trail_brake_bar_at_apex, 1.0), 1.0
     )
+    # ADR-018 pedagogy: intermediates lose more time to "nothing time"
+    # (the gap between brake-off and throttle-on) than to anything else.
+    # This dimension drops linearly from 1.0 → 0.0 across 0 → 1.5 s
+    # of dead pedal time. 0.4 s is roughly the gold-pass threshold; past
+    # 1.0 s is "actively coasting through the apex" territory.
+    s_nothing = max(0.0, 1.0 - p.nothing_time_s / 1.5)
 
-    # Weighted aggregate per the docs spec: exit 30%, apex 25%, entry 15%,
-    # time 20%, trail 10%
+    # Weighted aggregate. Adjusted from the original (entry 15, apex 25,
+    # exit 30, time 20, trail 10) to make room for nothing-time at 15 %.
+    # Time, trail, and entry give up the slack — they remain decisive but
+    # no longer monopolise the scorecard signal.
     score = (
-        s_entry * 0.15 + s_apex * 0.25 + s_exit * 0.30
-        + s_time  * 0.20 + s_trail * 0.10
+        s_entry  * 0.10 + s_apex   * 0.25 + s_exit    * 0.30
+        + s_time * 0.15 + s_trail  * 0.05 + s_nothing * 0.15
     )
     grade = _grade_letter(score)
 

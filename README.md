@@ -1,9 +1,9 @@
 # Pitwall — Trustable AI Racing Coach
 
-[![Tests](https://img.shields.io/badge/tests-316%20passed-2aa198?style=flat-square)](tests/)
+[![Tests](https://img.shields.io/badge/tests-358%20passed-2aa198?style=flat-square)](tests/)
 [![Smoke](https://img.shields.io/badge/smoke-51%20assertions-2aa198?style=flat-square)](tools/smoke_test_endpoints.py)
-[![Routes](https://img.shields.io/badge/routes-55-859900?style=flat-square)](docs/api.md)
-[![ADRs](https://img.shields.io/badge/ADRs-17-b58900?style=flat-square)](docs/adr/index.md)
+[![Routes](https://img.shields.io/badge/routes-56-859900?style=flat-square)](docs/api.md)
+[![ADRs](https://img.shields.io/badge/ADRs-18-b58900?style=flat-square)](docs/adr/index.md)
 [![PWA design](https://img.shields.io/badge/PWA%20design-38%20screens-d33682?style=flat-square)](docs/vue/README.md)
 [![Python](https://img.shields.io/badge/python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white)](#install)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Termux-1a3a52?style=flat-square)](#hardware)
@@ -16,7 +16,7 @@
 A real-time, on-device coaching system for track-day drivers. Runs on a
 Pixel 10 via Termux: ingests CAN telemetry over USB from the car's OBD-II
 port, makes coaching decisions with on-device Gemma 4 E2B (via litert-lm)
-and a 55-endpoint Python brain backed by DuckDB, and pairs with a Vue PWA
+and a 56-endpoint Python brain backed by DuckDB, and pairs with a Vue PWA
 (`pitwall-web`, sibling repo, fully designed in
 [`docs/vue/`](docs/vue/README.md), implementation pending) for
 presentation. Built for the May 23, 2026 Sonoma Raceway field test —
@@ -47,16 +47,19 @@ LLM work runs on-device through litert-lm).
 
 </details>
 
-The architecture is documented across 17 ADRs. The three most recent —
+The architecture is documented across 18 ADRs. The four most recent —
 [ADR-015](docs/adr/015-universal-telemetry-sink.md) (universal telemetry
 sink), [ADR-016](docs/adr/016-can-bus-ingest-and-frontend-pivot.md) (USB
-CAN ingest + Vue PWA frontend), and [ADR-017](docs/adr/017-three-tier-coach-architecture.md)
+CAN ingest + Vue PWA frontend), [ADR-017](docs/adr/017-three-tier-coach-architecture.md)
 (three-tier coach: in-drive canonical phrases, paddock LLM brief +
-debrief; cloud Gemini removed) — record the late-April pivot from BLE +
-Flutter to USB-CAN + PWA, plus the on-device-only LLM commitment. The
-Flutter / Kotlin trees in `android/` and `android-app/` are frozen as
-v1 reference; they will be removed once `pitwall-web` reaches feature
-parity.
+debrief; cloud Gemini removed), and
+[ADR-018](docs/adr/018-field-readiness-blockers-and-pedagogy-tuning.md)
+(field-readiness blockers + pedagogy tuning from the 2026-04-29 Team 2
+review) — record the late-April pivot from BLE + Flutter to USB-CAN +
+PWA, the on-device-only LLM commitment, and the May-23-driven shift to
+transition-focused intermediate-driver coaching. The Flutter / Kotlin
+trees in `android/` and `android-app/` are frozen as v1 reference; they
+will be removed once `pitwall-web` reaches feature parity.
 
 ## What this is / what this isn't
 
@@ -78,7 +81,7 @@ driver skill level.
 
 ## Status
 
-- **Bridge**: shipped. 55 HTTP endpoints, 316 tests passing, 0 skipped,
+- **Bridge**: shipped. 56 HTTP endpoints, 358 tests passing, 0 skipped,
   smoke-tested end-to-end against a real 8273-frame Sonoma VBO with 51
   assertions green.
 - **CAN pipeline**: shipped. `python-can` reader + simulator + DBC; 6
@@ -94,6 +97,16 @@ driver skill level.
   Gemma-via-litert-lm; cloud Gemini removed entirely. Verified
   end-to-end on Apple Silicon CPU — `LitertCoach.brief()` ~6.7 s,
   `.debrief()` ~10 s.
+- **Field-readiness blockers + pedagogy tuning (ADR-018)**: shipped
+  2026-04-30 in response to the Team 2 architecture review. LLM
+  friction sink (`GET /diagnostics/llm_friction` + `llm_friction`
+  DuckDB table); audio ducker (4-layer audio model with tactical-tone
+  duck during TTS, `expected_tts_ms` cue hint); 1D Kalman dead-reckoning
+  for distance (`tools/dead_reckoning.py` fuses CAN speed + IMU + GPS,
+  closes the 5.8 m / 100 ms GPS gap at 130 mph); intermediate-driver
+  pedagogy refit (nothing-time penalty, brake-release prompts,
+  slip-angle oscillation rule, highlight-reel debrief opener).
+  Long-term framework refactor deferred post-Sonoma.
 - **PWA bridge contract**: shipped. The 7 endpoints the upcoming
   `pitwall-web` PWA depends on are all in place — `?include_can_state`
   on `/signals/registry`, `_live` synthetic session, `[EMOTION:]` tag
@@ -111,9 +124,10 @@ driver skill level.
 ```
 pitwall/
 ├── tools/
-│   ├── pitwall_bridge.py             # 55-route Flask app, CAN reader hookup, SSE
+│   ├── pitwall_bridge.py             # 56-route Flask app, CAN reader hookup, SSE
 │   ├── can_reader.py                 # python-can consumer → DuckDB sink
 │   ├── can_simulator.py              # VBO replay or synthetic CAN producer
+│   ├── dead_reckoning.py             # ADR-018: 1D Kalman filter for distance
 │   ├── smoke_test_endpoints.py       # end-to-end test against a real VBO
 │   ├── generate_sample_vbo.py        # 3-lap synthetic VBO
 │   └── …                             # bulk import, gold-lap extraction, etc.
@@ -139,7 +153,7 @@ pitwall/
 │       ├── service/pitwall-bridge/{run, log/run}
 │       └── boot/start-pitwall
 ├── docs/
-│   ├── api.md                        # 55-endpoint reference
+│   ├── api.md                        # 56-endpoint reference
 │   ├── internal_architecture.md      # post-2026-04-28 backend topology
 │   ├── ux.md                         # underlying UX principles
 │   ├── pitwall-web-design.md         # legacy GBA-style PWA UX sketch
@@ -152,9 +166,9 @@ pitwall/
 │   │   ├── screens/                  #   38 screen docs
 │   │   ├── assets/                   #   sprite naming + nano-banana prompts
 │   │   └── journal/
-│   ├── adr/                          # 17 ADRs
+│   ├── adr/                          # 18 ADRs
 │   └── …                             # pedagogy, telemetry-pipeline, etc.
-├── tests/                            # 316 passing, 0 skipped
+├── tests/                            # 358 passing, 0 skipped
 ├── android/  +  android-app/         # FROZEN v1 native; deletes post-PWA
 ├── mkdocs.yml
 ├── CHANGELOG.md
@@ -242,14 +256,14 @@ python3 tools/pitwall_bridge.py \
 
 ```bash
 python3 -m pytest tests/ -q
-# → 316 passed, 0 skipped
+# → 358 passed, 0 skipped
 ```
 
 End-to-end smoke against a real Racelogic VBO:
 
 ```bash
 python3 tools/smoke_test_endpoints.py --keep-db
-# Ingests 8273-frame Sonoma VBO → exercises 55 endpoints → 51 assertions
+# Ingests 8273-frame Sonoma VBO → exercises 56 endpoints → 51 assertions
 ```
 
 ### PWA bridge contract (the 7 routes the upcoming Vue PWA depends on)
@@ -310,7 +324,7 @@ curl -X POST -H 'Content-Type: application/json' \
 │  │                            ▼                                       │ │
 │  │  ┌──────────────────────────────────────────────────┐              │ │
 │  │  │ Flask HTTP server on 127.0.0.1:8765              │              │ │
-│  │  │ 55 endpoints (api.md) incl. SSE streams:         │              │ │
+│  │  │ 56 endpoints (api.md) incl. SSE streams:         │              │ │
 │  │  │   GET /cues/stream      → live coaching cues     │              │ │
 │  │  │   GET /notifications    → async inbox            │              │ │
 │  │  │   POST /spectator/token → read-only mirror auth  │              │ │
@@ -398,7 +412,7 @@ adding their DBC alongside `data/dbc/pitwall.dbc` via `--can-dbc`.
   shapes and the `--can-channel` startup flags.
 - [`docs/internal_architecture.md`](docs/internal_architecture.md) — the
   as-shipped backend topology with mermaid diagrams.
-- [`docs/adr/index.md`](docs/adr/index.md) — all 17 architecture decision
+- [`docs/adr/index.md`](docs/adr/index.md) — all 18 architecture decision
   records.
 - [`docs/adr/015-universal-telemetry-sink.md`](docs/adr/015-universal-telemetry-sink.md)
   — the registry + tall sink + capability model.
@@ -407,6 +421,10 @@ adding their DBC alongside `data/dbc/pitwall.dbc` via `--can-dbc`.
 - [`docs/adr/017-three-tier-coach-architecture.md`](docs/adr/017-three-tier-coach-architecture.md)
   — three-tier coach (canonical / paddock-LLM / paddock-LLM); cloud Gemini
   removed.
+- [`docs/adr/018-field-readiness-blockers-and-pedagogy-tuning.md`](docs/adr/018-field-readiness-blockers-and-pedagogy-tuning.md)
+  — field-readiness blockers + pedagogy tuning from the 2026-04-29 Team 2
+  review (LLM friction sink, audio ducker, Kalman dead-reckoning,
+  intermediate-driver pedagogy).
 
 ### For frontend devs (`pitwall-web`)
 
@@ -460,17 +478,19 @@ mkdocs serve -a 127.0.0.1:8889
 
 | Suite | Count | Notes |
 |---|---|---|
-| `tests/` (pytest) | **316 passed, 0 skipped** | Unit + integration; vendored fixtures, no network |
-| `tests/test_can_pipeline.py` | 6 of the 316 | Round-trip on `interface='virtual'`; no kernel modules required |
-| `tests/test_coach_engine_litert.py` | 8 of the 316 | Live-Gemma tests; auto-skip when model file is absent |
+| `tests/` (pytest) | **358 passed, 0 skipped** | Unit + integration; vendored fixtures, no network |
+| `tests/test_can_pipeline.py` | 9 of the 358 | Round-trip on `interface='virtual'` + ADR-018 dead-reckoner wiring |
+| `tests/test_dead_reckoning.py` | 13 of the 358 | ADR-018 1D Kalman filter unit suite |
+| `tests/test_coach_engine_litert.py` | 8 of the 358 | Live-Gemma tests; auto-skip when model file is absent |
 | `tools/smoke_test_endpoints.py` | **51 assertions, 0 failed** | End-to-end against a real 8273-frame Sonoma VBO |
 
 Run individually:
 
 ```bash
 python3 -m pytest tests/test_bridge.py -q                # routes-level tests
-python3 -m pytest tests/test_can_pipeline.py -q          # 6 CAN round-trip tests
-python3 -m pytest tests/test_coach_engine.py -q          # coach + emotion extractor
+python3 -m pytest tests/test_can_pipeline.py -q          # CAN round-trip + ADR-018 wiring
+python3 -m pytest tests/test_dead_reckoning.py -q        # ADR-018 Kalman unit suite
+python3 -m pytest tests/test_coach_engine.py -q          # coach + emotion extractor + new pedagogy rules
 python3 -m pytest tests/test_coach_engine_litert.py -q   # live Gemma (skipped without model)
 python3 -m pytest tests/test_session_analyzer.py -q      # post-session pipeline
 python3 tools/smoke_test_endpoints.py                    # full-VBO smoke
@@ -514,6 +534,12 @@ milestone (23 days out). Open work in priority order:
   `data/tracks/<id>.json` slot ready; awaits gold-standard reference
   laps and corner geometry.
 - **Public release + license** — TBD post-field-test.
+- **Framework refactor (post-Sonoma)** — per ADR-018, the Team 2 review's
+  long-term recommendations are queued for after May 23: abstract
+  `CoachContext` → generic `StateContext`, parameterise the LSTM input
+  layer for arbitrary time-series vectors, and decouple the spatial
+  awareness engine from its 1D track-length loop to support 3D mapping.
+  Don't start until the field test is done.
 
 ## Team 2 (Intermediate, BMW M3)
 
@@ -542,6 +568,11 @@ milestone (23 days out). Open work in priority order:
   cross-platform (macOS / Linux / Termux). Replaced the original
   MediaPipe Genai approach which doesn't ship LLM Inference for
   desktop Python.
+- **Team 2 architecture review (2026-04-29, "CONDITIONAL PASS")** — the
+  punch list that became [ADR-018](docs/adr/018-field-readiness-blockers-and-pedagogy-tuning.md):
+  LLM friction logging, the audio ducker rule, Kalman dead-reckoning,
+  and the intermediate-driver pedagogy refit (transitions over
+  locations, lead the debrief with a positive moment).
 
 ## Contributing
 

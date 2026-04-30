@@ -1,7 +1,23 @@
 """Unit tests for src/simulator/analytics.py."""
+from types import SimpleNamespace
+
 import pytest
 import analytics
 from corner_grader import CornerPass
+
+
+def _osc_frame(t, combo_g):
+    """Minimal frame for slip-oscillation tests — only `timestamp` and
+    `combo_g` matter for the band classifier."""
+    return SimpleNamespace(
+        timestamp=t, distance=0.0, speed=20.0, lat=0.0, lon=0.0,
+        heading=0.0, altitude=0.0, g_lat=0.0, g_long=0.0,
+        combo_g=combo_g, brake_pressure=0.0, brake_position=0.0,
+        throttle=50.0, steering=0.0, rpm=4500.0,
+        coolant_temp=88.0, oil_temp=95.0, fuel_level=50.0,
+        avitime=0.0, lap=0, lap_time=0.0,
+        distance_to_corner=0.0, corner_name="", corner_severity=0,
+    )
 
 
 def _pass(corner, lap=0, **kwargs):
@@ -245,3 +261,42 @@ def test_smoothness_per_corner_uses_real_track(real_track, synth_lap_frames):
     # Should be keyed by corner name, not session-wide
     for k in sm:
         assert k in [c.name for c in real_track.corners]
+
+
+# ─── ADR-018: slip_oscillation_events ────────────────────────────────────────
+
+def test_slip_oscillation_empty_input_returns_empty():
+    assert analytics.slip_oscillation_events([]) == []
+    assert analytics.slip_oscillation_events([_osc_frame(0, 1.0)]) == []
+
+
+def test_slip_oscillation_quiet_session_no_events():
+    """A driver staying in one band the whole time produces no events."""
+    frames = [_osc_frame(t * 0.1, 1.0) for t in range(60)]    # 6 s steady
+    assert analytics.slip_oscillation_events(frames) == []
+
+
+def test_slip_oscillation_detects_ego_swings():
+    """Five rapid band crossings inside a 3 s window must produce an event."""
+    # max_combo_g defaults to the max in-frames so set the peak to 2.0:
+    # bands cut at 0.55·2 = 1.10, 0.80·2 = 1.60, 0.95·2 = 1.90.
+    # Alternate 1.0 (under) → 1.7 (at_peak) → 1.0 → 1.95 (over) → 1.0 → 1.7 → 2.0
+    pattern = [1.0, 1.7, 1.0, 1.95, 1.0, 1.7, 2.0, 1.0]
+    frames = [_osc_frame(i * 0.3, g) for i, g in enumerate(pattern)]
+    events = analytics.slip_oscillation_events(frames, window_s=3.0,
+                                               min_band_crossings=4)
+    assert len(events) >= 1
+    e = events[0]
+    assert e["crossings"] >= 4
+    assert e["severity"] in ("medium", "high")
+    assert e["t_start"] <= 0.0
+    assert e["t_end"] >= e["t_start"]
+
+
+def test_slip_oscillation_high_severity_for_extreme_swings():
+    """Eight band crossings inside one window earn severity='high'."""
+    pattern = [1.0, 1.7, 1.0, 1.95, 1.0, 1.7, 1.0, 1.95, 2.0]
+    frames = [_osc_frame(i * 0.25, g) for i, g in enumerate(pattern)]
+    events = analytics.slip_oscillation_events(frames, window_s=3.0,
+                                               min_band_crossings=4)
+    assert any(e["severity"] == "high" for e in events)

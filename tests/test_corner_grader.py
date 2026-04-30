@@ -197,6 +197,64 @@ def test_extract_corner_passes_from_synth_lap(synth_lap_frames, real_track):
         assert p.corner in [c.name for c in real_track.corners]
 
 
+def test_nothing_time_dimension_lowers_score(synth_gold_corner_pass):
+    """ADR-018 pedagogy: a pass that matches gold on every other dimension
+    but coasts 1.0 s between brake-off and throttle-on must score lower than
+    one with zero nothing-time. The dimension is weighted at 15 % so the
+    expected delta is ≈10 % of the perfect score."""
+    g = synth_gold_corner_pass
+
+    def _pass_with(nothing_time_s):
+        return CornerPass(
+            corner=g.corner, lap=1,
+            entry_speed_kmh=g.entry_speed_kmh,
+            apex_speed_kmh=g.apex_speed_kmh,
+            exit_speed_kmh=g.exit_speed_kmh,
+            min_speed_kmh=g.min_speed_kmh,
+            peak_brake_bar=g.peak_brake_bar,
+            brake_point_m=g.brake_point_m, brake_release_m=g.brake_release_m,
+            trail_brake_bar_at_apex=g.trail_brake_bar_at_apex,
+            throttle_at_exit_pct=g.throttle_at_exit_pct,
+            max_g_lat=g.max_g_lat, max_combo_g=g.max_combo_g,
+            corner_time_s=g.corner_time_s,
+            coast_seconds=0, steering_corrections=0,
+            nothing_time_s=nothing_time_s,
+        )
+
+    clean = grade_corner_pass(_pass_with(0.0), g).score_pct
+    coasty = grade_corner_pass(_pass_with(1.0), g).score_pct
+    assert clean > coasty
+    # 1.0 s of nothing-time costs (1/1.5)·15 % ≈ 0.10 of the score.
+    assert (clean - coasty) > 0.05
+    assert (clean - coasty) < 0.18
+
+
+def test_decompose_attributes_nothing_time_above_threshold(synth_gold_corner_pass):
+    """0.5 s of nothing-time on a 1.0 s delta should land as a
+    `nothing_time` attribution worth ~0.3 s under the new multiplier."""
+    g = synth_gold_corner_pass
+    p = CornerPass(
+        corner=g.corner, lap=1,
+        entry_speed_kmh=g.entry_speed_kmh - 2,
+        apex_speed_kmh=g.apex_speed_kmh - 2,
+        exit_speed_kmh=g.exit_speed_kmh - 2,
+        min_speed_kmh=g.min_speed_kmh - 2,
+        peak_brake_bar=g.peak_brake_bar,
+        brake_point_m=g.brake_point_m, brake_release_m=g.brake_release_m,
+        trail_brake_bar_at_apex=g.trail_brake_bar_at_apex,
+        throttle_at_exit_pct=g.throttle_at_exit_pct,
+        max_g_lat=g.max_g_lat, max_combo_g=g.max_combo_g,
+        corner_time_s=g.corner_time_s + 1.0,
+        coast_seconds=0, steering_corrections=0,
+        nothing_time_s=0.5,
+    )
+    attribs = _decompose_time_loss(p, g)
+    by_cause = {a.cause: a.seconds_lost for a in attribs}
+    assert "nothing_time" in by_cause
+    # 0.5 s × 0.6 multiplier = 0.30 s before the cap kicks in
+    assert by_cause["nothing_time"] >= 0.25
+
+
 def test_scorecard_to_dict_round_trip(synth_corner_pass, synth_gold_corner_pass):
     g = synth_gold_corner_pass
     gold = GoldStandard(track="Sonoma Raceway", source_file="t.vbo",

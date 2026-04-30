@@ -4,16 +4,34 @@ Every sound the player will hear, why it's there, where it lives, how
 it's produced. Audio is half the "feels like an old game" pitch — get
 this wrong and the pixel art doesn't carry it alone.
 
-## Three audio layers
+## Four audio layers
 
 | Layer | Volume | Mix priority | Source |
 |---|---|---|---|
 | **Music** | 15% master, ducks to 5% during dialogue | low | Chiptune loops, generative or pre-baked |
 | **SFX** | 30% master | medium | jsfxr-generated, ~20 distinct samples |
+| **Tactical tones** | 60% master, **ducks to 12%** while TTS plays | medium-high | Web Audio oscillator, pitch ↔ delta from sonic_model |
 | **Voice (TTS)** | 100% master | high | Pre-rendered MP3 per coach phrase + Web Speech fallback |
 
-All three pipe through [Howler.js](https://howlerjs.com/) with one
-shared mixer. Mute toggles per layer in `screens/13-settings.md`.
+All four pipe through [Howler.js](https://howlerjs.com/) with one
+shared mixer (the tactical-tone oscillator wired into the Howler graph
+via a `MediaElementAudioSourceNode`). Mute toggles per layer in
+`screens/13-settings.md`.
+
+### Why a separate tactical-tone layer
+
+The sonic-model emits a continuous pitch where the pitch IS the
+delta — speed delta, brake-pressure delta, longitudinal-G delta — so
+the driver hears how far they are from the gold-lap reference without
+listening to words. This is the reflexive sub-50 ms feedback layer
+(per [ADR-017](../adr/017-three-tier-coach-architecture.md)).
+
+It cannot share the SFX bus: SFX are < 1 s one-shots, tactical tones
+are continuous and never stop. It cannot share the voice bus either,
+because voice (TTS) is *the thing we duck around*. It needs its own
+gain node so we can ramp it down by ~14 dB whenever a coach phrase is
+speaking and back up when the phrase ends — without affecting any
+other layer.
 
 ## SFX library
 
@@ -158,30 +176,85 @@ keys are stable across rebuilds.
 ```ts
 // pitwall-web/src/lib/audio.ts
 import { Howl } from 'howler'
+import { ref } from 'vue'
+
+// One reactive flag is the source of truth for ducking. The tactical-tone
+// oscillator and any future ducked layer watch it and ramp their gain.
+// Setting it true while it is already true extends the duck window
+// (multiple back-to-back voice cues won't drop the duck mid-phrase).
+export const ttsDucked = ref(false)
+let _duckUntil = 0          // monotonic ms — when the active duck window ends
 
 export const audio = {
-  music:  new Map<string, Howl>(),
-  sfx:    new Map<string, Howl>(),
-  voice:  new Map<string, Howl>(),
+  music:    new Map<string, Howl>(),
+  sfx:      new Map<string, Howl>(),
+  voice:    new Map<string, Howl>(),
+  tactical: null as null | TacticalToneOscillator,    // see sonic-model bus
 
   playMusic(track: string) {
     /* fade out current track over 500 ms, fade in new */
   },
   playSfx(id: SfxId) { /* one-shot */ },
-  playVoice(coachId: CoachId, phraseId: string) {
+  playVoice(coachId: CoachId, phraseId: string, hintMs = 0) {
     const key = `${coachId}/${phraseId}`
     let h = this.voice.get(key)
     if (!h) {
       h = new Howl({ src: [`/audio/coaches/${key}.mp3`] })
       this.voice.set(key, h)
     }
-    audio.duckMusic(true)         // music drops to 5% master
-    h.once('end', () => audio.duckMusic(false))
+    // Two ducks for the price of one: music drops to 5%, tactical to 12%.
+    audio.duckMusic(true)
+    audio.duckTactical(true, hintMs || (h.duration() * 1000) || 1500)
+    h.once('end', () => {
+      audio.duckMusic(false)
+      // Tactical un-ducks via timer — see duckTactical — so a
+      // long phrase that finishes early doesn't yank tones up
+      // before the user has parsed the cue.
+    })
     h.play()
   },
+  speakAdHoc(text: string, voiceConfig: VoiceConfig, hintMs = 0) {
+    // Web Speech path — used when the LLM emits a phrase outside the
+    // pre-rendered set. Ducker hint comes from the bridge's
+    // `expected_tts_ms` on the /cues/stream payload (~150 ms/word, floor 800).
+    const u = new SpeechSynthesisUtterance(text)
+    u.rate = voiceConfig.rate
+    u.pitch = voiceConfig.pitch
+    u.voice = pickVoice(voiceConfig.coachId)
+    audio.duckMusic(true)
+    audio.duckTactical(true, hintMs || estimateMs(text))
+    u.onend = () => audio.duckMusic(false)
+    speechSynthesis.speak(u)
+  },
   duckMusic(ducked: boolean) { /* fade music to 5% / 100% */ },
+  duckTactical(ducked: boolean, holdMs = 0) {
+    // Engages the duck IMMEDIATELY (8 ms ramp — fast enough that the
+    // driver doesn't hear the hand-off, slow enough that we don't
+    // get a click). Releases on a timer so back-to-back cues stack
+    // their hold windows instead of fighting each other.
+    if (ducked) {
+      _duckUntil = Math.max(_duckUntil, performance.now() + holdMs)
+      ttsDucked.value = true
+      audio.tactical?.gain.gainNode.gain.linearRampToValueAtTime(
+        0.12, audio.tactical.ctx.currentTime + 0.008,
+      )
+      setTimeout(audio._maybeUnduck, holdMs + 16)
+    }
+  },
+  _maybeUnduck() {
+    if (performance.now() >= _duckUntil - 8) {
+      ttsDucked.value = false
+      audio.tactical?.gain.gainNode.gain.linearRampToValueAtTime(
+        0.60, audio.tactical.ctx.currentTime + 0.080,
+      )
+    }
+  },
 }
 ```
+
+The PWA's `/cues/stream` subscriber feeds `expected_tts_ms` from each
+event into `playVoice`/`speakAdHoc` so the duck window matches the
+phrase length exactly — no guessing, no hand-tuning.
 
 ## Audio rules
 
@@ -191,15 +264,24 @@ These match the visual rules in `01-visual-language.md`:
 2. **Every cancel has a thud.** No silent B-button presses.
 3. **Music ducks during dialogue.** 100% → 5% over 200 ms; restore
    when teletype finishes.
-4. **TTS never overlaps TTS.** A new voice cue interrupts the previous
-   one (`Howl.stop()` then play).
-5. **No SFX during the on-track HUD's high-attention windows** —
+4. **Tactical tones duck during TTS.** 60% → 12% over 8 ms (fast hand-off,
+   no click) when a coach phrase starts; restore over 80 ms (slow ramp so
+   the driver stays oriented after the cue lands). Window length comes from
+   the bridge's `expected_tts_ms` cue field — back-to-back cues *extend*
+   the duck instead of fighting each other. **This is the cognitive-overload
+   fix from ADR-018.** Without it, the driver hears continuous brake-delta
+   pitch UNDER a verbal pace note at full volume — provably bad at 130 mph.
+5. **TTS never overlaps TTS.** A new voice cue interrupts the previous
+   one (`Howl.stop()` then play). The arbiter at the bridge already cools
+   down to one cue per 3 s (ADR-002), so this is a backstop.
+6. **No SFX during the on-track HUD's high-attention windows** —
    between corner-entry and corner-exit, only safety SFX (`over_grip`,
    `coast_warning`) play. Cursor / dialogue SFX are suppressed.
-6. **`prefers-reduced-motion: reduce`** also reduces audio: music
+7. **`prefers-reduced-motion: reduce`** also reduces audio: music
    volume drops to 0, SFX to 50%. Coach voice unchanged (it's the
-   point of the coach).
-7. **No SFX delay > 30 ms.** Pre-loaded Howls; never lazy-load on
+   point of the coach). Tactical-tone gain drops to 30% (still
+   present — it's a safety layer).
+8. **No SFX delay > 30 ms.** Pre-loaded Howls; never lazy-load on
    button press.
 
 ## Mute / volume UX

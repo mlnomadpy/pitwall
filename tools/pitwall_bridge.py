@@ -60,13 +60,16 @@ except ImportError as e:
     print(f"⚠  sonic_model not available ({e}) — falling back to rule engine")
 
 try:
-    from coach_engine import make_coach, CoachArbiter, build_context
+    from coach_engine import (
+        make_coach, CoachArbiter, build_context, set_friction_logger,
+    )
     _coach = make_coach(kind="auto")
     _arbiter = CoachArbiter()
     print(f"✓  coach_engine loaded ({_coach.name})")
 except ImportError as e:
     _coach = None
     _arbiter = None
+    set_friction_logger = None  # type: ignore[assignment]
     print(f"⚠  coach_engine not available ({e})")
 
 try:
@@ -211,6 +214,28 @@ def get_db():
             ended_at      TIMESTAMP,
             note          VARCHAR
         );
+
+        -- ADR-018: LLM friction sink. Every LitertCoach._generate call lands
+        -- a row here so we can spot edge degradation (latency spikes,
+        -- truncations, fallbacks) at 130 mph instead of after the fact.
+        CREATE SEQUENCE IF NOT EXISTS llm_friction_id_seq;
+        CREATE TABLE IF NOT EXISTS llm_friction (
+            id               INTEGER PRIMARY KEY DEFAULT nextval('llm_friction_id_seq'),
+            session_id       VARCHAR,
+            role             VARCHAR,           -- 'brief' | 'cue' | 'debrief'
+            mode             VARCHAR,           -- DURING_DRIVE | PRE_BRIEF | POST_SESSION
+            backend          VARCHAR,
+            prompt_chars     INTEGER,
+            completion_chars INTEGER,
+            latency_ms       DOUBLE,
+            truncated        BOOLEAN,
+            fell_back        BOOLEAN,           -- true if templated fallback was used
+            error            VARCHAR,
+            emotion          VARCHAR,
+            ts               TIMESTAMP DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_llm_friction_session_ts
+            ON llm_friction (session_id, ts);
     """)
     return conn
 
@@ -352,6 +377,54 @@ def _compute_capabilities(sid: str) -> int:
 
         conn.close()
     return rows_written
+
+
+# ── ADR-018: LLM friction sink ─────────────────────────────────────────────
+
+def _log_llm_friction(rec: dict) -> None:
+    """Persist one LitertCoach friction record. Called from coach_engine via
+    `set_friction_logger`, so it must be silent on failure — a misbehaving
+    sink mustn't stall the inference call."""
+    if not HAS_DUCKDB:
+        return
+    try:
+        with _db_lock:
+            conn = get_db()
+            if conn is None:
+                return
+            try:
+                conn.execute(
+                    """INSERT INTO llm_friction
+                       (session_id, role, mode, backend, prompt_chars,
+                        completion_chars, latency_ms, truncated, fell_back,
+                        error, emotion)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                    [
+                        rec.get("session_id"),
+                        rec.get("role", ""),
+                        rec.get("mode", ""),
+                        rec.get("backend", ""),
+                        int(rec.get("prompt_chars") or 0),
+                        int(rec.get("completion_chars") or 0),
+                        float(rec.get("latency_ms") or 0.0),
+                        bool(rec.get("truncated", False)),
+                        bool(rec.get("fell_back", False)),
+                        (rec.get("error") or "")[:512],
+                        rec.get("emotion") or "",
+                    ],
+                )
+            finally:
+                conn.close()
+    except Exception:
+        pass
+
+
+# Register at import — only if both coach + duckdb are available.
+if HAS_COACH and HAS_DUCKDB and set_friction_logger is not None:
+    try:
+        set_friction_logger(_log_llm_friction)
+    except Exception:
+        pass
 
 
 # ── ADR-015 Phase 3: synchroniser helpers ──────────────────────────────────
@@ -1018,14 +1091,20 @@ def analyze():
     sid = burst.get("session_id")
     if sid:
         _cue_bus.publish(sid, {
-            "ts":         time.time(),
-            "burst_id":   burst_id,
-            "phrase_id":  None,
-            "text":       coaching or "",
-            "priority":   1,
-            "emotion":    "neutral",   # /analyze path doesn't carry emotion yet
-            "source":     source,
-            "pace_note":  pace_note,
+            "ts":              time.time(),
+            "burst_id":        burst_id,
+            "phrase_id":       None,
+            "text":            coaching or "",
+            "priority":        1,
+            "emotion":         "neutral",   # /analyze path doesn't carry emotion yet
+            "source":          source,
+            "pace_note":       pace_note,
+            # ADR-018 audio-ducker hint: PWA holds tactical-tone gain at
+            # -18 dB for this many ms while it speaks the cue. ~150 ms/word
+            # matches the canonical T-Rod TTS render rate; floor at 800 ms
+            # so a one-word safety call ('Brake!') still ducks long enough
+            # to land cleanly over the continuous tones.
+            "expected_tts_ms": _estimate_tts_ms(coaching or ""),
         })
 
     return jsonify({
@@ -1086,6 +1165,19 @@ class _CueBus:
 
 
 _cue_bus = _CueBus()
+
+
+def _estimate_tts_ms(text: str) -> int:
+    """Rough TTS duration estimate for the audio-ducker hint on cue events.
+
+    150 ms/word matches Gemini-TTS's canonical T-Rod render rate; floored at
+    800 ms so a one-word safety call ('Brake!') still ducks long enough for
+    a clean handover over the continuous tactical tones.
+    """
+    if not text:
+        return 0
+    words = max(1, len(text.split()))
+    return max(800, words * 150)
 
 
 @app.route("/cues/stream", methods=["GET"])
@@ -3175,18 +3267,34 @@ def coach_brief():
     ]
 
     emotion = "neutral"
+    sid_param = (request.args.get("session_id") or "").strip() or None
     if hasattr(_coach, "brief"):
-        result = _coach.brief(
-            driver_id=driver_id,
-            today_iso=today,
-            weather_phase=weather_phase.id,
-            surface_state=weather_phase.surface_state,
-            markers_selected=markers_selected,
-            weakest_recent_corner=profile.get("weakest_recent_corner"),
-            biggest_recent_improvement=profile.get("biggest_improvement"),
-            danger_zones_today=danger_today,
-            goal=goal,
-        )
+        try:
+            result = _coach.brief(
+                driver_id=driver_id,
+                today_iso=today,
+                weather_phase=weather_phase.id,
+                surface_state=weather_phase.surface_state,
+                markers_selected=markers_selected,
+                weakest_recent_corner=profile.get("weakest_recent_corner"),
+                biggest_recent_improvement=profile.get("biggest_improvement"),
+                danger_zones_today=danger_today,
+                goal=goal,
+                session_id=sid_param,
+            )
+        except TypeError:
+            # Older coach signature without session_id (test stubs etc.)
+            result = _coach.brief(
+                driver_id=driver_id,
+                today_iso=today,
+                weather_phase=weather_phase.id,
+                surface_state=weather_phase.surface_state,
+                markers_selected=markers_selected,
+                weakest_recent_corner=profile.get("weakest_recent_corner"),
+                biggest_recent_improvement=profile.get("biggest_improvement"),
+                danger_zones_today=danger_today,
+                goal=goal,
+            )
         # New shape (3-tuple) for emotion-aware coaches; old shape (2-tuple) tolerated.
         if len(result) == 3:
             narrative, focus, emotion = result
@@ -3586,6 +3694,114 @@ def signals_registry():
     if (request.args.get("include_can_state") or "").lower() == "true":
         body["can_state"] = _can_state_snapshot()
     return jsonify(body)
+
+
+@app.route("/diagnostics/llm_friction", methods=["GET"])
+def diagnostics_llm_friction():
+    """ADR-018: surface LitertCoach edge friction.
+
+    Every brief/debrief lands a row in `llm_friction`; this endpoint serves
+    raw rows + aggregates so the Pit Stall Setup screen can show whether
+    Gemma is degrading (latency creep, truncations, fallbacks) before it
+    bites mid-session.
+
+    Query params:
+        session_id     (optional)  filter to one session
+        role           (optional)  brief | cue | debrief
+        since_minutes  (optional)  only rows from the last N minutes
+        limit          (default 100, max 1000)
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    sid = (request.args.get("session_id") or "").strip()
+    role = (request.args.get("role") or "").strip()
+    try:
+        limit = max(1, min(int(request.args.get("limit", 100)), 1000))
+    except ValueError:
+        limit = 100
+    try:
+        since_min = float(request.args.get("since_minutes", 0) or 0)
+    except ValueError:
+        since_min = 0.0
+
+    where = []
+    params: list = []
+    if sid:
+        where.append("session_id = ?")
+        params.append(sid)
+    if role:
+        where.append("role = ?")
+        params.append(role)
+    if since_min > 0:
+        where.append("ts >= now() - INTERVAL (?) MINUTE")
+        params.append(since_min)
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return jsonify({"error": "duckdb not available"}), 503
+        try:
+            rows = conn.execute(
+                f"""SELECT id, session_id, role, mode, backend,
+                          prompt_chars, completion_chars, latency_ms,
+                          truncated, fell_back, error, emotion, ts
+                   FROM llm_friction
+                   {where_sql}
+                   ORDER BY ts DESC
+                   LIMIT ?""",
+                [*params, limit],
+            ).fetchall()
+            agg_overall = conn.execute(
+                f"""SELECT
+                       COUNT(*),
+                       quantile_cont(latency_ms, 0.5),
+                       quantile_cont(latency_ms, 0.95),
+                       AVG(CASE WHEN error IS NOT NULL AND error <> '' THEN 1.0 ELSE 0.0 END),
+                       AVG(CASE WHEN fell_back THEN 1.0 ELSE 0.0 END),
+                       AVG(CASE WHEN truncated THEN 1.0 ELSE 0.0 END)
+                   FROM llm_friction
+                   {where_sql}""",
+                params,
+            ).fetchone()
+            agg_by_role = conn.execute(
+                f"""SELECT role, COUNT(*),
+                          quantile_cont(latency_ms, 0.5),
+                          AVG(CASE WHEN fell_back THEN 1.0 ELSE 0.0 END)
+                   FROM llm_friction
+                   {where_sql}
+                   GROUP BY role
+                   ORDER BY role""",
+                params,
+            ).fetchall()
+        finally:
+            conn.close()
+
+    out_rows = [
+        {"id": r[0], "session_id": r[1], "role": r[2], "mode": r[3],
+         "backend": r[4], "prompt_chars": r[5], "completion_chars": r[6],
+         "latency_ms": float(r[7]) if r[7] is not None else 0.0,
+         "truncated": bool(r[8]), "fell_back": bool(r[9]),
+         "error": r[10] or "", "emotion": r[11] or "",
+         "ts": str(r[12]) if r[12] is not None else ""}
+        for r in rows
+    ]
+    n, p50, p95, err_rate, fb_rate, trunc_rate = agg_overall or (0, None, None, 0, 0, 0)
+    return jsonify({
+        "count": int(n or 0),
+        "p50_latency_ms": float(p50) if p50 is not None else None,
+        "p95_latency_ms": float(p95) if p95 is not None else None,
+        "error_rate":      float(err_rate or 0.0),
+        "fallback_rate":   float(fb_rate or 0.0),
+        "truncation_rate": float(trunc_rate or 0.0),
+        "by_role": [
+            {"role": r[0], "count": int(r[1]),
+             "p50_latency_ms": float(r[2]) if r[2] is not None else None,
+             "fallback_rate":  float(r[3] or 0.0)}
+            for r in agg_by_role
+        ],
+        "rows": out_rows,
+    })
 
 
 def _can_state_snapshot() -> dict:
