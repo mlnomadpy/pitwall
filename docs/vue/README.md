@@ -61,6 +61,11 @@ Two reasons that look like one:
   - [`09-tech-stack.md`](09-tech-stack.md) — Vue 3 + Vite + Tailwind +
     DuckDB-Wasm + Howler + service worker. Why each piece, what it
     replaces, what version.
+  - [`11-navigation-map.md`](11-navigation-map.md) — **the god mermaid**.
+    Full overview + zoomed subgraphs (session loop, hub radial,
+    analytics radial, overlays, Coach Speaks Modal usage) + per-screen
+    incoming/outgoing reference table. Single source of truth for
+    "where does this button go?"
 
 - **Screens** (under `screens/`): one doc per screen. Each one has
   the same six sections — purpose, wireframe, states, sprite usage,
@@ -83,6 +88,7 @@ Two reasons that look like one:
   *Session loop*
   - [`15-pit-stall-setup.md`](screens/15-pit-stall-setup.md) · connect car + live state ★
   - [`07-pre-brief.md`](screens/07-pre-brief.md) · goals + weather + briefing
+  - [`37-track-walk.md`](screens/37-track-walk.md) · ★★★ interactive Sonoma layout, per-corner coach commentary, historical review
   - [`08-on-track-hud.md`](screens/08-on-track-hud.md) · live driving
   - [`09-cool-down.md`](screens/09-cool-down.md) · per-corner score chimes
   - [`10-stage-clear.md`](screens/10-stage-clear.md) · post-session score

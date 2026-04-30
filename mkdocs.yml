@@ -75,6 +75,7 @@ nav:
           - "07 · Controls": vue/07-controls.md
           - "08 · Animation spec": vue/08-animation-spec.md
           - "09 · Tech stack": vue/09-tech-stack.md
+          - "11 · Navigation map (god mermaid)": vue/11-navigation-map.md
       - "Screens — boot + identity":
           - "00 · Title": vue/screens/00-title.md
           - "01 · Save select": vue/screens/01-save-select.md
@@ -89,6 +90,7 @@ nav:
       - "Screens — session loop":
           - "15 · Pit Stall Setup": vue/screens/15-pit-stall-setup.md
           - "07 · Pre-Brief": vue/screens/07-pre-brief.md
+          - "37 · Track Walk": vue/screens/37-track-walk.md
           - "08 · On-Track HUD": vue/screens/08-on-track-hud.md
           - "09 · Cool-Down": vue/screens/09-cool-down.md
           - "10 · Stage Clear": vue/screens/10-stage-clear.md

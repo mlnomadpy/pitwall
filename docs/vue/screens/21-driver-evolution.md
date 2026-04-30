@@ -151,6 +151,6 @@ data in the profile and render as a 5-step heatmap.
 - [`16-analysis-hub.md`](16-analysis-hub.md) — entry point
 - [`04-trainer-card.md`](04-trainer-card.md) — sibling (alt evolution view)
 - [`17-lap-times-hall.md`](17-lap-times-hall.md) — destination on A
-- [Bridge `/driver/<id>/evolution`](../../api.md#get-driverid-evolutiontracksonoma)
+- [Bridge `/driver/<id>/evolution`](../../api.md#get-driveridevolutiontracksonoma)
 - [Bridge `/driver/<id>/profile`](../../api.md)
 - [ADR-007 — Event-sourced driver profile](../../adr/007-event-sourced-profile.md)

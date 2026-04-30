@@ -147,4 +147,4 @@ A+/A/B+/B/C+/C/D/F per the bands defined in `driver_profile.py`.
 - [`21-driver-evolution.md`](21-driver-evolution.md) — full evolution chart
 - [`03-character-bible.md`](../03-character-bible.md) — avatar slots
 - [`04-state-architecture.md`](../04-state-architecture.md) — save schema
-- [Bridge `/driver/<id>/evolution`](../../api.md#get-driverid-evolutiontracksonoma)
+- [Bridge `/driver/<id>/evolution`](../../api.md#get-driveridevolutiontracksonoma)

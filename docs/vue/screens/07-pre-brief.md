@@ -166,10 +166,22 @@ async function confirm() {
 - **Bridge offline mid-pre-brief** — block CONFIRM with "BRIDGE OFFLINE";
   player can navigate back
 
+## Walk-the-track button
+
+Below the goal list, a "**▶ WALK THE TRACK**" button opens
+[`37-track-walk.md`](37-track-walk.md) — the interactive Sonoma layout
+where the player can tap any corner for coach commentary + their
+historical performance, add corners to session goals from there, and
+read marker lore. Returning from track-walk drops the player back on
+this pre-brief screen with any added goals already in the list.
+
 ## Related
 
 - [`06-world-map.md`](06-world-map.md) — entry point
+- [`37-track-walk.md`](37-track-walk.md) — interactive track exploration
+  + per-corner coaching
 - [`08-on-track-hud.md`](08-on-track-hud.md) — destination
 - [`15-pit-stall-setup.md`](15-pit-stall-setup.md) — fallback on pre-flight ✗
 - [`10-stage-clear.md`](10-stage-clear.md) — where the goals are scored
+- [`36-goals-library.md`](36-goals-library.md) — custom goal editor
 - [Bridge `/coach/brief`](../../api.md)
