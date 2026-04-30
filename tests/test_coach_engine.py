@@ -371,28 +371,89 @@ def test_litert_coach_propose_falls_back_to_rule():
     assert msg is None or isinstance(msg, CoachingMessage)
 
 
-def test_litert_coach_brief_falls_back_to_templated():
+def test_litert_coach_brief_falls_back_to_templated(monkeypatch):
+    """Force-fail the runtime so brief() falls through to the templated
+    path. Independent of whether the LLM is installed locally."""
+    def _explode(self, _model_path):
+        raise RuntimeError("forced-no-runtime")
+    monkeypatch.setattr(LitertCoach, "_init_runtime", _explode)
+
     c = LitertCoach(driver_level="intermediate")
-    text, focus = c.brief(
+    text, focus, emotion = c.brief(
         driver_id="Taha", today_iso="2026-05-23",
         weather_phase="morning_fog", surface_state="cool damp",
         markers_selected=["Turn 11"],
     )
     assert text  # templated brief
     assert isinstance(focus, list)
+    assert emotion == "neutral"     # no LLM ⇒ neutral fallback
 
 
 def test_litert_coach_debrief_returns_empty_when_no_llm(monkeypatch):
-    """Force-empty engine ⇒ debrief returns ("", []) so callers fall through
-    to a templated narrative. Independent of whether the model is installed."""
+    """Force-empty engine ⇒ debrief returns ("", [], "neutral") so callers
+    fall through. Independent of whether the model is installed."""
     def _explode(self, _model_path):
         raise RuntimeError("forced-no-runtime")
     monkeypatch.setattr(LitertCoach, "_init_runtime", _explode)
 
     c = LitertCoach(driver_level="intermediate")
-    text, focus = c.debrief({"track": "Sonoma Raceway", "scorecard": {}})
+    text, focus, emotion = c.debrief({"track": "Sonoma Raceway", "scorecard": {}})
     assert text == ""
     assert focus == []
+    assert emotion == "neutral"
+
+
+# ─── Emotion-tag extractor ───────────────────────────────────────────────────
+
+
+def test_extract_emotion_strips_leading_tag():
+    from coach_engine import _extract_emotion
+    cleaned, emotion = _extract_emotion("[EMOTION: encouraging]\nGood lap.")
+    assert emotion == "encouraging"
+    assert cleaned == "Good lap."
+
+
+def test_extract_emotion_handles_unknown_value():
+    from coach_engine import _extract_emotion
+    cleaned, emotion = _extract_emotion("[EMOTION: confused]\nText.")
+    assert emotion == "neutral"        # falls back
+    assert cleaned == "Text."
+
+
+def test_extract_emotion_no_tag_returns_neutral():
+    from coach_engine import _extract_emotion
+    cleaned, emotion = _extract_emotion("Just text, no tag.")
+    assert emotion == "neutral"
+    assert cleaned == "Just text, no tag."
+
+
+def test_extract_emotion_case_insensitive_tag_name():
+    from coach_engine import _extract_emotion
+    cleaned, emotion = _extract_emotion("[EMOTION: PROUD]\nNice.")
+    assert emotion == "proud"
+    assert cleaned == "Nice."
+
+
+def test_extract_emotion_empty_input_returns_neutral():
+    from coach_engine import _extract_emotion
+    cleaned, emotion = _extract_emotion("")
+    assert emotion == "neutral"
+    assert cleaned == ""
+
+
+def test_valid_emotions_set_has_12_entries():
+    from coach_engine import VALID_EMOTIONS
+    assert len(VALID_EMOTIONS) == 12
+    assert "neutral" in VALID_EMOTIONS
+    assert "thinking" in VALID_EMOTIONS
+    assert "proud" in VALID_EMOTIONS
+
+
+def test_build_system_prompt_includes_emotion_instruction():
+    from coach_engine import build_system_prompt
+    prompt = build_system_prompt("intermediate", "Sonoma Raceway")
+    assert "[EMOTION:" in prompt
+    assert "neutral" in prompt and "encouraging" in prompt
 
 
 # ─── make_coach ──────────────────────────────────────────────────────────────

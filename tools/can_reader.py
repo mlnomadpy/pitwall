@@ -91,7 +91,12 @@ class CanReader:
     """Consumes a CAN bus, decodes via DBC, sinks into pitwall stores.
 
     Args:
-        session_id: ingested rows are tagged with this id.
+        session_id: ingested rows are tagged with this id. The reserved
+                    string `_live` is the conventional placeholder for
+                    "no session in progress yet, but the bridge needs to
+                    serve live values" (used by the PWA's Pit Stall Setup
+                    screen). Live data accumulated against `_live` is
+                    safe to discard between sessions.
         interface:  python-can interface name (`virtual`, `socketcan`,
                     `slcan`, `pcan`, …).
         channel:    interface-specific channel (e.g. `/dev/ttyACM0`,
@@ -155,6 +160,61 @@ class CanReader:
         # Pre-resolve signal_ids for tall-store names. Populated lazily on
         # first sighting to avoid a round-trip on every frame.
         self._tall_id_cache: dict[str, int] = {}
+
+        # Stats for the Pit Stall Setup screen: rolling frames/sec,
+        # unknown CAN IDs (frames whose arbitration_id isn't in any loaded
+        # DBC). The PWA polls these via /signals/registry?include_can_state=true.
+        self._stats_lock = threading.Lock()
+        self._frames_total = 0
+        self._frames_unknown = 0
+        self._frames_window = []         # list[float] timestamps of recent frames
+        self._unknown_ids: dict[int, int] = {}   # arbitration_id → count
+
+    # ── public state accessor (read-only snapshot for pit-stall UI) ───────
+
+    def state(self) -> dict:
+        """Snapshot of CAN reader's runtime state.
+
+        Surfaces what the bridge's `/signals/registry?include_can_state=true`
+        endpoint exposes to the Pit Stall Setup screen: interface, channel,
+        bitrate, frames/s (rolling 5-s window), known + unknown frame
+        counts, the top unknown-ID list, the time since last frame, and
+        a `connected` boolean (loaded AND fresh).
+        """
+        now = time.time()
+        with self._stats_lock:
+            recent = [t for t in self._frames_window if now - t <= 5.0]
+            self._frames_window = recent
+            fps = len(recent) / 5.0 if recent else 0.0
+            last_frame = max(recent) if recent else 0.0
+            unknown_top = sorted(
+                self._unknown_ids.items(), key=lambda kv: kv[1], reverse=True,
+            )[:10]
+        last_frame_age_s: Optional[float] = (now - last_frame) if last_frame else None
+        # "Connected" means: thread alive AND a frame arrived in the last 5 s.
+        # Different from "loaded" (just thread alive — bus could be plugged in
+        # but car ignition off, no frames flowing).
+        loaded    = self._engine_alive()
+        connected = loaded and (last_frame_age_s is not None and last_frame_age_s <= 5.0)
+        return {
+            "interface": self.interface,
+            "channel":   self.channel,
+            "bitrate":   self.bitrate,
+            "session_id": self.session_id,
+            "frames_total":   self._frames_total,
+            "frames_unknown": self._frames_unknown,
+            "frames_per_second": round(fps, 1),
+            "last_frame_age_s":  None if last_frame_age_s is None else round(last_frame_age_s, 2),
+            "unknown_ids": [
+                {"can_id": f"0x{cid:x}", "count": cnt}
+                for cid, cnt in unknown_top
+            ],
+            "loaded":    loaded,
+            "connected": connected,
+        }
+
+    def _engine_alive(self) -> bool:
+        return self._reader_thread is not None and self._reader_thread.is_alive()
 
     # ── lifecycle ─────────────────────────────────────────────────────────
 
@@ -225,9 +285,18 @@ class CanReader:
                 return
             if msg is None:
                 continue
+            # Record stats first so even unknown frames count toward fps.
+            with self._stats_lock:
+                self._frames_total += 1
+                self._frames_window.append(time.time())
             try:
                 decoded = self._db.decode_message(msg.arbitration_id, msg.data)
             except (KeyError, ValueError):
+                with self._stats_lock:
+                    self._frames_unknown += 1
+                    self._unknown_ids[msg.arbitration_id] = (
+                        self._unknown_ids.get(msg.arbitration_id, 0) + 1
+                    )
                 continue
             self._consume(msg.timestamp, decoded)
 

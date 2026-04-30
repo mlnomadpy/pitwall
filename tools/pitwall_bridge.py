@@ -27,7 +27,9 @@ import os
 import sys
 import threading
 import json
+import time
 from datetime import datetime
+from typing import Optional
 # Cloud Gemini was removed 2026-04-29 — every LLM call now goes through
 # coach_engine.LitertCoach (on-device Gemma 4 E2B via litert-lm). The flag
 # is kept only so older code paths can short-circuit cleanly.
@@ -42,7 +44,7 @@ if os.path.exists(env_path):
                 key, val = line.strip().split("=", 1)
                 os.environ[key.strip()] = val.strip().strip('"\'')
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 
 # ── Add src/simulator to path so we can import the real coaching engine ────────
 SIM_DIR = os.path.join(os.path.dirname(__file__), "..", "src", "simulator")
@@ -451,6 +453,28 @@ def _session_has_telemetry(sid: str) -> bool:
         ).fetchone()[0]
         conn.close()
     return bool(n)
+
+
+def _reset_live_session():
+    """Drop all rows for the synthetic `_live` session.
+
+    Called on bridge boot when the CAN reader is launched without an
+    explicit `--can-session-id`. Keeps stale values from a previous run
+    out of the Pit Stall Setup live-state view.
+    """
+    if not HAS_DUCKDB:
+        return
+    with _db_lock:
+        conn = get_db()
+        if conn is None:
+            return
+        try:
+            conn.execute("DELETE FROM telemetry            WHERE session_id = ?", ["_live"])
+            conn.execute("DELETE FROM telemetry_signals    WHERE session_id = ?", ["_live"])
+            conn.execute("DELETE FROM session_capabilities WHERE session_id = ?", ["_live"])
+            conn.execute("DELETE FROM coaching_notes       WHERE session_id = ?", ["_live"])
+        finally:
+            conn.close()
 
 
 def _ensure_session_row(sid: str, *, driver=None, driver_level=None,
@@ -955,7 +979,6 @@ def analyze():
     coach_source = None
     
     if _coach and _track:
-        import time
         import types
         
         frame = types.SimpleNamespace(
@@ -990,6 +1013,21 @@ def analyze():
             coaching = pace_note
             source = coach_source
 
+    # Publish to /cues/stream subscribers — every analyze() call fans out
+    # one cue event per session_id (if there's an active subscription).
+    sid = burst.get("session_id")
+    if sid:
+        _cue_bus.publish(sid, {
+            "ts":         time.time(),
+            "burst_id":   burst_id,
+            "phrase_id":  None,
+            "text":       coaching or "",
+            "priority":   1,
+            "emotion":    "neutral",   # /analyze path doesn't carry emotion yet
+            "source":     source,
+            "pace_note":  pace_note,
+        })
+
     return jsonify({
         "coaching":     coaching,
         "cues":         cues,
@@ -998,6 +1036,232 @@ def analyze():
         "pace_note":    pace_note,
         "coach_source": coach_source,
     })
+
+
+# ── /cues/stream SSE — live cue fan-out ────────────────────────────────────
+
+import queue as _queue
+
+
+class _CueBus:
+    """In-memory pub/sub of coaching cues, keyed by session_id.
+
+    Each SSE subscriber (one HTTP connection from the PWA's on-track HUD)
+    gets its own bounded queue. `publish(sid, event)` pushes to every
+    subscriber for that session. Lost queues (subscriber disconnected,
+    queue full) are cleaned up lazily on the next publish.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._subs: dict[str, list[_queue.Queue]] = {}
+
+    def subscribe(self, sid: str, maxsize: int = 32) -> _queue.Queue:
+        q: _queue.Queue = _queue.Queue(maxsize=maxsize)
+        with self._lock:
+            self._subs.setdefault(sid, []).append(q)
+        return q
+
+    def unsubscribe(self, sid: str, q: _queue.Queue):
+        with self._lock:
+            if sid in self._subs:
+                try:
+                    self._subs[sid].remove(q)
+                except ValueError:
+                    pass
+                if not self._subs[sid]:
+                    del self._subs[sid]
+
+    def publish(self, sid: str, event: dict):
+        dead: list[_queue.Queue] = []
+        with self._lock:
+            queues = list(self._subs.get(sid, []))
+        for q in queues:
+            try:
+                q.put_nowait(event)
+            except _queue.Full:
+                dead.append(q)
+        for q in dead:
+            self.unsubscribe(sid, q)
+
+
+_cue_bus = _CueBus()
+
+
+@app.route("/cues/stream", methods=["GET"])
+def cues_stream():
+    """Server-Sent Events stream of coaching cues for a session.
+
+    Query params:
+        session_id   required — only events for this session are streamed
+
+    Each event is JSON:
+        {ts, burst_id, phrase_id, text, priority, emotion, source}
+
+    The PWA's on-track HUD subscribes once at session start, reads cues
+    until the connection closes (Pause menu's QUIT, page hide, network
+    drop). Auto-reconnect logic is the client's responsibility.
+    """
+    sid = request.args.get("session_id")
+    if not sid:
+        return jsonify({"error": "session_id query param required"}), 400
+
+    q = _cue_bus.subscribe(sid)
+
+    def gen():
+        try:
+            # Send a hello event so the client knows the connection is live
+            yield "event: hello\n"
+            yield f"data: {json.dumps({'session_id': sid})}\n\n"
+            while True:
+                try:
+                    event = q.get(timeout=15.0)
+                except _queue.Empty:
+                    # Heartbeat — keeps proxies + browsers from idle-closing
+                    yield ": keepalive\n\n"
+                    continue
+                yield "event: cue\n"
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            _cue_bus.unsubscribe(sid, q)
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",       # disable nginx buffering if proxied
+        },
+    )
+
+
+# ── /notifications SSE — async event inbox for the PWA ────────────────────
+
+
+_notif_bus = _CueBus()   # same pub/sub primitive, different keyspace
+
+
+def emit_notification(driver: Optional[str], kind: str, **fields):
+    """Publish an async event for the PWA's notification center.
+
+    Used by debrief-ready, medal-earned, level-up, hardware-warning,
+    evolution-ready callsites elsewhere in the bridge. Fan-out is per-driver
+    (or global when `driver` is None).
+    """
+    event = {
+        "ts":     time.time(),
+        "kind":   kind,                 # see screens/33-notification-center.md
+        "driver": driver,
+        **fields,
+    }
+    # Subscribers can listen on a specific driver name OR on '*' for all.
+    _notif_bus.publish(driver or "*", event)
+    _notif_bus.publish("*", event)
+
+
+@app.route("/notifications", methods=["GET"])
+def notifications_stream():
+    """SSE stream of async events for the notification center.
+
+    Query params:
+        driver   filter to events for this driver only ('*' or omitted = all)
+
+    Each event is JSON: {ts, kind, driver, ...kind-specific fields}.
+    Kinds match `screens/33-notification-center.md`:
+      debrief-ready · medal-earned · level-up · affinity-tier ·
+      track-unlock · hardware-warning · evolution-ready · session-saved
+    """
+    driver = request.args.get("driver") or "*"
+    q = _notif_bus.subscribe(driver)
+
+    def gen():
+        try:
+            yield "event: hello\n"
+            yield f"data: {json.dumps({'driver': driver})}\n\n"
+            while True:
+                try:
+                    event = q.get(timeout=30.0)
+                except _queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                yield "event: notification\n"
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            _notif_bus.unsubscribe(driver, q)
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── /spectator/token — read-only mirror access ─────────────────────────────
+
+
+import secrets as _secrets
+
+
+_spectator_tokens: dict[str, dict] = {}    # token → { sid, expires_at }
+_SPECTATOR_TTL_S = 4 * 3600                # 4 hours
+
+
+def _purge_expired_tokens():
+    now = time.time()
+    expired = [t for t, info in _spectator_tokens.items() if info["expires_at"] < now]
+    for t in expired:
+        _spectator_tokens.pop(t, None)
+
+
+@app.route("/spectator/token", methods=["POST"])
+def spectator_token_create():
+    """Generate a one-time, time-limited token granting read-only access
+    to a session's live cue stream. Used by the PWA's Live Spectator
+    screen to share a viewing link with a passenger or external display.
+
+    Body: { session_id: str } — the session this token grants access to
+    Response: { token, session_id, expires_at, url } — `url` is the
+    suggested deep-link the PWA renders as a QR code.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    sid = body.get("session_id")
+    if not sid:
+        return jsonify({"error": "session_id required"}), 400
+
+    _purge_expired_tokens()
+    token = _secrets.token_urlsafe(24)
+    expires_at = time.time() + _SPECTATOR_TTL_S
+    _spectator_tokens[token] = {"session_id": sid, "expires_at": expires_at}
+    return jsonify({
+        "token":      token,
+        "session_id": sid,
+        "expires_at": expires_at,
+        "ttl_s":      _SPECTATOR_TTL_S,
+        "url":        f"/spectator/{sid}?token={token}",
+    })
+
+
+def _validate_spectator_token(token: str) -> Optional[str]:
+    """Returns the session_id the token grants access to, or None if
+    invalid / expired. Caller should 401 on None."""
+    _purge_expired_tokens()
+    info = _spectator_tokens.get(token)
+    if info is None:
+        return None
+    if info["expires_at"] < time.time():
+        _spectator_tokens.pop(token, None)
+        return None
+    return info["session_id"]
+
+
+@app.route("/spectator/token/<token>", methods=["DELETE"])
+def spectator_token_revoke(token: str):
+    """Driver explicitly revokes a spectator token (e.g., session ended)."""
+    existed = _spectator_tokens.pop(token, None) is not None
+    return jsonify({"revoked": existed})
 
 
 # ── Insights engine ───────────────────────────────────────────────────────────
@@ -1315,6 +1579,91 @@ def session_sync(sid: str):
         "rows": [dict(zip(cols, r)) for r in rows],
         "count": len(rows),
     })
+
+
+@app.route("/session/<sid>/export.parquet", methods=["GET"])
+def session_export_parquet(sid: str):
+    """Stream a session's data as Parquet for DuckDB-Wasm hydration.
+
+    Query params:
+        table   'telemetry' (wide canonicals) | 'telemetry_signals'
+                (ADR-015 tall sink) | 'capabilities' (per-signal Hz +
+                useful flag). Default: 'telemetry'.
+
+    Powers the PWA's analytics flow: PWA fetches the parquet once per
+    session, registers it with DuckDB-Wasm, then runs all subsequent
+    SQL client-side. No per-query bridge round-trip needed.
+
+    Status codes:
+      200  parquet bytes streamed back; Content-Type: application/octet-stream
+      400  bad table name
+      404  session not found in the requested table
+      503  duckdb unavailable
+    """
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    table = (request.args.get("table") or "telemetry").lower()
+    if table not in ("telemetry", "telemetry_signals", "capabilities"):
+        return jsonify({"error": f"unknown table: {table}"}), 400
+
+    import tempfile
+    tmp = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+
+    try:
+        with _db_lock:
+            conn = get_db()
+            if conn is None:
+                return jsonify({"error": "duckdb not available"}), 503
+            try:
+                if table == "capabilities":
+                    select_sql = (
+                        "SELECT sc.session_id, sr.name AS signal_name, "
+                        "       sc.n_samples, sc.mean_hz, sc.t_start, sc.t_end, "
+                        "       sr.units, sr.\"group\", sr.min_useful_hz "
+                        "FROM session_capabilities sc "
+                        "JOIN signal_registry sr USING(signal_id) "
+                        "WHERE sc.session_id = ?"
+                    )
+                else:
+                    select_sql = f"SELECT * FROM {table} WHERE session_id = ?"
+                # Pre-check there's anything to export — else return 404 cleanly
+                n = conn.execute(
+                    f"SELECT COUNT(*) FROM ({select_sql})",
+                    [sid],
+                ).fetchone()[0]
+                if not n:
+                    return jsonify({
+                        "error": "session not found in this table",
+                        "session_id": sid, "table": table,
+                    }), 404
+                # DuckDB's COPY TO writes parquet directly (no pandas needed)
+                conn.execute(
+                    f"COPY ({select_sql}) TO '{tmp_path}' (FORMAT PARQUET)",
+                    [sid],
+                )
+            finally:
+                conn.close()
+
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+        return Response(
+            data,
+            mimetype="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{sid}-{table}.parquet"',
+                "Cache-Control": "no-cache",
+                "X-Pitwall-Session": sid,
+                "X-Pitwall-Table": table,
+                "X-Pitwall-Rows": str(n),
+            },
+        )
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 @app.route("/session/import", methods=["POST"])
@@ -2825,8 +3174,9 @@ def coach_brief():
         or d.severity == "high"
     ]
 
+    emotion = "neutral"
     if hasattr(_coach, "brief"):
-        narrative, focus = _coach.brief(
+        result = _coach.brief(
             driver_id=driver_id,
             today_iso=today,
             weather_phase=weather_phase.id,
@@ -2837,6 +3187,11 @@ def coach_brief():
             danger_zones_today=danger_today,
             goal=goal,
         )
+        # New shape (3-tuple) for emotion-aware coaches; old shape (2-tuple) tolerated.
+        if len(result) == 3:
+            narrative, focus, emotion = result
+        else:
+            narrative, focus = result
     else:
         narrative, focus = "", markers_selected[:3]
 
@@ -2851,6 +3206,7 @@ def coach_brief():
         "danger_zones_today":      danger_today,
         "narrative_md":            narrative,
         "focus":                   focus,
+        "emotion":                 emotion,
     })
 
 
@@ -3199,7 +3555,14 @@ def session_capabilities_recompute(sid: str):
 
 @app.route("/signals/registry", methods=["GET"])
 def signals_registry():
-    """ADR-015: full signal catalog. Frontend caches once at app launch."""
+    """ADR-015: full signal catalog. Frontend caches once at app launch.
+
+    Query params:
+        include_can_state    if 'true', include a `can_state` block with
+                             the live CAN reader's interface, channel,
+                             frames/s (rolling 5 s), unknown CAN IDs,
+                             and loaded status. Pit Stall Setup uses this.
+    """
     if not HAS_DUCKDB:
         return jsonify({"error": "duckdb not available"}), 503
     with _db_lock:
@@ -3219,7 +3582,107 @@ def signals_registry():
          "min_useful_hz": r[6], "discovery":     r[7], "obd2_pid":  r[8]}
         for r in rows
     ]
-    return jsonify({"count": len(signals), "signals": signals})
+    body = {"count": len(signals), "signals": signals}
+    if (request.args.get("include_can_state") or "").lower() == "true":
+        body["can_state"] = _can_state_snapshot()
+    return jsonify(body)
+
+
+def _can_state_snapshot() -> dict:
+    """Snapshot for the Pit Stall Setup screen.
+
+    Includes:
+      - reader runtime state (loaded / connected / fps / last-frame age)
+      - USB-CAN device enumeration (which physical adapters are plugged
+        into the host right now, even if no reader is bound to them)
+
+    Empty placeholder fields when no reader is active so the PWA can
+    render explicit ✗ rows.
+    """
+    if _can_reader is None:
+        reader_state = {
+            "loaded":            False,
+            "connected":         False,
+            "interface":         None,
+            "channel":           None,
+            "bitrate":           None,
+            "session_id":        None,
+            "frames_total":      0,
+            "frames_unknown":    0,
+            "frames_per_second": 0.0,
+            "last_frame_age_s":  None,
+            "unknown_ids":       [],
+        }
+    else:
+        reader_state = _can_reader.state()
+
+    # Always probe USB devices — the PWA wants to know about adapters
+    # whether or not the bridge has bound to one yet (e.g. user just
+    # plugged in a CANable but hasn't started the reader).
+    reader_state["usb_devices"] = _detect_usb_can_devices()
+    return reader_state
+
+
+# Vendor:Product → adapter model. Used to label detected USB devices.
+# VID/PID list compiled from python-can / community references; expand as
+# needed. Lower-cased hex with no 0x prefix.
+_USB_CAN_DEVICE_DB: dict[tuple[str, str], dict] = {
+    # CANable / canable.io, CANtact-clone family running slcan firmware
+    ("1d50", "606f"): {"model": "CANable / OpenLink", "kind": "slcan"},
+    ("1d50", "604b"): {"model": "Korlan USB2CAN",     "kind": "slcan"},
+    # Macchina M2 — runs custom firmware exposing serial
+    ("2341", "8051"): {"model": "Macchina M2",        "kind": "slcan"},
+    # PEAK PCAN-USB
+    ("0c72", "000c"): {"model": "PEAK PCAN-USB",      "kind": "pcan"},
+    # Kvaser USBcan
+    ("0bfd", "0117"): {"model": "Kvaser USBcan",      "kind": "kvaser"},
+    # Generic FTDI-based ELM327 dongles (treated as serial; not full CAN)
+    ("0403", "6001"): {"model": "FTDI USB-serial (ELM327?)", "kind": "obd2"},
+    # CH340-based clones
+    ("1a86", "7523"): {"model": "CH340 USB-serial (clone)",   "kind": "slcan"},
+}
+
+
+def _detect_usb_can_devices() -> list[dict]:
+    """Enumerate currently-connected USB serial devices that look like
+    CAN-bus adapters. Returns one dict per device — empty list if none
+    detected or pyserial isn't installed.
+
+    The PWA's Pit Stall Setup uses this to:
+      - Tell the driver *which* adapter is plugged in (model name)
+      - Confirm the cable is physically present even when the bridge
+        wasn't started with --can-channel
+      - Suggest the right `--can-channel` value if reader isn't running
+    """
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        return []
+
+    out: list[dict] = []
+    for p in list_ports.comports():
+        vid = f"{p.vid:04x}" if p.vid else None
+        pid = f"{p.pid:04x}" if p.pid else None
+        match = _USB_CAN_DEVICE_DB.get((vid, pid)) if vid and pid else None
+        # Skip devices that aren't likely USB-CAN — but keep entries for
+        # any FTDI / CDC ACM device since they could be undocumented adapters.
+        likely_can = bool(match) or (
+            p.device.startswith(("/dev/ttyACM", "/dev/ttyUSB"))
+            or "ACM" in (p.device or "")
+        )
+        if not likely_can:
+            continue
+        out.append({
+            "device":       p.device,
+            "vid":          f"0x{vid}" if vid else None,
+            "pid":          f"0x{pid}" if pid else None,
+            "description":  p.description or "",
+            "manufacturer": p.manufacturer or "",
+            "model":        match["model"] if match else "Unknown serial device",
+            "kind":         match["kind"]  if match else "unknown",
+            "is_known":     bool(match),
+        })
+    return out
 
 
 @app.route("/track/markers", methods=["GET"])
@@ -3388,12 +3851,20 @@ if __name__ == "__main__":
 
     # Optional CAN reader — when --can-channel is provided, spawn a thread
     # that consumes the bus and ingests into the same DuckDB this bridge owns.
+    # Default session_id is `_live` (the synthetic placeholder for "no real
+    # session in progress yet, but the bridge needs to surface live values").
+    # PWA's Pit Stall Setup screen polls /session/_live/signals at 5 Hz.
     if args.can_channel:
-        sid = args.can_session_id or _new_session_id(_track.name if _track else None)
+        sid = args.can_session_id or "_live"
+        if sid == "_live":
+            # Reset the _live session each bridge boot so stale values from
+            # a prior run don't pollute Pit Stall Setup's view.
+            _reset_live_session()
         _ensure_session_row(
             sid,
             track=(_track.name if _track else None),
-            note="auto-created by bridge --can-channel",
+            note="auto-created by bridge --can-channel"
+                 + (" (live placeholder)" if sid == "_live" else ""),
         )
         _start_can_reader(
             session_id=sid,

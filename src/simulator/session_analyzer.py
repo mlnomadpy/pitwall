@@ -186,7 +186,12 @@ def _narrate(bundle: dict, coach=None, driver_level: str = "intermediate") -> tu
     # If coach is provided + supports POST_SESSION, delegate
     if coach is not None and hasattr(coach, "debrief"):
         try:
-            text, focus = coach.debrief(bundle, driver_level=driver_level)
+            result = coach.debrief(bundle, driver_level=driver_level)
+            # New (text, focus, emotion) shape; old (text, focus) tolerated.
+            if len(result) == 3:
+                text, focus, _emotion = result
+            else:
+                text, focus = result
             if text:
                 return text, focus
         except Exception:
