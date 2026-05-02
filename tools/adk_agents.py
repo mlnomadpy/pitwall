@@ -1,54 +1,75 @@
 """
 ADK multi-agent topology for pitwall paddock coaching.
 
-Model: Gemini(base_url=...) → LiteRT-LM server (lit serve --port 8001)
-       running Gemma 4 E4B on Pixel 10 Tensor G5 NPU via Termux.
+Model backends (`PITWALL_ADK_BACKEND`)
+--------------------------------------
+- **`engine`** (recommended on Termux/Pixel): in-process via `litert_lm.Engine`
+  using `LitertLmModel(BaseLlm)`. No second process. Guaranteed Tensor G5 NPU
+  access (same engine `LitertCoach` uses for the hot path). Explicit KV-cache
+  control via per-system-prompt Conversation reuse.
+- **`litertlm`** (default — preserves existing setup): HTTP via ADK's
+  `Gemini(base_url=..., model=...)` against a separately-launched `lit serve`.
+  This is the path documented at https://adk.dev/agents/models/litert-lm/.
+- **`openai`**: HTTP via `LiteLlm` (litellm) against any OpenAI-compatible
+  server (Ollama, llama.cpp, vLLM, litegpt). For dev machines.
 
-Startup (Termux):
-    lit pull gemma-4-e4b
-    lit serve --port 8001
+Environment overrides
+---------------------
+    PITWALL_ADK_BACKEND      default: "litertlm"  ({engine | litertlm | openai})
+    PITWALL_LITERT_URL       default: http://localhost:8001  (litertlm/openai)
+    PITWALL_LITERT_MODEL     default: gemma3n-e2b   (litertlm/openai model id)
+    PITWALL_LITERT_API_KEY   default: lit-serve-not-required (openai only)
+    PITWALL_LITERTLM_PATH    .litertlm bundle path (engine backend)
+    PITWALL_LITERTLM_BUDGET  KV-cache char budget per agent (default 30000)
+    PITWALL_ADK_TIMEOUT_S    default: 45  (raises after this many seconds)
+    PITWALL_ADK_CHAR_BUDGET  default: 60000 (rotate ADK session above this)
+    PITWALL_ADK_PROMPT_LOG   default: ""   (empty disables prompt JSONL log)
 
-Environment overrides:
-    PITWALL_LITERT_URL   default: localhost:8001
-    PITWALL_LITERT_MODEL default: gemma-4-e4b
+Public API for pitwall_bridge.py
+--------------------------------
+    run_adk(prompt, user_id="driver") -> (text, adk_session_id)
+    stream_adk(prompt, user_id="driver") -> Iterator[str]
+    reset_driver_session(user_id) -> None
+    get_pending_traces(adk_session_id=None) -> list[dict]
+    coach_orchestrator       — PitwallOrchestrator instance
+    AGENT_REGISTRY           — list[dict] for /coach/agents
 
-Public API for pitwall_bridge.py:
-    run_adk(prompt, user_id="driver") -> str   — synchronous, thread-safe
-    coach_orchestrator                          — PitwallOrchestrator instance
-    AGENT_REGISTRY                              — list[dict] for /coach/agents
-
-Agent roster (17 agents + PitwallOrchestrator):
-
-  PitwallOrchestrator        Root. Deterministic keyword routing.
-  ├── DebriefPipeline         Sequential: ParallelAgent([Highlights, Telemetry, Pedagogy]) → Narrative
-  ├── BriefPipeline           Sequential: Pedagogy → Narrative (separate narrative instance)
-  ├── TelemetryAgent          Session data (output_key: telemetry_data)
-  ├── LapComparisonAgent      Lap-vs-lap delta
-  ├── CornerCoachAgent        Single-corner deep-dive
-  ├── ProgressTrackerAgent    Multi-session arc
-  ├── SetupAdvisorAgent       Car balance from telemetry
-  ├── HighlightFinderAgent    Best moments (output_key: highlights_data)
-  ├── MindsetCoachAgent       Plateau + motivation
-  ├── GoldLapAgent            Driver vs AJ reference lap
-  ├── WeatherAdaptationAgent  Weather phase → adjustments
-  ├── SessionPlannerAgent     N-lap practice plan
-  ├── IncidentReviewAgent     Anomaly detection
-  ├── RacePaceAgent           Lap degradation model
-  ├── GoalSettingAgent        Realistic PB targets
-  ├── MentalMapAgent          Corner consistency variance
-  ├── VoiceScriptAgent        TTS audio cache scripts (ADR-017)
-  ├── PedagogyAgent           Driver profile + Bentley concepts (output_key: pedagogy_data)
-  └── NarrativeAgent          All human-facing output. Always the final stage.
+Agent roster (single-parent — pipelines own their own data agents)
+------------------------------------------------------------------
+  PitwallOrchestrator                  Root, deterministic regex routing
+  ├── DebriefPipeline                  Sequential[Parallel[H_d, T_d, P_d], N_d]
+  ├── BriefPipeline                    Sequential[P_b, N_b]
+  ├── TelemetryAgent                   QA telemetry default
+  ├── LapComparisonAgent
+  ├── CornerCoachAgent
+  ├── ProgressTrackerAgent
+  ├── SetupAdvisorAgent
+  ├── HighlightFinderAgent             QA highlights (separate from H_d)
+  ├── PedagogyAgent                    QA pedagogy (separate from P_d, P_b)
+  ├── MindsetCoachAgent
+  ├── GoldLapAgent
+  ├── WeatherAdaptationAgent
+  ├── SessionPlannerAgent
+  ├── IncidentReviewAgent
+  ├── RacePaceAgent
+  ├── GoalSettingAgent
+  ├── MentalMapAgent
+  ├── VoiceScriptAgent
+  └── AgentMetaAgent
 """
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import json
 import logging
 import os
+import queue
+import re
 import threading
 import time
 from collections import deque
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Iterable
 
 from adk_tools import (
     query_pitwall_db,
@@ -71,293 +92,418 @@ from adk_tools import (
 
 _log = logging.getLogger(__name__)
 
+_RUN_TIMEOUT_S = float(os.getenv("PITWALL_ADK_TIMEOUT_S", "45"))
+_SESSION_CHAR_BUDGET = int(os.getenv("PITWALL_ADK_CHAR_BUDGET", "60000"))
+_PROMPT_LOG_PATH = os.getenv("PITWALL_ADK_PROMPT_LOG", "")
+
 HAS_ADK = False
 try:
     from google.adk.agents import Agent, BaseAgent, ParallelAgent, SequentialAgent
+    from google.adk.apps import App
     from google.adk.models import Gemini
     from google.adk.plugins import BasePlugin
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
+    from google.adk.agents.run_config import RunConfig, StreamingMode
     from google.genai.types import Content, Part
     HAS_ADK = True
+except ImportError as _e:
+    _log.debug("ADK not importable: %s", _e)
+
+# LiteLlm is optional — only needed when PITWALL_ADK_BACKEND=openai.
+try:
+    from google.adk.models.lite_llm import LiteLlm  # noqa: F401
+    HAS_LITELLM = True
 except ImportError:
-    pass
+    HAS_LITELLM = False
+
+# LitertLmModel adapter — only needed when PITWALL_ADK_BACKEND=engine.
+try:
+    from litert_lm_model import (
+        LitertLmModel,
+        reset_all_conversations as _reset_litertlm_conversations,
+        get_kv_cache_stats as _litertlm_kv_stats,
+        HAS_LITERTLM_MODEL,
+    )
+except ImportError:
+    HAS_LITERTLM_MODEL = False
+    _reset_litertlm_conversations = lambda: None  # noqa: E731
+    _litertlm_kv_stats = lambda: {"active_conversations": 0}  # noqa: E731
 
 # ── Agent trace buffer (drained by pitwall_bridge after each run_adk call) ────
 
-_pending_traces: deque[dict] = deque(maxlen=2000)
+_pending_traces: deque[dict] = deque(maxlen=4000)
 _trace_lock = threading.Lock()
 
 
-def get_pending_traces() -> list[dict]:
-    """Drain and return all buffered traces. Called by pitwall_bridge to write to DuckDB."""
+def get_pending_traces(adk_session_id: str | None = None) -> list[dict]:
+    """Drain agent traces.
+
+    If `adk_session_id` is provided, only rows whose `trace_id` matches are
+    drained — others remain in the deque for their owning request to drain.
+    This prevents cross-trace contamination when concurrent Flask requests
+    each call _drain_adk_traces() (audit issue #3).
+    """
     with _trace_lock:
-        traces = list(_pending_traces)
+        if adk_session_id is None:
+            traces = list(_pending_traces)
+            _pending_traces.clear()
+            return traces
+        keep: list[dict] = []
+        out: list[dict] = []
+        for t in _pending_traces:
+            if t.get("trace_id") == adk_session_id:
+                out.append(t)
+            else:
+                keep.append(t)
         _pending_traces.clear()
-        return traces
+        _pending_traces.extend(keep)
+        return out
 
 
 # ── Persistent session registry (KV cache reuse across calls per driver) ──────
 # lit serve has no prefix-cache flags — KV cache reuse happens at the ADK
-# session level via LiteRT-LM's session-cloning mechanism. Keeping the same
-# ADK session alive means the system instruction tokens are already in the
-# KV cache for subsequent calls (~30-50% prefill reduction on warm requests).
+# session level. Keeping the same ADK session alive means the system instruction
+# tokens are already in the KV cache for subsequent calls. The shared
+# instruction prefix (_COMMON_PREFIX) compounds this across specialists.
 
-_driver_sessions: dict[str, str] = {}       # user_id → ADK session_id
+_driver_sessions: dict[str, str] = {}        # user_id → ADK session_id
 _driver_sessions_lock = threading.Lock()
-_session_turn_count: dict[str, int] = {}
-_SESSION_MAX_TURNS = 50  # auto-reset after N turns to prevent context overflow
+_session_chars: dict[str, int] = {}          # user_id → cumulative prompt+completion chars
 
 
 def reset_driver_session(user_id: str) -> None:
-    """Expire a driver's ADK session — call at start of each new driving session.
+    """Expire a driver's ADK session and delete it inside InMemorySessionService.
 
-    Forces a fresh InMemorySessionService session on the next run_adk() call,
-    clearing accumulated context while the cold-start KV cache rebuild is
-    acceptable (new session = new day = driver expects a moment to start).
+    Schedules the actual deletion on the persistent event loop (best-effort,
+    bounded by a short timeout). Forgetting the registry entry is always done
+    synchronously so the next call starts fresh.
+
+    Also drops the engine-backend KV cache. Conversations there are keyed by
+    system_instruction, not user_id, so this clears warmth for *all* drivers.
+    Acceptable: the next call rebuilds within ~10ms (system prompt re-prefill)
+    and the cold start at the new driving day is the existing UX contract.
     """
     with _driver_sessions_lock:
-        _driver_sessions.pop(user_id, None)
-        _session_turn_count.pop(user_id, None)
+        old_sid = _driver_sessions.pop(user_id, None)
+        _session_chars.pop(user_id, None)
+
+    if HAS_ADK and old_sid and _loop is not None:
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                _delete_session_async(user_id, old_sid), _loop)
+            fut.result(timeout=2)
+        except Exception as exc:
+            _log.warning("ADK session %s delete failed: %s", old_sid, exc)
+
+    # Flush the in-process LiteRT-LM conversation cache too.
+    try:
+        _reset_litertlm_conversations()
+    except Exception:
+        pass
 
 
-# run_adk / reset_driver_session are always importable — raise at call time
-def run_adk(prompt: str, user_id: str = "driver") -> str:
-    raise RuntimeError("google-adk not installed — pip install google-adk")
+def get_kv_cache_stats() -> dict:
+    """Expose KV-cache state for /diagnostics endpoints.
+
+    Returns engine-backend stats (active conversations, total chars, budget).
+    On non-engine backends returns a placeholder.
+    """
+    return _litertlm_kv_stats()
+
+
+# ── Module-level stubs (raise on call when ADK absent) ────────────────────────
+
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def run_adk(prompt: str, user_id: str = "driver") -> tuple[str, str]:
+    raise RuntimeError("google-adk not installed — pip install google-adk litellm")
+
+
+def stream_adk(prompt: str, user_id: str = "driver") -> Iterable[str]:
+    raise RuntimeError("google-adk not installed — pip install google-adk litellm")
+
+
+async def _delete_session_async(user_id: str, sid: str) -> None:
+    raise RuntimeError("google-adk not installed")
+
+
+# ── Intent classifier (always defined — pure-Python regex, no ADK dep) ───────
+
+_INTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
+    # Most specific first; corner before brief so "brief me on T6" hits corner.
+    ("corner",         re.compile(r"\bT\s?\d{1,2}\b|\bturn\s+\d+\b|\bcarousel\b|\bbus\s*stop\b", re.I)),
+    ("debrief",        re.compile(r"\b(debrief|how did i do|session summary|review my session)\b", re.I)),
+    ("brief",          re.compile(r"\b(pre[- ]?session|today'?s plan|before i go out)\b|^\s*brief(\s+me)?\b", re.I)),
+    ("gold_lap",       re.compile(r"\b(gold lap|reference lap|gold standard)\b|\bAJ\b", re.I)),
+    ("weather",        re.compile(r"\b(weather|fog|greasy|track temp|conditions)\b", re.I)),
+    ("session_plan",   re.compile(r"\b(practice plan|how should i structure|laps available)\b|\bi have \d+ laps?\b", re.I)),
+    ("incident",       re.compile(r"\b(incident|close call|scary|saved it|nearly off|moment at)\b", re.I)),
+    ("race_pace",      re.compile(r"\b(race pace|stint|degradation|tyre drop)\b", re.I)),
+    ("goal",           re.compile(r"\b(pb target|lap time goal|what time should|target lap|set me a goal)\b", re.I)),
+    ("mental_map",     re.compile(r"\b(variance|consistent|inconsistent|mental map)\b", re.I)),
+    ("voice_script",   re.compile(r"\b(voice script|tts|cue script|pace notes|audio cue)\b", re.I)),
+    ("lap_comparison", re.compile(r"\blap\s*\d+\s*vs|compare lap|why was lap|fastest vs slowest\b", re.I)),
+    ("progress",       re.compile(r"\b(progress|improving|getting faster|over sessions|this month)\b", re.I)),
+    ("setup",          re.compile(r"\b(setup|understeer|oversteer|balance|nervous mid|car feel)\b", re.I)),
+    ("mindset",        re.compile(r"\b(frustrated|frustration|plateau|not working|motivation)\b", re.I)),
+    ("agent_meta",     re.compile(r"\b(slowest|agent latency|tool call count|agent trace)\b.*\bagent\b|\bagent\b.*\b(slowest|slow|latency|trace)\b", re.I)),
+]
+
+_VALID_INTENTS = frozenset(
+    [name for name, _ in _INTENT_PATTERNS] + ["telemetry", "debrief", "brief"]
+)
+
+
+def _classify_intent(query: str | None) -> str:
+    """Regex-based, ordered, first-match-wins. Returns 'telemetry' on miss.
+
+    Defined at module scope (not gated by HAS_ADK) so unit tests don't need
+    google-adk installed to verify routing behaviour.
+    """
+    if not query:
+        return "telemetry"
+    for name, pat in _INTENT_PATTERNS:
+        if pat.search(query):
+            return name
+    return "telemetry"
 
 
 if not HAS_ADK:
     coach_orchestrator = None  # type: ignore[assignment]
     AGENT_REGISTRY: list = []
 else:
-    _model = Gemini(
-        base_url=os.getenv("PITWALL_LITERT_URL", "localhost:8001"),
-        model=os.getenv("PITWALL_LITERT_MODEL", "gemma-4-e4b"),
+    # ── Persistent event loop (one daemon thread; reused across requests) ─────
+
+    _loop = asyncio.new_event_loop()
+
+    def _loop_runner() -> None:
+        asyncio.set_event_loop(_loop)
+        _loop.run_forever()
+
+    _loop_thread = threading.Thread(target=_loop_runner, daemon=True, name="adk-loop")
+    _loop_thread.start()
+
+    # ── Model selection ───────────────────────────────────────────────────────
+    # Three backends — see module docstring for trade-offs.
+    #   engine    → in-process litert_lm.Engine (no second process; NPU on Pixel)
+    #   litertlm  → HTTP to `lit serve` via Gemini(base_url=...)
+    #   openai    → HTTP to any OpenAI-compatible server via LiteLlm
+
+    _BACKEND = os.getenv("PITWALL_ADK_BACKEND", "litertlm").lower()
+    _MODEL_ID = os.getenv("PITWALL_LITERT_MODEL", "gemma3n-e2b")
+    _MODEL_URL = os.getenv("PITWALL_LITERT_URL", "http://localhost:8001")
+
+    if _BACKEND == "engine":
+        if not HAS_LITERTLM_MODEL:
+            raise RuntimeError(
+                "PITWALL_ADK_BACKEND=engine requires litert-lm + google-adk — "
+                "pip install litert-lm google-adk")
+        _model = LitertLmModel(model=_MODEL_ID)
+    elif _BACKEND == "openai":
+        if not HAS_LITELLM:
+            raise RuntimeError(
+                "PITWALL_ADK_BACKEND=openai requires litellm — "
+                "pip install google-adk[litellm]")
+        _model = LiteLlm(
+            model=_MODEL_ID,
+            api_base=_MODEL_URL,
+            api_key=os.getenv("PITWALL_LITERT_API_KEY", "lit-serve-not-required"),
+        )
+    else:
+        # LiteRT-LM via `lit serve` — official ADK doc'd path. Default.
+        _model = Gemini(model=_MODEL_ID, base_url=_MODEL_URL)
+
+    # ── Shared instruction prefix (KV cache prefix matches across specialists) ─
+
+    _COMMON_PREFIX = (
+        "You are part of pitwall, an on-device track-day coaching system "
+        "running locally on a Pixel 10. Be concrete and concise. Reference "
+        "real session data; never invent numbers. If a tool call returns an "
+        "error, say so plainly and suggest what data is missing. "
+        "Always end every response with a tag of the form [EMOTION:x] where x "
+        "is one of: neutral, encouraging, focused, concerned, excited.\n"
+        "----\n"
     )
 
-    # ── Intent classifier ──────────────────────────────────────────────────────
+    def _instr(specific: str) -> str:
+        return _COMMON_PREFIX + specific
 
-    def _classify_intent(query: str) -> str:
-        """Keyword-based deterministic router. Avoids LLM routing 17 sub-agents."""
-        q = query.lower()
-        if any(k in q for k in ("debrief", "how did i do", "session summary", "review my session")):
-            return "debrief"
-        if any(k in q for k in ("brief", "pre-session", "pre session", "today's plan", "before i go out")):
-            return "brief"
-        if any(k in q for k in ("gold lap", "reference lap", " aj ", "gold standard")):
-            return "gold_lap"
-        if any(k in q for k in ("weather", "fog", "conditions", "greasy", "track temperature")):
-            return "weather"
-        if any(k in q for k in ("practice plan", "laps available", "how should i structure", "i have")):
-            return "session_plan"
-        if any(k in q for k in ("incident", "moment at", "close call", "scary", "saved it", "nearly off")):
-            return "incident"
-        if any(k in q for k in ("race pace", "stint", "degradation", "tyre drop", "20 laps", "how consistent")):
-            return "race_pace"
-        if any(k in q for k in ("target", "goal", "pb target", "lap time goal", "what time should")):
-            return "goal"
-        if any(k in q for k in ("variance", "consistency", "consistent", "inconsistent", "mental map")):
-            return "mental_map"
-        if any(k in q for k in ("audio", "tts", "cue script", "pace notes", "voice script")):
-            return "voice_script"
-        if any(k in q for k in ("vs lap", "compare lap", "why was lap", "lap 1 vs", "lap 2 vs")):
-            return "lap_comparison"
-        if any(k in q for k in ("turn ", " t6", " t7", " t10", " t11", "corner", "carousel")):
-            return "corner"
-        if any(k in q for k in ("progress", "improving", "getting faster", "this month", "over sessions")):
-            return "progress"
-        if any(k in q for k in ("setup", "understeer", "oversteer", "balance", "car feel", "nervous mid")):
-            return "setup"
-        if any(k in q for k in ("frustrated", "frustration", "plateau", "not working", "motivation")):
-            return "mindset"
-        if any(k in q for k in ("agent trace", "slowest agent", "which agent", "tool call", "agent latency")):
-            return "agent_meta"
-        return "telemetry"
+    # ── Agent factory helpers ─────────────────────────────────────────────────
 
-    # ── Data agents ────────────────────────────────────────────────────────────
+    def _qa_agent(name: str, role: str, tools: list, output_key: str | None = None) -> "Agent":
+        kwargs: dict = {
+            "name": name, "model": _model,
+            "description": role, "instruction": _instr(role),
+            "tools": tools,
+        }
+        if output_key:
+            kwargs["output_key"] = output_key
+        return Agent(**kwargs)
 
-    telemetry_agent = Agent(
-        name="TelemetryAgent",
-        model=_model,
+    # ── QA-only specialists (single parent: PitwallOrchestrator) ──────────────
+
+    telemetry_agent = _qa_agent(
+        "TelemetryAgent",
+        "Report session data — laps, coaching notes, telemetry signals — for one session_id.",
+        [query_pitwall_db, get_session_highlights],
         output_key="telemetry_data",
-        description="Session data: laps, coaching notes, and telemetry signals for a single session.",
-        tools=[query_pitwall_db, get_session_highlights],
     )
-
-    lap_comparison_agent = Agent(
-        name="LapComparisonAgent",
-        model=_model,
-        description="Frame-by-frame delta between two laps. Identifies where time was gained or lost.",
-        tools=[get_lap_delta, query_pitwall_db],
+    lap_comparison_agent = _qa_agent(
+        "LapComparisonAgent",
+        "Frame-by-frame delta between two laps. Identify where time was gained or lost.",
+        [get_lap_delta, query_pitwall_db],
     )
-
-    corner_coach_agent = Agent(
-        name="CornerCoachAgent",
-        model=_model,
-        description="Grade history, coaching notes, and improvement trend for one corner across sessions.",
-        tools=[get_corner_history, query_pitwall_db],
+    corner_coach_agent = _qa_agent(
+        "CornerCoachAgent",
+        "Grade history and improvement trend for one corner across sessions.",
+        [get_corner_history, query_pitwall_db],
     )
-
-    progress_tracker_agent = Agent(
-        name="ProgressTrackerAgent",
-        model=_model,
-        description="Multi-session lap time trend, corner arcs, and plateau detection.",
-        tools=[get_progress_report, query_pitwall_db],
+    progress_tracker_agent = _qa_agent(
+        "ProgressTrackerAgent",
+        "Multi-session lap-time trend, corner arcs, and plateau detection.",
+        [get_progress_report, query_pitwall_db],
     )
-
-    setup_advisor_agent = Agent(
-        name="SetupAdvisorAgent",
-        model=_model,
-        description="Reads telemetry to infer car balance — coasting, oscillation, brake pressure.",
-        tools=[get_setup_indicators, query_pitwall_db],
+    setup_advisor_agent = _qa_agent(
+        "SetupAdvisorAgent",
+        "Infer car balance from telemetry — coasting, oscillation, brake pressure.",
+        [get_setup_indicators, query_pitwall_db],
     )
-
-    highlight_finder_agent = Agent(
-        name="HighlightFinderAgent",
-        model=_model,
+    highlight_finder_agent = _qa_agent(
+        "HighlightFinderAgent",
+        "Find session best moments: fastest lap, peak grip, cleanest sector.",
+        [get_session_highlights, query_pitwall_db],
         output_key="highlights_data",
-        description="Finds session best moments: fastest lap, peak grip, cleanest sector.",
-        tools=[get_session_highlights, query_pitwall_db],
     )
-
-    mindset_coach_agent = Agent(
-        name="MindsetCoachAgent",
-        model=_model,
-        description="Plateau and frustration coaching. Detects stagnation and suggests mindset resets.",
-        tools=[get_progress_report, get_corner_history, query_pitwall_db],
+    mindset_coach_agent = _qa_agent(
+        "MindsetCoachAgent",
+        "Plateau and frustration coaching — detect stagnation and suggest mindset resets.",
+        [get_progress_report, get_corner_history, query_pitwall_db],
     )
-
-    gold_lap_agent = Agent(
-        name="GoldLapAgent",
-        model=_model,
-        description="Compares driver's best lap to AJ's gold standard corner-by-corner with leverage weights.",
-        tools=[get_gold_lap_comparison, query_pitwall_db],
+    gold_lap_agent = _qa_agent(
+        "GoldLapAgent",
+        "Compare driver's best lap to AJ's gold standard corner-by-corner.",
+        [get_gold_lap_comparison, query_pitwall_db],
     )
-
-    weather_adaptation_agent = Agent(
-        name="WeatherAdaptationAgent",
-        model=_model,
-        description="Translates Sonoma's 4 weather phases into concrete line, braking, and tyre advice.",
-        tools=[get_weather_adaptation_context, query_pitwall_db],
+    weather_adaptation_agent = _qa_agent(
+        "WeatherAdaptationAgent",
+        "Translate Sonoma's 4 weather phases into line, braking, and tyre advice.",
+        [get_weather_adaptation_context, query_pitwall_db],
     )
-
-    session_planner_agent = Agent(
-        name="SessionPlannerAgent",
-        model=_model,
-        description="Builds a lap-by-lap practice plan given N laps, weighted by corner leverage and weakness.",
-        tools=[get_session_plan_context, query_pitwall_db],
+    session_planner_agent = _qa_agent(
+        "SessionPlannerAgent",
+        "Build a lap-by-lap practice plan for N laps weighted by corner leverage and weakness.",
+        [get_session_plan_context, query_pitwall_db],
     )
-
-    incident_review_agent = Agent(
-        name="IncidentReviewAgent",
-        model=_model,
-        description="Detects over-limit grip events, emergency brakes, and steering saves in telemetry.",
-        tools=[get_incident_moments, query_pitwall_db],
+    incident_review_agent = _qa_agent(
+        "IncidentReviewAgent",
+        "Detect over-limit grip events, emergency brakes, and steering saves in telemetry.",
+        [get_incident_moments, query_pitwall_db],
     )
-
-    race_pace_agent = Agent(
-        name="RacePaceAgent",
-        model=_model,
-        description="Models lap time degradation to separate qualifying pace from sustainable race pace.",
-        tools=[get_race_pace_model, query_pitwall_db],
+    race_pace_agent = _qa_agent(
+        "RacePaceAgent",
+        "Model lap-time degradation to separate qualifying pace from sustainable race pace.",
+        [get_race_pace_model, query_pitwall_db],
     )
-
-    goal_setting_agent = Agent(
-        name="GoalSettingAgent",
-        model=_model,
-        description="Sets realistic PB targets from improvement rate and corner leverage. Top 3 corners to attack.",
-        tools=[get_goal_targets, get_progress_report, query_pitwall_db],
+    goal_setting_agent = _qa_agent(
+        "GoalSettingAgent",
+        "Set realistic PB targets from improvement rate and corner leverage.",
+        [get_goal_targets, get_progress_report, query_pitwall_db],
     )
-
-    mental_map_agent = Agent(
-        name="MentalMapAgent",
-        model=_model,
-        description="Corner-by-corner speed variance map. High variance = inconsistent; low = repeatable.",
-        tools=[get_track_variance_map, query_pitwall_db],
+    mental_map_agent = _qa_agent(
+        "MentalMapAgent",
+        "Corner-by-corner speed-variance map. High variance = inconsistent.",
+        [get_track_variance_map, query_pitwall_db],
     )
-
-    voice_script_agent = Agent(
-        name="VoiceScriptAgent",
-        model=_model,
-        description="Generates 2-3 word TTS cue phrases per driving phase per corner. Writes to audio cache.",
-        tools=[get_audio_script_context, save_voice_scripts],
+    voice_script_agent = _qa_agent(
+        "VoiceScriptAgent",
+        "Generate 2-3 word TTS cue phrases per driving phase per corner; "
+        "write the result to the audio cache via save_voice_scripts.",
+        [get_audio_script_context, save_voice_scripts],
     )
-
-    pedagogy_agent = Agent(
-        name="PedagogyAgent",
-        model=_model,
+    pedagogy_agent = _qa_agent(
+        "PedagogyAgent",
+        "Map driver profile to Ross Bentley concepts. Recommend one focus concept.",
+        [query_pitwall_db],
         output_key="pedagogy_data",
-        description="Maps driver profile to Ross Bentley concepts. Recommends one focus concept per session.",
-        tools=[query_pitwall_db],
+    )
+    agent_meta_agent = _qa_agent(
+        "AgentMetaAgent",
+        "Answer meta questions about agent performance: slowest agents, top tools, traces.",
+        [get_agent_telemetry],
     )
 
-    agent_meta_agent = Agent(
-        name="AgentMetaAgent",
-        model=_model,
-        description="Answers meta questions about agent performance: slowest agents, most-called tools, trace history.",
-        tools=[get_agent_telemetry],
+    # ── Pipeline-internal data agents (separate instances; single-parent) ─────
+    # output_key matches the QA siblings so the narrative templates fill the
+    # same slots regardless of which path produced them.
+
+    _telemetry_d = _qa_agent(
+        "TelemetryAgentDebrief",
+        "Pipeline copy of TelemetryAgent — used inside DebriefPipeline.",
+        [query_pitwall_db, get_session_highlights],
+        output_key="telemetry_data",
+    )
+    _highlight_finder_d = _qa_agent(
+        "HighlightFinderAgentDebrief",
+        "Pipeline copy of HighlightFinderAgent — used inside DebriefPipeline.",
+        [get_session_highlights, query_pitwall_db],
+        output_key="highlights_data",
+    )
+    _pedagogy_d = _qa_agent(
+        "PedagogyAgentDebrief",
+        "Pipeline copy of PedagogyAgent — used inside DebriefPipeline.",
+        [query_pitwall_db],
+        output_key="pedagogy_data",
+    )
+    _pedagogy_b = _qa_agent(
+        "PedagogyAgentBrief",
+        "Pipeline copy of PedagogyAgent — used inside BriefPipeline.",
+        [query_pitwall_db],
+        output_key="pedagogy_data",
     )
 
-    # ── Output agents (separate instances per pipeline — no shared mutable state) ──
+    # ── Narrative / output agents ─────────────────────────────────────────────
 
-    _NARRATIVE_INSTRUCTION = (
-        "Write the final coaching narrative from the structured data below.\n\n"
-        "Session highlights: {highlights_data}\n"
-        "Telemetry analysis: {telemetry_data}\n"
-        "Pedagogy context:   {pedagogy_data}\n\n"
-        "Output format rules:\n"
-        "- Brief: 2-4 sentences + FOCUS list of 3 items\n"
-        "- Debrief: 1 highlight opener + 3-item next-session focus\n"
-        "- Q&A: conversational, max 4 sentences, specific data references\n"
-        "- Voice scripts: 2-3 word rally-style cues in T-Rod's voice\n"
-        "Always end with [EMOTION:tag] — one of: "
-        "neutral, encouraging, focused, concerned, excited."
-    )
-
-    # Debrief uses all three output_keys; brief only needs pedagogy_data.
-    # Separate instances prevent session-state bleed if requests overlap.
-    narrative_agent = Agent(
-        name="NarrativeAgent",
-        model=_model,
-        description="Generates all human-facing coaching text. Always the final output stage.",
-        instruction=_NARRATIVE_INSTRUCTION,
-        tools=[],
+    _NARRATIVE_TAIL = (
+        "Write the final coaching narrative from the structured data below.\n"
+        "Session highlights: {highlights_data?}\n"
+        "Telemetry analysis: {telemetry_data?}\n"
+        "Pedagogy context:   {pedagogy_data?}\n\n"
+        "Format rules:\n"
+        "- Brief: 2-4 sentences then a FOCUS list of 3 items.\n"
+        "- Debrief: 1 highlight opener then a 3-item next-session focus.\n"
+        "- Q&A: max 4 sentences with specific data references.\n"
+        "- Voice scripts: 2-3 word rally-style cues in T-Rod's voice."
     )
 
     _narrative_brief = Agent(
-        name="NarrativeAgentBrief",
-        model=_model,
-        description="Generates pre-session brief text from pedagogy context.",
-        instruction=_NARRATIVE_INSTRUCTION,
-        tools=[],
+        name="NarrativeAgentBrief", model=_model,
+        description="Pre-session brief text from pedagogy context.",
+        instruction=_instr(_NARRATIVE_TAIL), tools=[],
     )
-
     _narrative_debrief = Agent(
-        name="NarrativeAgentDebrief",
-        model=_model,
-        description="Generates post-session debrief text from highlights, telemetry, and pedagogy.",
-        instruction=_NARRATIVE_INSTRUCTION,
-        tools=[],
+        name="NarrativeAgentDebrief", model=_model,
+        description="Post-session debrief text from highlights, telemetry, and pedagogy.",
+        instruction=_instr(_NARRATIVE_TAIL), tools=[],
     )
 
-    # ── Pipelines ──────────────────────────────────────────────────────────────
+    # ── Pipelines ─────────────────────────────────────────────────────────────
 
     _debrief_data_phase = ParallelAgent(
         name="DebriefDataPhase",
-        sub_agents=[highlight_finder_agent, telemetry_agent, pedagogy_agent],
+        sub_agents=[_highlight_finder_d, _telemetry_d, _pedagogy_d],
     )
-
     debrief_pipeline = SequentialAgent(
         name="DebriefPipeline",
         sub_agents=[_debrief_data_phase, _narrative_debrief],
     )
-
     brief_pipeline = SequentialAgent(
         name="BriefPipeline",
-        sub_agents=[pedagogy_agent, _narrative_brief],
+        sub_agents=[_pedagogy_b, _narrative_brief],
     )
 
-    # ── Intent → specialist agent map (QA paths) ───────────────────────────────
+    # ── Intent → specialist agent map (QA paths) ──────────────────────────────
 
     _INTENT_TO_AGENT: dict[str, Agent] = {
         "gold_lap":       gold_lap_agent,
@@ -377,21 +523,42 @@ else:
         "telemetry":      telemetry_agent,
     }
 
-    # ── Root orchestrator ──────────────────────────────────────────────────────
+    # ── Root orchestrator ─────────────────────────────────────────────────────
 
     class PitwallOrchestrator(BaseAgent):
-        """Deterministic-routing orchestrator. _classify_intent replaces LLM routing."""
+        """Deterministic-routing orchestrator. Regex classifier → one sub-tree."""
 
-        async def _run_async_impl(
-            self, ctx
-        ) -> AsyncGenerator:  # type: ignore[override]
+        async def _run_async_impl(self, ctx) -> AsyncGenerator:  # type: ignore[override]
             try:
-                query: str = ctx.user_content.parts[0].text
+                query: str = ctx.user_content.parts[0].text  # type: ignore[union-attr]
             except (AttributeError, IndexError, TypeError) as exc:
-                _log.warning("PitwallOrchestrator: could not read user_content (%s) — defaulting to telemetry", exc)
+                _log.warning(
+                    "PitwallOrchestrator: could not read user_content (%s) — "
+                    "defaulting to telemetry", exc)
                 query = ""
 
-            intent = _classify_intent(query)
+            # Honour intent_override stashed in session.state by the bridge.
+            override = ""
+            try:
+                override = (ctx.session.state.get("temp:intent_override") or "").strip().lower()
+            except Exception:
+                pass
+            intent = override if override in _VALID_INTENTS else _classify_intent(query)
+
+            # Record routing decision as a trace row.
+            try:
+                trace_id = getattr(ctx.session, "id", "unknown")
+                with _trace_lock:
+                    _pending_traces.append({
+                        "trace_id":   trace_id,
+                        "agent_name": "PitwallOrchestrator",
+                        "event_type": "intent",
+                        "detail":     intent,
+                        "latency_ms": None,
+                        "success":    True,
+                    })
+            except Exception:
+                pass
 
             if intent == "debrief":
                 async for event in debrief_pipeline.run_async(ctx):
@@ -415,6 +582,7 @@ else:
             progress_tracker_agent,
             setup_advisor_agent,
             highlight_finder_agent,
+            pedagogy_agent,
             mindset_coach_agent,
             gold_lap_agent,
             weather_adaptation_agent,
@@ -424,41 +592,86 @@ else:
             goal_setting_agent,
             mental_map_agent,
             voice_script_agent,
-            pedagogy_agent,
-            narrative_agent,
             agent_meta_agent,
         ],
     )
 
-    # ── Tracing plugin — writes to _pending_traces, drained by bridge → DuckDB ──
+    # ── Tracing plugin — writes to _pending_traces (drained → DuckDB) ─────────
+
+    def _tool_response_ok(response) -> bool:
+        if isinstance(response, dict) and "error" in response:
+            return False
+        if (isinstance(response, list) and response
+                and isinstance(response[0], dict) and "error" in response[0]):
+            return False
+        return True
+
+    def _trace_id_from(maybe_ctx) -> str:
+        sess = getattr(maybe_ctx, "session", None)
+        if sess is not None:
+            return getattr(sess, "id", "unknown")
+        # Some ADK callback contexts wrap an _invocation_context with .session
+        inv = getattr(maybe_ctx, "_invocation_context", None)
+        if inv is not None:
+            return getattr(getattr(inv, "session", None), "id", "unknown")
+        return "unknown"
+
+    def _state_of(maybe_ctx):
+        # Try direct .state, then ._invocation_context.session.state.
+        s = getattr(maybe_ctx, "state", None)
+        if s is not None:
+            return s
+        sess = getattr(maybe_ctx, "session", None)
+        if sess is not None:
+            return getattr(sess, "state", None)
+        inv = getattr(maybe_ctx, "_invocation_context", None)
+        if inv is not None:
+            return getattr(getattr(inv, "session", None), "state", None)
+        return None
 
     class PitwallTracingPlugin(BasePlugin):
-        """Logs every agent run and tool call to the module-level trace buffer.
+        """Logs every agent run, tool call, and (optionally) model prompt.
 
-        pitwall_bridge.py drains get_pending_traces() after each run_adk()
-        call and writes rows to the agent_traces DuckDB table (ADR-021).
+        Per-agent timestamp keys (`temp:_agent_start_ms__<name>`) prevent the
+        ParallelAgent race that ADR-021 missed: three concurrent debrief
+        sub-agents each had their start time clobbered by the next, producing
+        wrong latencies.
+
+        ADK 1.32 hook signatures (async, kwargs-only) — see google.adk.plugins.
+        We also expose plain `before_agent` / `after_agent` / `after_tool`
+        synchronous shims so unit tests can drive the plugin without spinning
+        up an async loop.
         """
-        name = "pitwall_tracing"
 
-        def before_agent(self, ctx, **_kw):
-            # Store start time in temp state so after_agent can compute latency.
-            # temp: prefix means ADK discards it after this invocation.
+        def __init__(self) -> None:
+            super().__init__(name="pitwall_tracing")
+
+        # ── Sync test-friendly shims (used by tests/test_adk.py) ─────────────
+
+        def _record_agent_start(self, ctx, agent=None) -> None:
             try:
-                ctx.session.state["temp:_agent_start_ms"] = time.time() * 1000
+                name = (getattr(agent, "name", None)
+                        or getattr(ctx, "agent_name", None) or "unknown")
+                state = _state_of(ctx)
+                if state is not None:
+                    state[f"temp:_agent_start_ms__{name}"] = time.time() * 1000
             except Exception:
                 pass
-            return None
 
-        def after_agent(self, ctx, **_kw):
+        def _record_agent_end(self, ctx, agent=None) -> None:
             try:
-                start = ctx.session.state.pop("temp:_agent_start_ms", None)
+                name = (getattr(agent, "name", None)
+                        or getattr(ctx, "agent_name", None) or "unknown")
+                state = _state_of(ctx)
+                start = None
+                if state is not None:
+                    key = f"temp:_agent_start_ms__{name}"
+                    start = state.pop(key, None) if hasattr(state, "pop") else state.get(key)
                 latency = round(time.time() * 1000 - start, 1) if start else None
-                agent_name = getattr(ctx, "agent_name", None) or "unknown"
-                trace_id = getattr(ctx.session, "id", "unknown") if hasattr(ctx, "session") else "unknown"
                 with _trace_lock:
                     _pending_traces.append({
-                        "trace_id":   trace_id,
-                        "agent_name": agent_name,
+                        "trace_id":   _trace_id_from(ctx),
+                        "agent_name": name,
                         "event_type": "agent",
                         "detail":     "",
                         "latency_ms": latency,
@@ -466,75 +679,131 @@ else:
                     })
             except Exception:
                 pass
-            return None
 
-        def after_tool(self, tool, args, tool_context, response, **_kw):
+        def _record_tool(self, tool, tool_context, result) -> None:
             try:
-                tool_name = getattr(tool, "name", str(tool))
+                tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "unknown")
                 agent_name = getattr(tool_context, "agent_name", "unknown")
-                trace_id = (
-                    getattr(tool_context.session, "id", "unknown")
-                    if hasattr(tool_context, "session") else "unknown"
-                )
                 with _trace_lock:
                     _pending_traces.append({
-                        "trace_id":   trace_id,
+                        "trace_id":   _trace_id_from(tool_context),
                         "agent_name": agent_name,
                         "event_type": "tool",
                         "detail":     tool_name,
                         "latency_ms": None,
-                        "success":    True,
+                        "success":    _tool_response_ok(result),
                     })
+            except Exception:
+                pass
+
+        # Plain sync hooks (test entry points)
+        def before_agent(self, ctx, agent=None):
+            self._record_agent_start(ctx, agent)
+            return None
+
+        def after_agent(self, ctx, agent=None):
+            self._record_agent_end(ctx, agent)
+            return None
+
+        def after_tool(self, *, tool, args=None, tool_context, response=None):
+            self._record_tool(tool, tool_context, response)
+            return None
+
+        # ── Real ADK 1.32 async hooks (called by the Runner) ────────────────
+
+        async def before_agent_callback(self, *, agent, callback_context):
+            self._record_agent_start(callback_context, agent)
+            return None
+
+        async def after_agent_callback(self, *, agent, callback_context):
+            self._record_agent_end(callback_context, agent)
+            return None
+
+        async def after_tool_callback(self, *, tool, tool_args, tool_context, result):
+            self._record_tool(tool, tool_context, result)
+            return None
+
+        async def before_model_callback(self, *, callback_context, llm_request):
+            if not _PROMPT_LOG_PATH:
+                return None
+            try:
+                parts: list[str] = []
+                for c in (getattr(llm_request, "contents", None) or []):
+                    for p in (getattr(c, "parts", None) or []):
+                        t = getattr(p, "text", None)
+                        if t:
+                            parts.append(t)
+                flat = "\n".join(parts)
+                row = {
+                    "ts":          time.time(),
+                    "agent_name":  getattr(callback_context, "agent_name", "unknown"),
+                    "char_count":  len(flat),
+                    "prompt_snip": flat[:4000],
+                }
+                with open(_PROMPT_LOG_PATH, "a") as fh:
+                    fh.write(json.dumps(row) + "\n")
             except Exception:
                 pass
             return None
 
-    # ── Runner (canonical ADK invocation — BaseAgent has no .run() shortcut) ──
+    # ── Runner (uses App so plugins ride on the app, not the deprecated arg) ─
 
     _session_service = InMemorySessionService()
-    _runner = Runner(
-        agent=coach_orchestrator,
-        app_name="pitwall",
-        session_service=_session_service,
+    _app = App(
+        name="pitwall",
+        root_agent=coach_orchestrator,
         plugins=[PitwallTracingPlugin()],
     )
+    _runner = Runner(
+        app=_app,
+        session_service=_session_service,
+    )
+
+    async def _delete_session_async(user_id: str, sid: str) -> None:  # noqa: F811
+        try:
+            await _session_service.delete_session(
+                app_name="pitwall", user_id=user_id, session_id=sid)
+        except Exception as exc:
+            _log.warning("ADK session delete failed for %s: %s", sid, exc)
 
     async def _get_or_create_session(user_id: str):
-        """Return a persistent ADK session for this driver, creating one if needed.
+        """Return a persistent ADK session for this driver.
 
-        Reusing the session lets LiteRT-LM clone the KV cache for the agent
-        system instructions rather than rebuilding it from scratch each call.
-        Sessions auto-reset after _SESSION_MAX_TURNS to prevent context overflow.
+        Reuse keeps the system-instruction KV cache warm. Rotates when the
+        cumulative prompt+completion char count exceeds _SESSION_CHAR_BUDGET
+        (a proxy for token usage that doesn't require a tokenizer).
         """
         with _driver_sessions_lock:
             existing_sid = _driver_sessions.get(user_id)
-            turns = _session_turn_count.get(user_id, 0)
-            if turns >= _SESSION_MAX_TURNS:
-                _log.info("ADK session for '%s' hit %d turns — rotating", user_id, turns)
-                existing_sid = None
+            chars = _session_chars.get(user_id, 0)
+            should_rotate = chars >= _SESSION_CHAR_BUDGET
+            if should_rotate:
+                _log.info("ADK session for '%s' hit %d chars — rotating", user_id, chars)
                 _driver_sessions.pop(user_id, None)
-                _session_turn_count.pop(user_id, None)
+                _session_chars.pop(user_id, None)
+
+        if should_rotate and existing_sid:
+            await _delete_session_async(user_id, existing_sid)
+            existing_sid = None
 
         if existing_sid:
             try:
                 session = await _session_service.get_session(
-                    app_name="pitwall", user_id=user_id, session_id=existing_sid
-                )
+                    app_name="pitwall", user_id=user_id, session_id=existing_sid)
                 if session:
                     return session
             except Exception as exc:
                 _log.warning("ADK session lookup failed (%s) — creating new", exc)
 
         session = await _session_service.create_session(
-            app_name="pitwall", user_id=user_id
-        )
+            app_name="pitwall", user_id=user_id)
         with _driver_sessions_lock:
             _driver_sessions[user_id] = session.id
-            _session_turn_count[user_id] = 0
+            _session_chars[user_id] = 0
         _log.debug("ADK session created: user=%s sid=%s", user_id, session.id)
         return session
 
-    async def _run_adk_async(prompt: str, user_id: str) -> str:
+    async def _run_adk_async(prompt: str, user_id: str) -> tuple[str, str]:
         session = await _get_or_create_session(user_id)
         final_text = ""
         async for event in _runner.run_async(
@@ -546,18 +815,84 @@ else:
                 if event.content and event.content.parts:
                     final_text = event.content.parts[0].text or final_text
         with _driver_sessions_lock:
-            _session_turn_count[user_id] = _session_turn_count.get(user_id, 0) + 1
-        return final_text
+            _session_chars[user_id] = (
+                _session_chars.get(user_id, 0) + len(prompt) + len(final_text)
+            )
+        return final_text, session.id
 
-    def run_adk(prompt: str, user_id: str = "driver") -> str:  # noqa: F811
+    async def _stream_adk_async(prompt: str, user_id: str) -> AsyncGenerator[str, None]:
+        session = await _get_or_create_session(user_id)
+        rc = RunConfig(streaming_mode=StreamingMode.SSE)
+        total_chars = 0
+        async for event in _runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=Content(parts=[Part(text=prompt)]),
+            run_config=rc,
+        ):
+            if event.content and event.content.parts:
+                text = event.content.parts[0].text or ""
+                if text:
+                    total_chars += len(text)
+                    yield text
+        with _driver_sessions_lock:
+            _session_chars[user_id] = (
+                _session_chars.get(user_id, 0) + len(prompt) + total_chars
+            )
+
+    def run_adk(prompt: str, user_id: str = "driver") -> tuple[str, str]:  # noqa: F811
         """Synchronous entry point for pitwall_bridge.py (Flask is sync).
 
-        Reuses the persistent ADK session for this driver so the LiteRT-LM
-        server can clone the KV cache for warm requests.
+        Returns (final_text, adk_session_id). Bounded by PITWALL_ADK_TIMEOUT_S.
         """
-        return asyncio.run(_run_adk_async(prompt, user_id))
+        if _loop is None:
+            raise RuntimeError("ADK loop not started")
+        fut = asyncio.run_coroutine_threadsafe(
+            _run_adk_async(prompt, user_id), _loop)
+        try:
+            return fut.result(timeout=_RUN_TIMEOUT_S)
+        except concurrent.futures.TimeoutError:
+            fut.cancel()
+            raise RuntimeError(f"ADK run exceeded {_RUN_TIMEOUT_S}s timeout")
 
-    # Registry exposed via GET /coach/agents for Vue PWA discovery
+    _STREAM_SENTINEL = object()
+
+    def stream_adk(prompt: str, user_id: str = "driver") -> Iterable[str]:  # noqa: F811
+        """Sync generator yielding text chunks. Schedules the async generator
+        on the persistent loop and bridges chunks via a thread-safe queue.
+        """
+        if _loop is None:
+            raise RuntimeError("ADK loop not started")
+        out_q: queue.Queue = queue.Queue()
+
+        async def _produce() -> None:
+            try:
+                async for chunk in _stream_adk_async(prompt, user_id):
+                    out_q.put(("chunk", chunk))
+            except Exception as exc:
+                out_q.put(("error", f"{type(exc).__name__}: {exc}"))
+            finally:
+                out_q.put((_STREAM_SENTINEL, None))
+
+        asyncio.run_coroutine_threadsafe(_produce(), _loop)
+
+        deadline = time.monotonic() + _RUN_TIMEOUT_S
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f"ADK stream exceeded {_RUN_TIMEOUT_S}s timeout")
+            try:
+                kind, payload = out_q.get(timeout=remaining)
+            except queue.Empty:
+                raise RuntimeError(f"ADK stream exceeded {_RUN_TIMEOUT_S}s timeout")
+            if kind is _STREAM_SENTINEL:
+                return
+            if kind == "error":
+                raise RuntimeError(payload or "ADK stream failed")
+            yield payload
+
+    # ── Vue PWA registry exposed via GET /coach/agents ────────────────────────
+
     AGENT_REGISTRY = [
         {"name": "TelemetryAgent",
          "role": "Session data — laps, coaching notes, telemetry signals",
@@ -623,9 +958,6 @@ else:
          "role": "Driver profile + Ross Bentley concept selection",
          "example_questions": ["What Bentley concept should I focus on today?",
                                "What is my weakest skill right now?"]},
-        {"name": "NarrativeAgent",
-         "role": "Final output — converts everything into driver language",
-         "example_questions": ["(always called last by the orchestrator)"]},
         {"name": "AgentMetaAgent",
          "role": "ADK system telemetry — agent latency, tool call frequency, trace history",
          "example_questions": ["Which agent is slowest?",
