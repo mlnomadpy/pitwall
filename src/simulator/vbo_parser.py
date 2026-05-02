@@ -10,6 +10,7 @@ from pathlib import Path
 
 @dataclass
 class VBOMetadata:
+    """Header metadata parsed from a Racelogic .vbo file."""
     created: str = ""
     device_type: str = ""
     device_serial: str = ""
@@ -22,6 +23,7 @@ class VBOMetadata:
 
 @dataclass
 class TelemetryFrame:
+    """A single 10 Hz telemetry sample with all sensor channels."""
     timestamp: float
     lat: float          # decimal degrees
     lon: float          # decimal degrees

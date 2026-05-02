@@ -32,6 +32,7 @@ EARTH_R = 6_371_000.0
 
 
 def fetch_osm() -> dict:
+    """Query Overpass API for the Sonoma Raceway centerline and cache the result."""
     import requests
     query = (
         '[out:json][timeout:25];'
@@ -50,6 +51,7 @@ def fetch_osm() -> dict:
 
 
 def haversine_m(a, b):
+    """Great-circle distance in metres between two (lat, lon) tuples."""
     p1, p2 = math.radians(a[0]), math.radians(b[0])
     dlat = math.radians(b[0] - a[0])
     dlon = math.radians(b[1] - a[1])
@@ -177,6 +179,7 @@ def map_fractional(real_samples: list[dict], anon_distance: float,
 
 
 def main():
+    """CLI entry point — import Sonoma centerline from OSM and map markers to real GPS."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-fetch", action="store_true",
                     help="Use cached /tmp/sonoma_osm.json instead of hitting Overpass")

@@ -20,6 +20,7 @@ from gold_standard import GoldStandard
 
 @dataclass
 class Highlight:
+    """A notable session moment for the highlights reel and LLM prompt."""
     title: str
     category: str
     severity: str            # "high" | "medium" | "positive" | "engineering"
@@ -34,6 +35,7 @@ class Highlight:
 def find_highlights(passes: list[CornerPass], grades: list[CornerGrade],
                     gold: GoldStandard, frames,
                     max_items: int = 8) -> list[Highlight]:
+    """Rank the top-N interesting moments across Sonoma-specific categories."""
     out: list[Highlight] = []
 
     # Build a quick index of grade by (corner, lap)
@@ -199,6 +201,7 @@ def _approx_apex_timestamp(frames, p: CornerPass, gold_pass) -> float:
 
 
 def highlights_to_dict(hs: list[Highlight]) -> list[dict]:
+    """Serialise a list of Highlights to JSON-safe dicts."""
     return [asdict(h) for h in hs]
 
 

@@ -40,7 +40,7 @@ _G = 9.81
 @dataclass
 class DeadReckonerConfig:
     """Tunable noise parameters. Defaults are fitted to a Racelogic VBOX 3i
-    + an OBDLink CAN speed feed at Sonoma — the real on-track payload.
+    + a USB-CAN adapter speed feed at Sonoma — the real on-track payload.
     Adjust per car/track once we have data to fit against."""
     sigma_a: float = 2.0          # process accel noise (m/s²)
     sigma_speed: float = 0.3      # CAN speed measurement noise (m/s)

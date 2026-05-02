@@ -12,11 +12,11 @@ The Python backend is the source of truth. The Flutter Pixel app is a renderer p
 flowchart LR
   subgraph SENSORS["📡 Sensors (on-car)"]
     RL[Racelogic Mini<br/>10 Hz GPS+IMU<br/>VBO format]
-    OBD[OBDLink MX<br/>CAN brake/throttle/RPM]
+    OBD[USB-CAN Adapter<br/>CAN brake/throttle/RPM]
     CAM[Pixel dashcam<br/>MP4 chunks]
   end
 
-  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 37 endpoints"]
+  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 56 endpoints"]
     direction TB
     INGEST["/session/&lt;id&gt;/frames<br/>/session/&lt;id&gt;/video_frames<br/>/analyze (burst)"]
     QUERY["/session/&lt;id&gt;/scorecard<br/>/highlights /map /sync<br/>/coach/brief /debrief"]
@@ -532,7 +532,7 @@ pitwall/
 │       └── pitwall_app.py
 ├── tests/                             (this turn's audit suite)
 └── tools/
-    ├── pitwall_bridge.py              (Flask, 26 endpoints)
+    ├── pitwall_bridge.py              (Flask, 56 endpoints)
     ├── enrich_sonoma_track.py
     ├── extract_gold_lap.py
     ├── best_sonoma_lap.py             (S/F line-projection)
@@ -774,7 +774,7 @@ flowchart TB
 
   subgraph SENSORS["📡 Sensors"]
     RL[Racelogic VBO<br/>10 Hz]:::sensor
-    OBD[OBDLink MX]:::sensor
+    OBD[USB-CAN Adapter]:::sensor
     CAM[Pixel dashcam]:::sensor
   end
 
@@ -788,7 +788,7 @@ flowchart TB
     VAL[validate_litert.py]:::tools
   end
 
-  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 37 endpoints"]
+  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 56 endpoints"]
     direction TB
 
     subgraph BRG_INGEST["ingest"]

@@ -28,6 +28,7 @@ class MarkerDef:
 
 @dataclass
 class CornerDef:
+    """Full definition of a track corner — geometry, speed profiles, and coaching data."""
     name: str
     number: int
     direction: str
@@ -49,6 +50,7 @@ class CornerDef:
 
 @dataclass
 class SectorDef:
+    """A track sector defined by start and end cumulative distances."""
     name: str
     start_distance: float
     end_distance: float
@@ -56,6 +58,7 @@ class SectorDef:
 
 @dataclass
 class TrackMap:
+    """Complete runtime track model loaded from a track.json file."""
     name: str
     track_length: float
     sf_lat: float

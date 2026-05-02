@@ -58,6 +58,7 @@ class TimeLossAttribution:
 
 @dataclass
 class CornerGrade:
+    """Grade for a single corner pass — quality score, time deltas, and coaching."""
     corner: str
     lap: int
     grade: str                  # "A+" .. "F"
@@ -75,6 +76,7 @@ class CornerGrade:
 
 @dataclass
 class SessionScorecard:
+    """Aggregate session scorecard — per-corner grades and session-level metrics."""
     session_id: str
     n_laps: int
     best_lap_s: float
@@ -242,6 +244,7 @@ def grade_corner_pass(p: CornerPass, g: GoldCornerPass) -> CornerGrade:
 
     # Scoring dimensions, from feedback-system.md:118-140
     def safe_ratio(actual: float, gold: float, weight: float, tolerance: float = 0.05) -> float:
+        """Score a dimension as 0–1 based on gap to gold (tolerant at ±5%)."""
         if gold <= 0:
             return 1.0
         gap = abs(actual - gold) / gold
@@ -447,6 +450,7 @@ def _build_corner_pass(frames, corner: CornerDef, lap: int,
 
 
 def scorecard_to_dict(s: SessionScorecard) -> dict:
+    """Serialise a SessionScorecard to a JSON-safe dict for the bridge."""
     return {
         "session_id":         s.session_id,
         "n_laps":             s.n_laps,

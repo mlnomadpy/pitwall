@@ -185,6 +185,7 @@ class SessionManager:
         self.audio.stop()
 
     def stop(self):
+        """Halt the running session and silence all audio output."""
         self.running = False
         self.audio.silence()
         self.audio.stop()
@@ -344,6 +345,7 @@ if HAS_TEXTUAL:
             self._voice_enabled = voice_enabled
 
         def compose(self) -> ComposeResult:
+            """Build the Textual widget tree for the TUI layout."""
             yield Static("🏁 PITWALL", id="header_bar")
             yield Static("Speed: --- mph", id="speed_display")
             yield Static("Brake: --- | Throttle: --- | G: ---", id="telemetry")
@@ -357,6 +359,7 @@ if HAS_TEXTUAL:
             yield Static("Ready | Track: loading...", id="status_bar")
 
         def on_mount(self):
+            """Initialise the SessionManager once the TUI is ready."""
             model_path = os.path.join(os.path.dirname(__file__), "models", "lstm_v3.pt")
             self.session = SessionManager(
                 self.track_path, model_path,
@@ -370,6 +373,7 @@ if HAS_TEXTUAL:
             )
 
         def on_button_pressed(self, event: Button.Pressed):
+            """Route button presses to the corresponding actions."""
             if event.button.id == "start":
                 self.action_start_session()
             elif event.button.id == "stop":
@@ -381,11 +385,13 @@ if HAS_TEXTUAL:
 
         @work(thread=True)
         def action_start_session(self):
+            """Start VBO replay in a background thread."""
             if not self.replay_path:
                 self.call_from_thread(self.notify, "No replay file. Use --replay")
                 return
 
             def on_frame(i, f, cues, corner, next_c, voice=""):
+                """Update the TUI widgets on each telemetry frame."""
                 speed_mph = f.speed * 2.237
                 speed_kmh = f.speed * 3.6
                 grip = min(f.combo_g / 2.29 * 100, 150)
@@ -428,12 +434,14 @@ if HAS_TEXTUAL:
             self.session.start_replay(self.replay_path, speed=self.speed, on_frame=on_frame)
 
         def action_stop_session(self):
+            """Stop the current session and update the status bar."""
             if self.session:
                 self.session.stop()
             self.query_one("#status_bar").update("Stopped")
             self.notify("Session stopped")
 
         def action_toggle_record(self):
+            """Toggle telemetry recording on/off."""
             if self.session:
                 self.session.recording = not self.session.recording
                 state = "ON" if self.session.recording else "OFF"
@@ -443,6 +451,7 @@ if HAS_TEXTUAL:
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point for the Pitwall terminal app."""
     parser = argparse.ArgumentParser(description="Pitwall Terminal App")
     parser.add_argument("--replay", help="VBO file to replay")
     parser.add_argument("--track", required=True, help="Track JSON file")

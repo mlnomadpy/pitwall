@@ -22,7 +22,7 @@ graph LR
     FRAME[Telemetry Frame] --> MATCH[Vector Matcher<br/>find applicable concepts]
     VECTORS[(Pedagogical Vector DB<br/>Ross Bentley curriculum)] --> MATCH
     MATCH --> CANDIDATES[Matched Vectors<br/>ranked by relevance]
-    CANDIDATES --> LLM[Gemma 4 / Gemini 3.0<br/>generate coaching using<br/>matched concepts as context]
+    CANDIDATES --> LLM[Gemma 4 E2B / LitertCoach<br/>generate coaching using<br/>matched concepts as context]
     LLM --> MSG[Coaching Message<br/>grounded in curriculum]
 ```
 

@@ -286,38 +286,37 @@ ORDER BY session_date, corner_name;
 ```mermaid
 graph TB
     subgraph On-Track
-        SENSORS[Racelogic + OBDLink<br/>10Hz telemetry] --> FUSION[Sensor Fusion]
+        SENSORS[Racelogic + USB-CAN<br/>10Hz telemetry] --> FUSION[Sensor Fusion]
         FUSION --> LSTM[LSTM v3<br/>sequence predictor]
-        FUSION --> DUCK_LIVE[(DuckDB Live<br/>rolling buffer)]
+        FUSION --> DUCK_LIVE[(DuckDB<br/>telemetry + coaching_notes)]
         
         LSTM --> SONIC[Sonic Model v2<br/>delta → tones]
         
         DUCK_LIVE -->|corner exit| GRADE_RT[Quick Corner Grade]
-        TARGET_RT[(Target Profile)] --> GRADE_RT
-        GRADE_RT --> GEMMA_RT[Gemma<br/>one-sentence feedback]
+        TARGET_RT[(Gold Standard)] --> GRADE_RT
+        GRADE_RT --> LITERT[LitertCoach<br/>Gemma 4 E2B<br/>one-sentence feedback]
         
-        SONIC --> ARB[Message Arbiter]
-        GEMMA_RT --> ARB
+        SONIC --> ARB[CoachArbiter]
+        LITERT --> ARB
         ARB --> EARBUDS[Pixel Earbuds]
-        ARB --> HUD[Signal Light HUD]
         
         FUSION --> REC[Recorder<br/>telemetry + video timestamps]
     end
 
     subgraph Off-Track
         REC --> DUCK_POST[(DuckDB<br/>full session)]
-        TARGET_POST[(Target Driver<br/>AJ / Best Self / Custom)] --> GRADER[Corner Grader<br/>all corners, all laps<br/>A+ to F]
+        TARGET_POST[(Gold Standard<br/>AJ / Best Self / Custom)] --> GRADER[Corner Grader<br/>all corners, all laps<br/>A+ to F]
         DUCK_POST --> GRADER
         
-        GRADER --> GEMMA_POST[Gemma Debrief<br/>narrative + plan]
+        GRADER --> ADK_DEBRIEF[ADK Paddock Agents<br/>18 agents via Gemma 4 E4B<br/>narrative + plan]
         GRADER --> CLIPPER[Video Clipper<br/>worst + best corners]
         VID[(Phone Video)] --> CLIPPER
         
-        GEMMA_POST --> REPORT[Session Report Card]
+        ADK_DEBRIEF --> REPORT[Session Report Card]
         CLIPPER --> REPORT
         GRADER --> PROGRESS[Progress Tracker<br/>grades over sessions]
         
-        GEMMA_POST --> PROFILE[Update Training Plan<br/>in event-sourced profile]
+        ADK_DEBRIEF --> PROFILE[Update Training Plan<br/>in event-sourced profile]
     end
 ```
 

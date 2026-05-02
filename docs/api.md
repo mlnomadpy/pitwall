@@ -1,11 +1,16 @@
 # API — Pitwall HTTP Bridge
 
-The bridge (`tools/pitwall_bridge.py`) is the **Tier 1 warm path** for the Flutter Pixel 10 app and the canonical integration surface for any external client (telemetry adapters, dashboards, replay tools). It runs locally on `127.0.0.1:8765`, wraps the full Python coaching stack (`sonic_model`, `coach_engine`, `track_loader`), and persists session state to DuckDB.
+The bridge (`tools/pitwall_bridge.py`) is the **central HTTP surface** for the Vue PWA, telemetry adapters, and any external client (dashboards, replay tools). It runs locally on `127.0.0.1:8765`, wraps the full Python coaching stack (`sonic_model`, `coach_engine`, `session_analyzer`, ADK agents), and persists session state to DuckDB. Currently serving **56 endpoints** across three tiers:
+
+- **Hot path (<50 ms):** `/analyze` burst — `sonic_model` + `RuleCoach` reflexive cues
+- **Warm path (<100 ms):** `/coach/brief`, `/coach/debrief` — `LitertCoach` (Gemma 4 E2B)
+- **Paddock path (2–15 s):** `/coach/ask` — 18 ADK agents (Gemma 4 E4B via `lit serve`)
 
 ```
-client (Flutter / curl / Termux) ──► HTTP :8765 ──► sonic_model.compute_cues  ─┐
+client (Vue PWA / curl / Termux) ──► HTTP :8765 ──► sonic_model.compute_cues  ─┐
                                             └────► coach_engine.propose       ├─► /analyze response
-                                            └────► duckdb (sessions/laps/notes)
+                                            └────► adk_agents.run_adk()      │
+                                            └────► duckdb (sessions/laps/notes/traces)
 ```
 
 See [ADR-010](adr/010-http-bridge-warm-path.md) for the design rationale.
@@ -97,7 +102,7 @@ Liveness probe and engine status.
 
 ### `POST /analyze`
 
-The main coaching endpoint. Receives a telemetry burst from `AntigravityPipeline.kt` and returns coaching text + audio cues + a rally-style pace note.
+The main coaching endpoint. Receives a telemetry burst from the Vue PWA, CAN reader, or any HTTP client and returns coaching text + audio cues + a rally-style pace note.
 
 **Request body** (subset; extra fields ignored):
 

@@ -45,17 +45,20 @@ DEFAULT_PROMPT = (
 
 
 def banner(title: str):
+    """Print a prominent step banner."""
     print(f"\n{'=' * 60}")
     print(f"  {title}")
     print("=" * 60)
 
 
 def check(condition: bool, ok: str, fail: str) -> bool:
+    """Print a ✓/✗ result line and return the condition."""
     print(f"  {'✓' if condition else '✗'}  {ok if condition else fail}")
     return condition
 
 
 def main():
+    """CLI entry point — validate LiteRT-LM on a physical Pixel in Termux."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="",
                     help="Path to Gemma 4 .task; defaults to standard locations")

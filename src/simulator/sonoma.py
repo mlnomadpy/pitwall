@@ -32,6 +32,7 @@ TRACK_CENTROID_LON = -122.4594
 
 @dataclass(frozen=True)
 class Sector:
+    """A named track sector bounded by two cumulative-distance markers."""
     name: str
     start_m: float
     end_m: float
@@ -40,6 +41,7 @@ class Sector:
 
 @dataclass(frozen=True)
 class Straight:
+    """A named straight segment — feeds top-speed analysis endpoints."""
     name: str
     start_m: float
     end_m: float
@@ -48,6 +50,7 @@ class Straight:
 
 @dataclass(frozen=True)
 class DangerZone:
+    """A track region with elevated risk — drives safety overrides and pre-brief warnings."""
     id: str
     start_m: float
     end_m: float
@@ -57,6 +60,7 @@ class DangerZone:
 
 @dataclass(frozen=True)
 class WeatherPhase:
+    """A time-of-day weather phase — drives surface coaching and warm-up advice."""
     id: str
     start_hour: int
     end_hour: int

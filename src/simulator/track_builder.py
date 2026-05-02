@@ -26,6 +26,7 @@ from vbo_parser import parse_vbo, TelemetryFrame
 
 @dataclass
 class GeoPoint:
+    """A GPS coordinate with optional distance and altitude."""
     lat: float
     lon: float
     distance: float = 0.0
@@ -34,6 +35,7 @@ class GeoPoint:
 
 @dataclass
 class Corner:
+    """Auto-detected corner with geometry, speed profiles, and brake data."""
     name: str
     number: int
     direction: str              # "left" or "right"
@@ -49,6 +51,7 @@ class Corner:
 
 @dataclass
 class Sector:
+    """A track sector bounded by distance markers."""
     name: str
     start_distance: float
     end_distance: float
@@ -56,6 +59,7 @@ class Sector:
 
 @dataclass
 class TrackDefinition:
+    """Complete auto-generated track definition ready for JSON serialisation."""
     name: str
     generated_from: list[str]
     track_length_m: float
@@ -602,6 +606,7 @@ def track_to_json(track: TrackDefinition) -> dict:
 # ─── CLI ───────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point — parse VBO files and generate a track definition JSON."""
     parser = argparse.ArgumentParser(description="Build track definition from VBO files")
     parser.add_argument("vbo_files", nargs="+", help="One or more .vbo files")
     parser.add_argument("-o", "--output", default="track.json", help="Output JSON file")

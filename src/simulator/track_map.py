@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 @dataclass
 class Corner:
+    """A Sonoma corner definition with gold-standard reference data from the best lap."""
     name: str
     severity: int           # 1 (hairpin) to 6 (flat out)
     entry_distance: float   # meters from start/finish

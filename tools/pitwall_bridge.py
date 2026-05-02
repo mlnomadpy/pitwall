@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
-pitwall_bridge.py — Local HTTP bridge server for the Pitwall Android app.
+pitwall_bridge.py — Local HTTP bridge for the Pitwall coaching system.
 
-Integrates the full src/simulator coaching stack (sonic_model, track_loader,
-vbo_parser) so Android gets real cues — not stub rules.
+Central HTTP surface for the Vue PWA, telemetry adapters (CAN reader,
+VBO importer), and any external client (dashboards, replay tools). Wraps
+the full src/simulator coaching stack (sonic_model, coach_engine, ADK
+agents) and persists session state to DuckDB.
 
-Endpoints:
-    GET  /health           → {"status": "ok", "engine": "sonic_model" | "rules"}
-    POST /analyze          → telemetry burst JSON → coaching message + cues
-    GET  /laps             → lap history from DuckDB
-    POST /lap              → save a completed lap record
+Three-tier architecture — 56 endpoints:
+    Hot  (<50 ms):  POST /analyze → sonic_model + RuleCoach reflexive cues
+    Warm (<100 ms): POST /coach/brief, /coach/debrief → LitertCoach (Gemma 4 E2B)
+    Paddock (2-15s): POST /coach/ask → 18 ADK agents (Gemma 4 E4B via lit serve)
+
+Plus session management, telemetry ingest, diagnostics, driver profile,
+and track intelligence endpoints.
 
 Install:
     pip3 install flask duckdb
@@ -17,8 +21,8 @@ Install:
 Run from repo root (so imports resolve):
     python3 tools/pitwall_bridge.py --track src/simulator/sonoma.json
 
-Emulator tunnel (once per adb session):
-    ~/Library/Android/sdk/platform-tools/adb reverse tcp:8765 tcp:8765
+On Termux (Pixel 10):
+    python3 tools/pitwall_bridge.py --track src/simulator/sonoma.json --can vcan0
 """
 
 import argparse
@@ -138,6 +142,7 @@ _burst_lock = threading.Lock()
 
 # ── DuckDB helpers ─────────────────────────────────────────────────────────────
 def get_db():
+    """Open a DuckDB connection and ensure all schema tables exist."""
     if not HAS_DUCKDB:
         return None
     conn = duckdb.connect(DB_PATH)
@@ -841,6 +846,7 @@ def _lap_sectors(sid: str, lap: dict) -> list:
     track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
 
     def lap_progress(d):
+        """Convert raw cumulative distance to 0-1 lap progress fraction."""
         if d is None:
             return None
         delta = d - base_d
@@ -1065,6 +1071,7 @@ def _rule_coaching(burst: dict) -> str:
 
 @app.route("/health", methods=["GET"])
 def health():
+    """Return bridge status, engine type, and DuckDB availability."""
     return jsonify({
         "status":    "ok",
         "version":   "2.0",
@@ -1078,9 +1085,9 @@ def health():
 @app.route("/analyze", methods=["POST"])
 def analyze():
     """
-    Receive a telemetry burst from AntigravityPipeline.kt and return coaching.
+    Receive a telemetry burst and return coaching cues.
 
-    Expected JSON (from serialiseBurst in AntigravityPipeline):
+    Called by the Vue PWA, CAN reader pipeline, or curl. Expected JSON:
     {
       "session_id": "...",  "burst_id": 7,
       "avg_speed_kmh": 104, "max_combo_g": 1.82,
@@ -1196,12 +1203,14 @@ class _CueBus:
         self._subs: dict[str, list[_queue.Queue]] = {}
 
     def subscribe(self, sid: str, maxsize: int = 32) -> _queue.Queue:
+        """Register a new SSE client queue for the given session."""
         q: _queue.Queue = _queue.Queue(maxsize=maxsize)
         with self._lock:
             self._subs.setdefault(sid, []).append(q)
         return q
 
     def unsubscribe(self, sid: str, q: _queue.Queue):
+        """Remove a client queue and clean up empty session entries."""
         with self._lock:
             if sid in self._subs:
                 try:
@@ -1212,6 +1221,7 @@ class _CueBus:
                     del self._subs[sid]
 
     def publish(self, sid: str, event: dict):
+        """Push an event dict to all subscribed queues for this session."""
         dead: list[_queue.Queue] = []
         with self._lock:
             queues = list(self._subs.get(sid, []))
@@ -2269,36 +2279,43 @@ def _section(sid: str, key: str):
 
 @app.route("/session/<sid>/scorecard", methods=["GET"])
 def session_scorecard(sid: str):
+    """Return the scorecard section of a session's analysis bundle."""
     return _section(sid, "scorecard")
 
 
 @app.route("/session/<sid>/highlights", methods=["GET"])
 def session_highlights(sid: str):
+    """Return the highlights section of a session's analysis bundle."""
     return _section(sid, "highlights")
 
 
 @app.route("/session/<sid>/stats", methods=["GET"])
 def session_stats(sid: str):
+    """Return the stats section of a session's analysis bundle."""
     return _section(sid, "stats")
 
 
 @app.route("/session/<sid>/friction_circle", methods=["GET"])
 def session_friction(sid: str):
+    """Return the friction-circle section of a session's analysis bundle."""
     return _section(sid, "friction")
 
 
 @app.route("/session/<sid>/hustle_map", methods=["GET"])
 def session_hustle(sid: str):
+    """Return the hustle-map section of a session's analysis bundle."""
     return _section(sid, "hustle_map")
 
 
 @app.route("/session/<sid>/eob", methods=["GET"])
 def session_eob(sid: str):
+    """Return the end-of-braking section of a session's analysis bundle."""
     return _section(sid, "eob")
 
 
 @app.route("/session/<sid>/incidents", methods=["GET"])
 def session_incidents(sid: str):
+    """Return the incidents section of a session's analysis bundle."""
     return _section(sid, "incidents")
 
 
@@ -2790,6 +2807,7 @@ def session_brake_acceleration(sid: str):
         conn.close()
 
     def nearest_corner(d):
+        """Map a cumulative distance to the closest corner name."""
         if d is None:
             return None
         return min(corner_bounds, key=lambda c: abs(d - c["entry_m"]))["name"]
@@ -3504,6 +3522,7 @@ def coach_brief():
 
 @app.route("/driver/<driver_id>/profile", methods=["GET"])
 def driver_profile_route(driver_id: str):
+    """Return the computed driver profile for the given driver."""
     if not HAS_ANALYZER or not HAS_DUCKDB:
         return jsonify({"error": "driver profile unavailable"}), 503
     with _db_lock:
@@ -4102,6 +4121,7 @@ def track_markers():
 
 @app.route("/track/danger_zones", methods=["GET"])
 def track_danger_zones():
+    """Return Sonoma danger zones with severity and distance bounds."""
     return jsonify({
         "track": "Sonoma Raceway",
         "danger_zones": [
@@ -4114,6 +4134,7 @@ def track_danger_zones():
 
 @app.route("/track/weather", methods=["GET"])
 def track_weather():
+    """Return the weather phase and coaching note for the given hour."""
     try:
         hour_local = int(request.args.get("hour_local", datetime.now().hour))
     except ValueError:
@@ -4129,6 +4150,7 @@ def track_weather():
 
 @app.route("/laps", methods=["GET"])
 def get_laps():
+    """Query lap records from DuckDB, optionally filtered by session_id."""
     session_id = request.args.get("session_id")
     limit = int(request.args.get("limit", 20))
 
@@ -4151,6 +4173,7 @@ def get_laps():
 
 @app.route("/lap", methods=["POST"])
 def save_lap():
+    """Insert a completed lap record into DuckDB."""
     data = request.get_json(force=True, silent=True) or {}
     with _db_lock:
         conn = get_db()
@@ -4390,6 +4413,7 @@ def coach_ask_stream():
     prompt = "\n".join(prompt_lines) + "\n" + history_text + f"Driver question: {question}"
 
     def generate():
+        """Yield SSE chunks from the ADK streaming response."""
         import re as _re
         accum = ""
         try:

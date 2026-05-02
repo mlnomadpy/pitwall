@@ -47,12 +47,14 @@ DIM = "\033[2m"; BOLD = "\033[1m"; RESET = "\033[0m"
 
 
 def bar(value, max_val, width=20, color=GREEN):
+    """Render an ANSI block-character bar at the given fill percentage."""
     pct = max(0, min(1, value / max_val)) if max_val > 0 else 0
     filled = int(pct * width)
     return f"{color}{'█' * filled}{DIM}{'░' * (width - filled)}{RESET}"
 
 
 def pattern_sym(p: Pattern) -> str:
+    """Map a Pattern enum value to a two-character display symbol."""
     return {"silent": "  ", "continuous": "~~", "pulse": "♪ ",
             "fast_pulse": "♪♪", "sharp": "⚡", "buzz": "⚠ ",
             "chime_up": "↑↑", "chime_down": "↓↓", "chime_neutral": "──"
@@ -60,6 +62,7 @@ def pattern_sym(p: Pattern) -> str:
 
 
 def freq_note(freq):
+    """Convert a frequency in Hz to the nearest musical note name (e.g. 'A4')."""
     if freq <= 0: return "---"
     notes = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"]
     semi = 12 * math.log2(freq / 440.0) + 69
@@ -69,6 +72,7 @@ def freq_note(freq):
 # ─── Lap Detection ──────────────────────────────────────────────────────────
 
 class LapTracker:
+    """Tracks lap boundaries and sector splits using start/finish line proximity."""
     def __init__(self, track: TrackMap):
         self.track = track
         self.lap = 0
@@ -128,6 +132,7 @@ def _haversine(lat1, lon1, lat2, lon2):
 # ─── Render ──────────────────────────────────────────────────────────────────
 
 def render(frame, cues, idx, total, lap_tracker, track, elapsed):
+    """Clear the terminal and redraw the full-screen telemetry dashboard."""
     speed_mph = frame.speed * 2.237
     speed_kmh = frame.speed * 3.6
 
@@ -230,6 +235,7 @@ def render(frame, cues, idx, total, lap_tracker, track, elapsed):
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def run(vbo_path, track_path, speed_mult=1.0, export_path=None):
+    """Main replay loop — load VBO + track, play back frames, render, and optionally export CSV."""
     print(f"Loading track: {track_path}")
     track = load_track(track_path)
     print(f"  {track.name}: {track.track_length:.0f}m, {len(track.corners)} corners, {len(track.sectors)} sectors")

@@ -15,6 +15,7 @@ from enum import Enum
 
 
 class Pattern(Enum):
+    """Audio playback pattern for the sonic co-driver's multi-layer output."""
     SILENT = "silent"
     CONTINUOUS = "continuous"
     PULSE = "pulse"
@@ -28,6 +29,7 @@ class Pattern(Enum):
 
 @dataclass
 class AudioCue:
+    """A single sonic coaching cue — one layer of the multi-layer audio output."""
     layer: str          # "grip", "brake_approach", "trail_brake", "throttle", "lap_estimate"
     frequency: float    # Hz (200-2000)
     volume: float       # 0.0-1.0

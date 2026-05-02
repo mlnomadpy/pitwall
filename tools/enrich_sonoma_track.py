@@ -235,10 +235,12 @@ def enrich(track: dict) -> dict:
 
 
 def write_pretty(path: Path, data: dict):
+    """Write a JSON dict to disk with indent-2 formatting."""
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
 
 
 def main():
+    """CLI entry point — enrich sonoma.json with markers and coaching tips."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-sync", action="store_true",
                     help="Only edit the canonical copy, skip the 3 duplicates")

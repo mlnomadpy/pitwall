@@ -32,9 +32,11 @@ LAPS = 3
 NOISE = 0.02       # ±2% sensor noise
 
 def noise(val, scale=NOISE):
+    """Apply uniform ±scale% sensor noise to a value."""
     return val * (1 + random.uniform(-scale, scale))
 
 def lerp(a, b, t):
+    """Linear interpolation from a toward b by factor t."""
     return a + (t - a) * b
 
 def track_speed(dist_m):
@@ -104,6 +106,7 @@ def lat_lon_at(dist_m):
     return round(lat, 6), round(lon, 6)
 
 def main():
+    """Generate a synthetic 3-lap VBO file and print to stdout."""
     lines = []
 
     # ── VBO header ────────────────────────────────────────────────────────────

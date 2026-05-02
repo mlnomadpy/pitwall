@@ -11,12 +11,10 @@ Two implementations behind one interface:
   - RuleCoach       : zero-dependency templated phrases keyed by a small
                       pedagogical-vector matcher (Ross Bentley curriculum
                       distilled in project_pitwall_bentley_pedagogy.md).
-  - LlamaCppCoach   : POSTs to an OpenAI-compatible /v1/chat/completions
-                      endpoint. Defaults to http://127.0.0.1:8080 (the
-                      llama.cpp llama-server default per
-                      https://github.com/ggml-org/llama.cpp/blob/master/docs/android.md).
-                      The same client works against Ollama, OpenAI, Together,
-                      Groq, etc. — anything OpenAI-compatible.
+  - LitertCoach     : on-device Gemma 4 E2B inference via LiteRT-LM
+                      (MediaPipe Genai). Runs in-process on the Pixel 10
+                      Tensor G5 NPU. Falls back to RuleCoach when the
+                      model is unreachable or inference times out.
 
 The arbiter (P3 safety / P2 technique / P1 strategy with cooldown + corner
 suppression) lives at the call site in pitwall_app.SessionManager so this
@@ -1272,7 +1270,7 @@ def build_context(
 ) -> CoachContext:
     """Pack the runtime state into a CoachContext + matched Bentley concept.
 
-    Single helper used by both RuleCoach and LlamaCppCoach so the gating logic
+    Single helper used by both RuleCoach and LitertCoach so the gating logic
     is identical regardless of which engine is active.
     """
     # Marker lookup — only meaningful when there's an upcoming corner

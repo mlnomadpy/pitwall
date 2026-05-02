@@ -58,6 +58,7 @@ def find_frame_at_distance(frames, target_m: float, track_len: float = 4258.0):
 
 
 def main():
+    """CLI entry point — extract dashcam stills at each Sonoma marker distance."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--vbo", default=DEFAULT_VBO)
     ap.add_argument("--mp4", default=DEFAULT_MP4)

@@ -40,6 +40,7 @@ results: list[tuple[str, bool, str]] = []
 
 
 def check(name: str, ok: bool, detail: str = ""):
+    """Record a PASS/FAIL result and print a coloured status line."""
     results.append((name, ok, detail))
     icon = f"{GREEN}✓{RESET}" if ok else f"{RED}✗{RESET}"
     suffix = f" {DIM}— {detail}{RESET}" if detail else ""
@@ -47,10 +48,12 @@ def check(name: str, ok: bool, detail: str = ""):
 
 
 def section(title: str):
+    """Print a coloured section header for grouping test output."""
     print(f"\n{YELL}── {title} ─────────────────────────────────────────{RESET}")
 
 
 def main():
+    """CLI entry point — ingest a VBO, exercise every endpoint, print a summary."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--vbo", default=DEFAULT_VBO)
     ap.add_argument("--keep-db", action="store_true")

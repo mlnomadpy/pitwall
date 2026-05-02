@@ -228,6 +228,7 @@ def play(
 
 
 def main():
+    """CLI entry point — replay VBO or synthetic frames as CAN traffic."""
     p = argparse.ArgumentParser(description="pitwall CAN simulator")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--vbo", help="path to a VBO file to replay")

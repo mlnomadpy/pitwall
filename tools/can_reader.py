@@ -434,6 +434,7 @@ class CanReader:
 # ── CLI ─────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point — start the CAN reader as a standalone process."""
     p = argparse.ArgumentParser(description="pitwall CAN reader (USB/virtual)")
     p.add_argument("--session-id", required=True, help="session_id to tag rows with")
     p.add_argument("--interface", default="virtual",

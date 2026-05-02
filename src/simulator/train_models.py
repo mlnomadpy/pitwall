@@ -248,6 +248,7 @@ def train_brake_predictor(train_frames, val_frames, test_frames):
 
     # Filter to meaningful braking events (>20 bar peak, >20m duration)
     def filter_events(events):
+        """Keep only braking events with >20 bar peak and >20 m duration."""
         return [e for e in events if e.get("peak_pressure", 0) > 20 and e.get("brake_duration_m", 0) > 20]
 
     train_events = filter_events(train_events)
@@ -510,6 +511,7 @@ def compute_corner_scores(frames: list[TelemetryFrame], track_json_path: str = N
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
+    """CLI entry point — train all ML models on VBO telemetry data."""
     parser = argparse.ArgumentParser(description="Train ML models on VBO data")
     parser.add_argument("data_dir", help="Directory containing .vbo files")
     parser.add_argument("--output", default="models/", help="Output directory for models")

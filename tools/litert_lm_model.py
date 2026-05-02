@@ -227,6 +227,7 @@ def _thermal_backoff_seconds() -> float:
 
 @dataclass(order=True)
 class _Job:
+    """A queued inference request with priority and a result channel."""
     priority: int
     seq: int                   # tie-breaker: FIFO within priority
     payload: dict = field(compare=False)
@@ -517,6 +518,7 @@ if HAS_LITERTLM_MODEL:
         async def generate_content_async(
             self, llm_request, stream: bool = False
         ) -> AsyncGenerator[Any, None]:
+            """ADK BaseLlm hook — route an LLM request through the worker queue."""
             system_prompt = _extract_system_instruction(llm_request)
             tools_dict = _extract_tools_dict(llm_request)
             history = list(getattr(llm_request, "contents", None) or [])

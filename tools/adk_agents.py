@@ -218,10 +218,12 @@ _loop: asyncio.AbstractEventLoop | None = None
 
 
 def run_adk(prompt: str, user_id: str = "driver") -> tuple[str, str]:
+    """Run a single ADK coaching query synchronously (stub when ADK is absent)."""
     raise RuntimeError("google-adk not installed — pip install google-adk litellm")
 
 
 def stream_adk(prompt: str, user_id: str = "driver") -> Iterable[str]:
+    """Stream ADK coaching tokens (stub when ADK is absent)."""
     raise RuntimeError("google-adk not installed — pip install google-adk litellm")
 
 
@@ -698,32 +700,39 @@ else:
 
         # Plain sync hooks (test entry points)
         def before_agent(self, ctx, agent=None):
+            """Sync shim — record agent start for testing without an async loop."""
             self._record_agent_start(ctx, agent)
             return None
 
         def after_agent(self, ctx, agent=None):
+            """Sync shim — record agent end and compute latency."""
             self._record_agent_end(ctx, agent)
             return None
 
         def after_tool(self, *, tool, args=None, tool_context, response=None):
+            """Sync shim — record a tool invocation result."""
             self._record_tool(tool, tool_context, response)
             return None
 
         # ── Real ADK 1.32 async hooks (called by the Runner) ────────────────
 
         async def before_agent_callback(self, *, agent, callback_context):
+            """ADK 1.32 async hook — record agent start timestamp."""
             self._record_agent_start(callback_context, agent)
             return None
 
         async def after_agent_callback(self, *, agent, callback_context):
+            """ADK 1.32 async hook — record agent end and compute latency."""
             self._record_agent_end(callback_context, agent)
             return None
 
         async def after_tool_callback(self, *, tool, tool_args, tool_context, result):
+            """ADK 1.32 async hook — record tool invocation result."""
             self._record_tool(tool, tool_context, result)
             return None
 
         async def before_model_callback(self, *, callback_context, llm_request):
+            """ADK 1.32 async hook — optionally log full prompts to disk."""
             if not _PROMPT_LOG_PATH:
                 return None
             try:

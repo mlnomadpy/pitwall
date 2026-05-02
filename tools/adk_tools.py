@@ -853,6 +853,7 @@ def write_conversation(
     focus_items: list[str] | None = None,
     emotion: str | None = None,
 ) -> None:
+    """Persist a coaching conversation turn to the DuckDB conversations table."""
     conn.execute(
         "INSERT INTO conversations "
         "(session_id, driver_id, role, text, focus_items, emotion) "

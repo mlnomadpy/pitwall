@@ -33,6 +33,7 @@ from corner_grader import CornerPass
 
 
 def stat_cards(frames) -> dict:
+    """Compute session-level statistics for the dashboard stat cards."""
     if not frames:
         return {}
     speeds_kmh = [f.speed * 3.6 for f in frames]

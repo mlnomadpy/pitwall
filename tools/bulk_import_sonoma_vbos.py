@@ -116,6 +116,7 @@ def _is_sonoma_file(frames, sf_lat, sf_lon, radius_km) -> bool:
 
 
 def main():
+    """CLI entry point — bulk-import Sonoma VBO files into pitwall's DuckDB."""
     ap = argparse.ArgumentParser()
     ap.add_argument("vbo_dir", help="Directory containing .vbo files")
     ap.add_argument("--track", default=str(DEFAULT_TRACK))

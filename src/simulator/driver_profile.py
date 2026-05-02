@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS driver_events (
 
 @dataclass
 class DriverEvent:
+    """A single event in the driver's append-only profile store."""
     driver_id: str
     session_id: str
     corner: str
@@ -39,10 +40,12 @@ class DriverEvent:
 
 
 def ensure_schema(conn) -> None:
+    """Create the driver_events table if it does not exist."""
     conn.execute(SCHEMA)
 
 
 def append_event(conn, e: DriverEvent) -> None:
+    """Write a single DriverEvent row to DuckDB."""
     conn.execute(
         "INSERT INTO driver_events (driver_id, session_id, corner, event_kind, value_num, value_str) "
         "VALUES (?, ?, ?, ?, ?, ?)",

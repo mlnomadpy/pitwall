@@ -31,6 +31,7 @@ EARTH_R = 6_371_000.0
 
 
 def haversine_m(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
+    """Great-circle distance in metres between two GPS coordinates."""
     p1, p2 = math.radians(a_lat), math.radians(b_lat)
     dlat = math.radians(b_lat - a_lat)
     dlon = math.radians(b_lon - a_lon)
@@ -104,6 +105,7 @@ def detect_laps(frames, sf_lat: float, sf_lon: float, sf_heading_deg: float,
 
 
 def session_centroid(frames) -> tuple[float, float]:
+    """Return the median lat/lon of a frame list as a rough session location."""
     lats = [f.lat for f in frames if f.lat]
     lons = [f.lon for f in frames if f.lon]
     if not lats:
@@ -112,6 +114,7 @@ def session_centroid(frames) -> tuple[float, float]:
 
 
 def fmt_lap(s: float) -> str:
+    """Format a lap time in seconds as M:SS.cc for display."""
     if not s or s != s:
         return "       —"
     m = int(s // 60)
@@ -120,6 +123,7 @@ def fmt_lap(s: float) -> str:
 
 
 def main():
+    """CLI entry point — rank VBO sessions by best Sonoma lap time."""
     ap = argparse.ArgumentParser()
     ap.add_argument("vbo_dir", help="Directory containing .vbo files")
     ap.add_argument("--track", default=str(ROOT / "data" / "tracks" / "sonoma.json"))

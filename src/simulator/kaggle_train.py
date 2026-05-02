@@ -1,3 +1,11 @@
+"""
+Kaggle GPU training script for LSTM v3 sequence predictor.
+
+Designed to run on Kaggle with 2× T4 GPUs.  Reads pre-processed
+``train.npz / val.npz / test.npz`` (produced by ``lstm_predictor_v3.py``),
+trains a multi-scale BiLSTM with attention + corner embedding, and saves
+the best checkpoint to ``lstm_v3_gpu.pt``.
+"""
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader

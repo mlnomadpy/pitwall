@@ -31,6 +31,7 @@ TRACE_OUT = ROOT / "data" / "reference" / "sonoma_gold_trace.json"
 
 
 def main():
+    """CLI entry point — extract a frozen gold-standard lap from a VBO file."""
     ap = argparse.ArgumentParser()
     ap.add_argument("--vbo", default=DEFAULT_VBO,
                     help=f"VBO file to extract gold lap from (default: {DEFAULT_VBO})")

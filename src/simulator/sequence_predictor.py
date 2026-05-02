@@ -302,6 +302,7 @@ class SequencePredictor:
         return pred[0]  # (20, 3)
 
     def save(self, path):
+        """Persist the trained model, normalisation stats, to a pickle file."""
         with open(path, "wb") as f:
             pickle.dump({
                 "model": self.model,
@@ -311,6 +312,7 @@ class SequencePredictor:
         print(f"  Model saved to {path}")
 
     def load(self, path):
+        """Restore a previously saved model from a pickle file."""
         with open(path, "rb") as f:
             data = pickle.load(f)
         self.model = data["model"]
@@ -405,6 +407,7 @@ def load_passes(data_dir, file_list, track):
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def cmd_train(args):
+    """Train the sequence predictor on VBO corner passes and save the model."""
     print("Sequence Predictor — Training")
     print("=" * 60)
 
@@ -494,6 +497,7 @@ def cmd_train(args):
 
 
 def cmd_eval(args):
+    """Load a saved model and evaluate it on the held-out test split."""
     print("Sequence Predictor — Evaluation")
     print("=" * 60)
 

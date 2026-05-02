@@ -32,13 +32,13 @@ gantt
     Sensor fusion engine           :a1, 2026-04-08, 10d
     Antigravity pipeline Tx/Rx     :a2, 2026-04-08, 14d
     Confidence-annotated frame     :a3, 2026-04-08, 7d
-    Racelogic + OBDLink adapters   :a4, 2026-04-10, 10d
+    Racelogic + USB-CAN adapters    :a4, 2026-04-10, 10d
     Message arbiter                :a5, 2026-04-14, 7d
     
     section Phase 2 - Intelligence
     Gemma 4 hot path on Pixel TPU  :b1, 2026-04-18, 10d
     Pedagogical vector DB          :b2, 2026-04-18, 7d
-    Gemini 3.0 warm path on Vertex :b3, 2026-04-21, 10d
+    LitertCoach warm path on-device :b3, 2026-04-21, 10d
     Gold Standard baseline (AJ lap):b4, 2026-04-21, 5d
     
     section Phase 3 - Integration
@@ -60,9 +60,9 @@ gantt
 
 **No code, no track.** Architecture review must demonstrate:
 
-- [ ] Sensor fusion engine running with Racelogic + OBDLink data
+- [ ] Sensor fusion engine running with Racelogic + USB-CAN data
 - [ ] Confidence-annotated frames flowing through the pipeline
-- [ ] Antigravity store-and-forward working with Vertex AI
+- [ ] Local DuckDB persistence working end-to-end
 - [ ] Gemma 4 inference on Pixel 10 TPU at <50ms
 - [ ] Message arbiter preventing conflicting coaching
 - [ ] At least 3 pedagogical vectors firing correctly on recorded telemetry
@@ -91,13 +91,13 @@ Cross-pod collaboration to build shared infrastructure once.
 ```mermaid
 graph TB
     subgraph Edge Guild
-        E1[Madona] --> SHARED_EDGE[Shared: Racelogic + OBDLink<br/>adapters, sensor fusion,<br/>confidence annotation]
+        E1[Madona] --> SHARED_EDGE[Shared: Racelogic + USB-CAN<br/>adapters, sensor fusion,<br/>confidence annotation]
         E2[Simon]  --> SHARED_EDGE
         E3[Austin] --> SHARED_EDGE
     end
 
     subgraph Pipeline Guild
-        P1[Mike]  --> SHARED_PIPE[Shared: Antigravity Tx/Rx,<br/>store-and-forward,<br/>burst format, Vertex ingestion]
+        P1[Mike]  --> SHARED_PIPE[Shared: DuckDB persistence,<br/>telemetry ingest,<br/>session management, bridge API]
         P2[Taha]  --> SHARED_PIPE
         P3[Henry] --> SHARED_PIPE
     end
@@ -129,20 +129,20 @@ Your scope on the Pipeline Guild:
 
 ### Phase 1 (Apr 8-21): Build the Antigravity Pipeline
 
-1. **Antigravity Tx** on Pixel 10: Buffer fused frames, pack into bursts, send via 5G
-2. **Antigravity Rx** on Vertex AI: Receive bursts, parse, validate, store, trigger Gemini 3.0
-3. **Store-and-forward reliability**: Persist to local disk when 5G drops, send when restored
+1. **Telemetry Persistence** on Pixel 10: DuckDB-backed frame persistence with session management
+2. **Bridge API** on localhost: Flask endpoints for coaching, analysis, and session lifecycle
+3. **Local reliability**: DuckDB survives process restarts, no lost frames
 4. **Burst format**: Confidence-annotated frames in JSON, session metadata, driver level
 
 ### Phase 2 (Apr 18-28): Connect to Reasoning
 
-5. **Feed Gemini 3.0**: Pass telemetry burst + Gold Standard + pedagogical vectors to Gemini
-6. **Return warm path coaching**: Route Gemini response back to Pixel 10 via 5G → arbiter
+5. **Feed LitertCoach**: Pass telemetry + Gold Standard + pedagogical vectors to on-device Gemma 4 E2B
+6. **Return warm path coaching**: Route LitertCoach response to arbiter in-process
 
 ### Phase 3 (Apr 28 - May 15): Team 2 Vertical Tuning
 
-7. **Tune for M3 / Intermediate**: Adjust Antigravity burst cadence, Gemini prompt, coaching language for Team 2's BMW M3 and intermediate driver
-8. **CAN configuration**: Ensure OBDLink MX reads M3-specific CAN signals correctly
+7. **Tune for M3 / Intermediate**: Adjust coaching cadence, LitertCoach prompt, coaching language for Team 2's BMW M3 and intermediate driver
+8. **CAN configuration**: Ensure USB-CAN adapter reads M3-specific CAN signals via DBC correctly
 
 ### Phase 4 (May 15-23): Field Prep
 
@@ -175,7 +175,7 @@ Your scope on the Pipeline Guild:
 - [ ] Antigravity Tx/Rx working end-to-end
 - [x] Confidence-annotated frames flowing through pipeline (simulator demonstrates this)
 - [ ] Store-and-forward tested (simulate 5G dropout)
-- [ ] Gemini 3.0 receiving bursts and generating coaching
+- [ ] On-device warm path generating coaching via LitertCoach
 - [ ] Warm path response delivered to arbiter → earbuds
 - [x] Track definitions auto-generated for Sonoma (validated against real data)
 - [x] LSTM model predicting speed/brake/throttle 2 seconds ahead on unseen track
@@ -188,7 +188,7 @@ Your scope on the Pipeline Guild:
 - [ ] Lap times computed from GPS crossing
 - [x] Corner report card framework built (corner scorer in train_models.py)
 - [ ] Driver profile updated from session data
-- [ ] System survives 5G dropouts without data loss
+- [ ] System runs fully on-device without cloud dependency
 - [x] Pedagogical vectors defined with real Sonoma corner data
 
 ### By May 30 (Sprint Wrap)

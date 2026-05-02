@@ -29,6 +29,7 @@ from lstm_predictor_v3 import (
 
 
 class Pattern(Enum):
+    """Audio pattern for the LSTM-driven sonic model's multi-layer output."""
     SILENT = "silent"
     CONTINUOUS = "continuous"
     PULSE = "pulse"
@@ -41,6 +42,7 @@ class Pattern(Enum):
 
 @dataclass
 class AudioCue:
+    """A single LSTM-computed audio cue with priority-based arbitration."""
     layer: str
     frequency: float
     volume: float
