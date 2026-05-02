@@ -1,7 +1,7 @@
 """
 Shared pytest fixtures for the Pitwall backend test suite.
 
-Adds `src/simulator/` to sys.path so tests can `import sonoma` etc. without
+Adds `src/simulator/` to sys.path so tests can `import pitwall.features.track.sonoma as sonoma` etc. without
 a package install. Provides synthetic frame generators + a frozen track +
 a tiny gold-standard fixture so analytics tests don't need to read disk.
 """
@@ -16,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "src" / "simulator"))
 
 
@@ -154,7 +155,7 @@ def real_track_path():
 
 @pytest.fixture
 def real_track(real_track_path):
-    from track_loader import load_track
+    from pitwall.features.track.track_loader import load_track
     return load_track(str(real_track_path))
 
 
@@ -165,14 +166,14 @@ def real_gold_path():
 
 @pytest.fixture
 def real_gold(real_gold_path):
-    from gold_standard import load_gold_standard
+    from pitwall.features.track.gold_standard import load_gold_standard
     return load_gold_standard(str(real_gold_path))
 
 
 @pytest.fixture
 def synth_corner_pass():
     """Build one CornerPass for unit-testing the grader."""
-    from corner_grader import CornerPass
+    from pitwall.features.session.corner_grader import CornerPass
     return CornerPass(
         corner="Turn 10", lap=1,
         entry_speed_kmh=120, apex_speed_kmh=70, exit_speed_kmh=110,
@@ -188,7 +189,7 @@ def synth_corner_pass():
 @pytest.fixture
 def synth_gold_corner_pass():
     """Build one GoldCornerPass that the synth_corner_pass should grade against."""
-    from gold_standard import GoldCornerPass
+    from pitwall.features.track.gold_standard import GoldCornerPass
     return GoldCornerPass(
         corner="Turn 10",
         entry_speed_kmh=120, apex_speed_kmh=73, exit_speed_kmh=115,
