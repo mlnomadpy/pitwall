@@ -198,6 +198,20 @@ litert-lm import \
 # coach_engine.LitertCoach finds it automatically
 ```
 
+Optional — ADK multi-agent backend (Phase 2). Enables richer paddock coaching:
+the debrief agent queries DuckDB directly instead of using a pre-packed bundle,
+and a driver Q&A endpoint becomes available. Requires Gemma 4 E4B via LiteRT-LM.
+
+```bash
+pip install google-adk
+
+# Download Gemma 4 E4B (~4 GB) and start the LiteRT-LM server:
+lit pull gemma-4-e4b
+lit serve --port 8001   # run in a separate terminal before starting the bridge
+```
+
+ADK falls back silently to `LitertCoach` when unavailable.
+
 > **Note:** earlier docs referenced `mediapipe` + `gemma-4-E2B-it.task`.
 > The desktop pip `mediapipe` package doesn't ship the LLM Inference
 > submodule; we switched to Google's official `litert-lm` package which

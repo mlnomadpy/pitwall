@@ -151,3 +151,9 @@ nav:
       - "015: Universal Telemetry Sink": adr/015-universal-telemetry-sink.md
       - "016: USB-CAN Ingest + Vue PWA Frontend": adr/016-can-bus-ingest-and-frontend-pivot.md
       - "017: Three-Tier Coach Architecture": adr/017-three-tier-coach-architecture.md
+      - "018: Field-Readiness + Pedagogy Tuning": adr/018-field-readiness-blockers-and-pedagogy-tuning.md
+      - "019: ADK Multi-Agent Backend": adr/019-adk-multi-agent-backend.md
+      - "020: ADK Agent Architecture Refactor": adr/020-adk-agent-architecture-refactor.md
+      - "021: ADK Second Audit — Runner, Concurrency, Feature Gaps": adr/021-adk-second-audit.md
+  - ADK Agent Architecture: adk-agent-architecture.md
+  - ADK Implementation Plan: adk-implementation-plan.md
