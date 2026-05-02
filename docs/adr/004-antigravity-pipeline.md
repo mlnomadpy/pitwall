@@ -1,7 +1,7 @@
 # ADR-004: Antigravity Store-and-Forward Pipeline
 
 ## Status
-Accepted
+**Superseded** — the Antigravity store-and-forward pattern was replaced by local DuckDB persistence when the project moved to fully on-device inference (see [ADR-012](012-coach-engine-adapter.md), [ADR-017](017-litert-lm-migration.md)). Vertex AI and Gemini 3.0 references below reflect the original sprint design, not the shipped architecture.
 
 ## Origin
 New for sprint. Replaces Pitwall's SSE + UDP direct streaming with guaranteed delivery.

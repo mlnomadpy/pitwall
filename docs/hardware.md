@@ -10,21 +10,22 @@ Single-device architecture. No laptop in the footwell.
 |-----------|------|-----------|------|
 | **Pixel 10** | Edge compute (TPU), 5G modem, HUD display, audio hub | Central device | -- |
 | **Racelogic Mini** | 20Hz GPS + 3-axis IMU | Bluetooth to Pixel 10 | ~$500 |
-| **OBDLink MX** | CAN bus extraction (throttle, brake, RPM, steering, wheel speeds) | Bluetooth to Pixel 10 | ~$100 |
+| **USB-CAN Adapter** | CAN bus extraction (throttle, brake, RPM, steering, wheel speeds) | USB to Pixel 10 (via Termux) | ~$30–80 |
 | **Pixel Earbuds** | Audio coaching delivery | Bluetooth to Pixel 10 | ~$200 |
 
-**Total in-car wiring: zero.** Everything connects via Bluetooth. The only physical connection is OBDLink MX plugged into the OBD-II port.
+**Total in-car wiring: one USB cable.** The USB-CAN adapter connects to the OBD-II port and to the Pixel 10 via USB. Racelogic and Earbuds connect via Bluetooth.
 
 ```
 ┌─────────────────────────────────────────────┐
 │                   CAR                        │
 │                                              │
 │   ┌──────────┐          ┌──────────────┐     │
-│   │Racelogic │──BT──┐   │  OBDLink MX  │     │
-│   │  Mini    │      │   │  (in OBD-II  │     │
-│   │(windshield)     │   │   port)      │     │
-│   └──────────┘      │   └──────┬───────┘     │
-│                     │          │ BT           │
+│   │Racelogic │──BT──┐   │  USB-CAN     │     │
+│   │  Mini    │      │   │  Adapter     │     │
+│   │(windshield)     │   │  (in OBD-II  │     │
+│   └──────────┘      │   │   port)      │     │
+│                     │   └──────┬───────┘     │
+│                     │          │ USB          │
 │                     ▼          ▼              │
 │              ┌─────────────────────┐          │
 │              │     Pixel 10        │          │
@@ -34,9 +35,6 @@ Single-device architecture. No laptop in the footwell.
 │              │  └───────────────┘  │          │
 │              │  ┌───────────────┐  │          │
 │              │  │ Gemma 4 (TPU) │  │          │
-│              │  └───────────────┘  │          │
-│              │  ┌───────────────┐  │          │
-│              │  │ 5G Modem      │  │──── Vertex AI
 │              │  └───────────────┘  │          │
 │              └──────────┬──────────┘          │
 │                         │ BT                  │
@@ -56,11 +54,11 @@ The Pixel 10 is the entire compute stack:
 | Function | What It Does |
 |----------|-------------|
 | **Edge TPU** | Runs Gemma 4 inference at <50ms per frame |
-| **5G Modem** | Connects to Vertex AI for Gemini 3.0 warm path |
 | **Display** | Shows Signal Light HUD (red/green grip bars) |
-| **Bluetooth** | Connects to Racelogic, OBDLink, Earbuds |
+| **Bluetooth** | Connects to Racelogic and Earbuds |
+| **USB** | Connects to USB-CAN adapter for CAN bus |
 | **Audio** | Routes TTS to Pixel Earbuds |
-| **Storage** | Persists Antigravity bursts when 5G drops |
+| **Storage** | Persists session data and telemetry to DuckDB |
 | **GPS** | Backup GPS if Racelogic disconnects (lower quality) |
 
 ### Mounting
@@ -109,33 +107,35 @@ IMU confidence is always 0.95 because it's self-contained. The `sats` field enco
 
 ---
 
-## OBDLink MX
+## USB-CAN Adapter
 
-CAN bus adapter. Verified across 183 VBO sessions from a BMW M3 (S54 engine).
+CAN bus adapter. The deployment target uses a **CANable Pro** or **Macchina M2** connected via USB to the Pixel 10 in Termux. The original 183 VBO sessions were recorded with an OBDLink MX via Bluetooth, but the as-shipped architecture uses `python-can` + `cantools` over USB for lower latency and higher reliability.
 
 | Spec | Value |
 |------|-------|
 | Protocol | CAN bus (ISO 15765-4) at native bus speed |
 | Effective rate in VBO | **10Hz** (synced with Racelogic sample period) |
-| Connection | Bluetooth SPP to Pixel 10 |
+| Connection | USB to Pixel 10 (via OTG / Termux) |
 | **Working signals (11)** | Brake pressure (0-104 bar), brake position (0-1), throttle (0-99%), steering (-1024 to +372°), RPM (843-8582), coolant temp (68-99°C), oil temp (84-121°C), oil pressure (0.6-5.85 bar), fuel level (20-46%), battery voltage (13.1-13.6V), coolant pressure (7.3-34.8 PSI) |
 | **Broken signals (7)** | Gear (255 constant), clutch (255), AFR (500), EGT (-50), OBD speed (500), head temp (mislabeled), Brake_Press_Calc (inconsistent) |
 | Power | OBD-II port pin 16 (always-on 12V) |
 
 !!! warning "7 Unmapped CAN Signals"
-    Gear, clutch, air-fuel ratio, exhaust temp, OBD vehicle speed, head temperature, and computed brake pressure are constant across all 183 files. These CAN IDs are not mapped in the OBDLink configuration for this car. **Gear must be derived from RPM/speed ratio** using the BMW S54 gear ratios. Individual wheel speeds are also not available — the ABS CAN IDs are not mapped.
+    Gear, clutch, air-fuel ratio, exhaust temp, OBD vehicle speed, head temperature, and computed brake pressure are constant across all 183 files. These CAN IDs are not mapped in the DBC configuration for this car. **Gear must be derived from RPM/speed ratio** using the BMW S54 gear ratios. Individual wheel speeds are also not available — the ABS CAN IDs are not mapped.
 
-### Why OBDLink MX, Not Generic ELM327
+### Why USB-CAN, Not OBDLink MX
 
-| Feature | ELM327 | OBDLink MX |
+The original prototype used OBDLink MX via Bluetooth. The shipped architecture switched to direct USB-CAN adapters for several reasons:
+
+| Feature | OBDLink MX (Bluetooth) | USB-CAN (CANable Pro) |
 |---------|--------|-----------|
-| CAN read mode | Sequential PID polling (3-4Hz total) | Native CAN pass-through (50Hz per signal) |
-| Brake data | Binary on/off switch | **Real brake pressure** (via CAN) |
-| Simultaneous signals | 1 at a time | All signals concurrently |
-| Reliability | Clones fail randomly | Certified genuine hardware |
-| Firmware updates | None | OTA updates |
+| Connection | Bluetooth SPP (pairing, reconnects) | USB (plug and go) |
+| Latency | ~20 ms BT overhead | <1 ms |
+| python-can support | Limited (BT serial wrapper) | Native (slcan) |
+| DBC decoding | Separate layer | `cantools` built-in |
+| Cost | ~$100 | ~$30–80 |
 
-**This difference is critical.** With OBDLink MX, we get real brake pressure at 50Hz — enabling trail braking coaching that's impossible with generic ELM327 (binary brake switch, confidence 0.20).
+**This matters for coaching latency.** With USB-CAN, brake pressure arrives with <1 ms transport overhead vs ~20 ms over Bluetooth, keeping the hot-path budget under 50 ms.
 
 ### Per-Car CAN Configuration
 
@@ -188,10 +188,10 @@ The primary driver interface. All coaching is delivered via audio.
 - [ ] Pixel 10 charged and mounted
 - [ ] "Stay awake while charging" enabled
 - [ ] Racelogic Mini mounted on windshield, powered on, GPS fix acquired
-- [ ] OBDLink MX plugged into OBD-II port, LED on
-- [ ] Bluetooth paired: Racelogic + OBDLink + Earbuds all connected
+- [ ] USB-CAN adapter plugged into OBD-II port and USB to Pixel 10
+- [ ] Bluetooth paired: Racelogic + Earbuds connected
 - [ ] App launched, telemetry flowing (check all signal indicators green)
 - [ ] Signal Light HUD visible in peripheral vision
 - [ ] Pixel Earbuds in, coaching audio audible
-- [ ] 5G connection verified (for warm path — system works without it)
-- [ ] CAN configuration loaded for this car
+- [ ] On-device coaching verified (warm path does not require network)
+- [ ] CAN configuration (DBC) loaded for this car

@@ -7,7 +7,10 @@ Accepted
 Adapted from Pitwall ADR-028. Simplified for single-device (Pixel 10) architecture.
 
 ## Context
-Hardware fails mid-session: Bluetooth drops (OBDLink disconnects), Racelogic battery dies, 5G goes away, Pixel 10 thermals throttle TPU performance. The system must degrade gracefully, never crash, and always inform the driver.
+
+> **Note:** The shipped architecture uses USB-CAN adapters (not OBDLink Bluetooth) and LitertCoach (not Gemini 3.0 cloud). The degradation tiers below have been updated accordingly.
+
+Hardware fails mid-session: USB-CAN disconnects, Racelogic battery dies, Pixel 10 thermals throttle TPU performance. The system must degrade gracefully, never crash, and always inform the driver.
 
 ## Decision
 
@@ -15,22 +18,19 @@ Hardware fails mid-session: Bluetooth drops (OBDLink disconnects), Racelogic bat
 
 | Failure | Detection | Time |
 |---------|----------|------|
-| OBDLink Bluetooth drops | No CAN frames for 200ms | < 500ms |
+| USB-CAN disconnects | No CAN frames for 200ms | < 500ms |
 | Racelogic Bluetooth drops | No GPS/IMU frames for 200ms | < 500ms |
-| 5G connectivity lost | Antigravity burst send fails | < 5s |
 | Pixel 10 TPU throttled | Gemma 4 inference > 100ms | Immediate |
 
 ### Degradation Levels
 
 ```mermaid
 graph TD
-    FULL[Full System<br/>Racelogic + OBDLink + Gemma 4 + Gemini 3.0] -->|OBDLink drops| NO_CAN[No CAN<br/>Lose: throttle, brake, RPM<br/>Keep: GPS, IMU, G-forces<br/>Coaching: G-force rules only]
+    FULL[Full System<br/>Racelogic + USB-CAN + Gemma 4 + LitertCoach] -->|USB-CAN drops| NO_CAN[No CAN<br/>Lose: throttle, brake, RPM<br/>Keep: GPS, IMU, G-forces<br/>Coaching: G-force rules only]
     
     FULL -->|Racelogic drops| NO_RL[No Racelogic<br/>Lose: GPS, IMU, G-forces<br/>Keep: CAN inputs<br/>Coaching: throttle/brake only<br/>no G-force rules]
     
-    FULL -->|5G drops| NO_5G[No Cloud<br/>Lose: Gemini 3.0 warm path<br/>Keep: everything local<br/>Coaching: Gemma 4 hot path only<br/>Antigravity buffers to disk]
-    
-    FULL -->|TPU throttled| NO_TPU[TPU Degraded<br/>Gemma 4 too slow<br/>Fallback: hardcoded rules<br/>Keep: all sensors + warm path]
+    FULL -->|TPU throttled| NO_TPU[TPU Degraded<br/>Gemma 4 too slow<br/>Fallback: hardcoded rules<br/>Keep: all sensors]
     
     NO_CAN -->|Racelogic also drops| OFFLINE[Offline<br/>No sensors<br/>All coaching disabled<br/>Audio: System offline]
 ```
@@ -39,9 +39,8 @@ graph TD
 
 | Event | Audio Message | HUD |
 |-------|-------------|-----|
-| OBDLink disconnects | "CAN disconnected. Brake coaching off." | Orange indicator |
+| USB-CAN disconnects | "CAN disconnected. Brake coaching off." | Orange indicator |
 | Racelogic disconnects | "GPS lost. G-force coaching off." | Orange indicator |
-| 5G drops | (silent — hot path unaffected) | Small 5G-off icon |
 | TPU throttled | (silent — falls back to rules) | - |
 | Everything fails | "System offline." | Red indicator |
 
@@ -54,4 +53,4 @@ When a disconnected sensor starts sending data again:
 4. If invalid: keep disabled, warn driver
 
 ## Consequences
-Positive: System never crashes. Driver always knows current capability. Hot path (Gemma 4) works without cloud. Warm path (Gemini 3.0) works without CAN. Negative: Degraded modes provide less coaching. Frequent Bluetooth reconnects cause notification churn (mitigated: suppress if same sensor reconnects within 10 seconds).
+Positive: System never crashes. Driver always knows current capability. All coaching runs on-device with zero cloud dependency. Negative: Degraded modes provide less coaching. Frequent USB reconnects cause notification churn (mitigated: suppress if same sensor reconnects within 10 seconds).

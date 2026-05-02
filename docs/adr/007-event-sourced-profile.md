@@ -16,7 +16,7 @@ The driver profile is **never written directly** by the LLM. It is computed from
 
 **Profile** is computed on demand: linear trends per corner, weakest corner, strongest corner, suggested focus area.
 
-The LLM (Gemini 3.0) reads the computed profile and narrates it in pre-session briefings and post-session debriefs. It interprets but never modifies.
+The LLM (LitertCoach / Gemma 4 E2B) reads the computed profile and narrates it in pre-session briefings and post-session debriefs. It interprets but never modifies.
 
 Driver preferences (car, goals, coaching level) are set manually, not by the LLM.
 

@@ -14,11 +14,11 @@
 
 | Item | File | Status |
 |---|---|---|
-| `conversations` table DDL in `get_db()` | `tools/pitwall_bridge.py` | ✅ shipped |
-| Write brief narrative to `conversations` | `tools/pitwall_bridge.py` | ✅ shipped |
-| Write debrief narrative to `conversations` | `tools/pitwall_bridge.py` | ✅ shipped |
-| `GET /conversations/<session_id>` | `tools/pitwall_bridge.py` | ✅ shipped |
-| `GET /conversations/driver/<driver_id>` | `tools/pitwall_bridge.py` | ✅ shipped |
+| `conversations` table DDL in `get_db()` | `src/pitwall/__main__.py` | ✅ shipped |
+| Write brief narrative to `conversations` | `src/pitwall/__main__.py` | ✅ shipped |
+| Write debrief narrative to `conversations` | `src/pitwall/__main__.py` | ✅ shipped |
+| `GET /conversations/<session_id>` | `src/pitwall/__main__.py` | ✅ shipped |
+| `GET /conversations/driver/<driver_id>` | `src/pitwall/__main__.py` | ✅ shipped |
 
 ---
 
@@ -105,10 +105,10 @@
 
 | Item | File | Status |
 |---|---|---|
-| `POST /coach/ask` (multi-turn Q&A) | `tools/pitwall_bridge.py` | ✅ shipped |
-| `POST /coach/ask/end` (flush to DuckDB) | `tools/pitwall_bridge.py` | ✅ shipped |
-| `GET /coach/agents` (Vue PWA discovery) | `tools/pitwall_bridge.py` | ✅ shipped |
-| In-memory `_qa_histories` with 1-hour TTL | `tools/pitwall_bridge.py` | ✅ shipped |
+| `POST /coach/ask` (multi-turn Q&A) | `src/pitwall/__main__.py` | ✅ shipped |
+| `POST /coach/ask/end` (flush to DuckDB) | `src/pitwall/__main__.py` | ✅ shipped |
+| `GET /coach/agents` (Vue PWA discovery) | `src/pitwall/__main__.py` | ✅ shipped |
+| In-memory `_qa_histories` with 1-hour TTL | `src/pitwall/__main__.py` | ✅ shipped |
 
 ---
 

@@ -42,7 +42,7 @@ Each track JSON gains a `markers: []` array, both at the top level (flat, sorted
 Marker authoring is done once per track via `tools/enrich_sonoma_track.py` which:
 - Holds a single `ENRICHMENT` dict (one entry per corner).
 - Materialises `distance` from `entry_distance + at_offset_m_from_entry` so the schema stays robust to track-builder geometry changes.
-- Syncs to all four duplicate `sonoma.json` copies (`data/tracks/`, `src/simulator/`, `flutter/assets/tracks/`, `flutter/android/app/src/main/assets/tracks/`).
+- Syncs to all four duplicate `sonoma.json` copies (`data/tracks/`, `src/pitwall/features/`, `flutter/assets/tracks/`, `flutter/android/app/src/main/assets/tracks/`).
 
 ## Consequences
 

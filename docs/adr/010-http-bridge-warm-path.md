@@ -9,9 +9,9 @@ The Flutter Pixel 10 app needs strategic coaching beyond what `GemmaEngine` (hot
 
 - Cellular service at racetracks is unreliable.
 - Vertex AI round-trip is 1–3 s — usable, but burns API quota.
-- The full Python coaching stack (`sonic_model.compute_cues`, `coach_engine`, `track_loader` with markers) lives in `src/simulator/` and is the canonical implementation; reproducing it in Kotlin is a maintenance liability.
+- The full Python coaching stack (`sonic_model.compute_cues`, `coach_engine`, `track_loader` with markers) lives in `src/pitwall/features/` and is the canonical implementation; reproducing it in Kotlin is a maintenance liability.
 
-`tools/pitwall_bridge.py` (introduced 2026-04-28 by VijayVivekanand/android PR #1, extended by this ADR) wraps the Python stack in a Flask HTTP server on `127.0.0.1:8765` and is reachable from the Pixel app via `adb reverse` or a Termux loopback when running on-device.
+`src/pitwall/__main__.py` (introduced 2026-04-28 by VijayVivekanand/android PR #1, extended by this ADR) wraps the Python stack in a Flask HTTP server on `127.0.0.1:8765` and is reachable from the Pixel app via `adb reverse` or a Termux loopback when running on-device.
 
 ## Decision
 

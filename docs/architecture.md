@@ -1,15 +1,21 @@
 # System Architecture
 
-!!! info "Implementation status (2026-04-28)"
-    The architecture below is fully reflected in two parallel runtimes now in-tree:
+!!! warning "Historical document — see [Internal Architecture](internal_architecture.md) for the as-shipped topology"
+    This page documents the **original sprint-design** (April 2026). The system has since evolved to a fully on-device, three-tier architecture with no cloud dependency:
 
-    - **`flutter/`** — Pixel 10 deployment target. Kotlin `MessageArbiter`, `SonicModel`, `GemmaEngine`, `AntigravityPipeline`, `SensorFusion`, `Filters`, `AudioEngine` + Flutter `on_track_screen` / `paddock_screen`.
-    - **`src/simulator/`** + **`tools/pitwall_bridge.py`** — Backend runtime (laptop dev / on-device Termux). The bridge runs a Flask HTTP server on :8765 with `/health /analyze /sessions /session/<id> /lap /laps` (DuckDB-backed) and is the **only warm path** — per [ADR-012](adr/012-coach-engine-adapter.md) the project committed to on-device coaching with no cloud LLM tier. The Flutter app falls through to a mock if the bridge is unreachable.
-    - The rally-style verbal coach (`src/simulator/coach_engine.py`) — `RuleCoach` + `LitertCoach` (LiteRT-LM via MediaPipe Genai, Gemma 4 E2B `.task`) — is wired into the bridge `/analyze` endpoint. Backend owns all LLM logic and system prompts per [ADR-013](adr/013-frontend-backend-boundary.md).
+    - **Hot path (<50 ms):** `sonic_model` + `RuleCoach` — canonical phrase library, no LLM.
+    - **Warm path (<100 ms):** `LitertCoach` (Gemma 4 E2B via LiteRT-LM, in-process) — rally-style pace notes.
+    - **Paddock path (2–15 s):** 18 ADK agents (Gemma 4 E4B via `lit serve`) — briefings, debriefs, Q&A.
+    - **No Vertex AI, no Antigravity pipeline, no Gemini 3.0** — all inference runs on-device.
+    - **CAN ingest** via USB-CAN adapters (`python-can` + `cantools`), not OBDLink Bluetooth.
+    - **56 HTTP endpoints** on the Flask bridge (up from the original 6).
+    - **358 tests passing**, 51-assertion end-to-end smoke test.
+
+    For the current architecture, see [Internal Architecture](internal_architecture.md) and [ADK Agent Architecture](adk-agent-architecture.md).
 
 ## Overview
 
-The system uses a **split-brain architecture** with two concurrent reasoning paths connected by the Antigravity telemetry pipeline, coordinated by a message arbiter. All compute runs on a single Pixel 10 device (edge) and Vertex AI (cloud).
+The system was originally designed as a **split-brain architecture** with two concurrent reasoning paths connected by the Antigravity telemetry pipeline. The shipped system consolidated to a fully on-device three-tier architecture — see the warning above.
 
 ## Full Architecture
 
@@ -17,12 +23,12 @@ The system uses a **split-brain architecture** with two concurrent reasoning pat
 graph TB
     subgraph Sensors
         RL[Racelogic Mini<br/>10Hz VBO output<br/>GPS + IMU + sub-meter accuracy]
-        OBD[OBDLink MX<br/>CAN bus via Bluetooth<br/>11 usable signals<br/>7 broken/unmapped]
+        OBD[USB-CAN Adapter<br/>CAN bus via python-can<br/>11 usable signals<br/>7 broken/unmapped]
     end
 
     subgraph Pixel 10 - Edge
         subgraph Sensor Fusion Engine
-            FUSE[Fuse Racelogic + OBDLink<br/>Kalman speed, Butterworth G-force<br/>complementary position<br/>confidence annotation per signal]
+            FUSE[Fuse Racelogic + USB-CAN<br/>Kalman speed, Butterworth G-force<br/>complementary position<br/>confidence annotation per signal]
         end
 
         subgraph Hot Path - Gemma 4 on TPU
@@ -35,8 +41,8 @@ graph TB
             ARB[Priority Gate<br/>P3 safety: immediate<br/>P2 technique: on straights<br/>P1 strategy: queued<br/>conflict detection<br/>3s global cooldown<br/>stale expiry 5s]
         end
 
-        subgraph Antigravity Tx
-            BURST[Store-and-Forward<br/>telemetry burst buffer<br/>guaranteed delivery<br/>survives 5G dropouts]
+        subgraph Local Persistence
+            BURST[DuckDB + Disk Buffer<br/>telemetry persistence<br/>session-local storage<br/>survives process restarts]
         end
 
         subgraph UX Layer
@@ -49,19 +55,11 @@ graph TB
         end
     end
 
-    subgraph Vertex AI - Cloud
-        subgraph Antigravity Rx
-            INGEST[Telemetry Burst Ingestion<br/>parse + validate + store]
-        end
-
-        subgraph Warm Path - Gemini 3.0
-            GEMINI[Gemini 3.0 Multimodal<br/>strategic analysis<br/>Gold Standard comparison<br/>sector-level coaching]
-            PVR_CLOUD[Pedagogical Vectors<br/>full curriculum retrieval<br/>+ Gold Standard baseline<br/>+ T-Rod human coaching reference]
+    subgraph On-Device Warm Path
+        subgraph Warm Path - LitertCoach
+            LITERT[LitertCoach<br/>Gemma 4 E2B via LiteRT-LM<br/>strategic analysis<br/>Gold Standard comparison<br/>sector-level coaching]
+            PVR_FULL[Pedagogical Vectors<br/>full curriculum retrieval<br/>+ Gold Standard baseline<br/>+ T-Rod human coaching reference]
             PROFILE[Event-Sourced<br/>Driver Profile<br/>computed from DuckDB<br/>append-only facts]
-        end
-
-        subgraph Cloud Analytics
-            VERTEX_DATA[Session Storage<br/>Vertex AI Datasets<br/>cross-session analysis]
         end
     end
 
@@ -81,12 +79,11 @@ graph TB
     RULES --> GEMMA
     GEMMA --> ARB
 
-    BURST -->|5G store-and-forward| INGEST
-    INGEST --> GEMINI
-    PVR_CLOUD --> GEMINI
-    PROFILE --> GEMINI
-    GEMINI -->|5G| ARB
-    INGEST --> VERTEX_DATA
+    BURST --> DUCK
+    DUCK --> LITERT
+    PVR_FULL --> LITERT
+    PROFILE --> LITERT
+    LITERT --> ARB
 
     ARB --> EARBUDS
     ARB --> HUD_SIGNAL
@@ -100,12 +97,11 @@ graph TB
 ```mermaid
 sequenceDiagram
     participant RL as Racelogic Mini
-    participant OBD as OBDLink MX
+    participant OBD as USB-CAN Adapter
     participant FUSE as Sensor Fusion
     participant GEMMA as Gemma 4 (Edge)
     participant ARB as Arbiter
-    participant AGY as Antigravity
-    participant GEMINI as Gemini 3.0 (Cloud)
+    participant LITERT as LitertCoach (Warm)
     participant DRIVER as Pixel Earbuds
 
     Note over RL,OBD: Approaching Turn 3 at 95 mph
@@ -132,12 +128,11 @@ sequenceDiagram
     ARB->>ARB: Mid-corner (gLat 0.8G > 0.3G) → HOLD
     ARB->>ARB: Wait until gLat < 0.3G...
 
-    FUSE->>AGY: Burst: last 10s of frames
-    AGY->>GEMINI: Telemetry burst via 5G
+    FUSE->>LITERT: Straight detected — warm path fires
 
-    GEMINI->>GEMINI: Compare to Gold Standard:<br/>AJ braked 15m later,<br/>carried 4mph more through apex,<br/>trail braked 20% lighter
+    LITERT->>LITERT: Compare to Gold Standard:<br/>AJ braked 15m later,<br/>carried 4mph more through apex,<br/>trail braked 20% lighter
 
-    GEMINI->>ARB: "Turn 3: you braked 15m early.<br/>Next lap, hold brake to the 2-board." (P1)
+    LITERT->>ARB: "Turn 3: you braked 15m early.<br/>Next lap, hold brake to the 2-board." (P1)
     
     Note over DRIVER: Now on straight after Turn 3
     ARB->>DRIVER: Deliver held P2: "Trail brake, ease off"
@@ -151,10 +146,10 @@ The original V1 prototype had no coordination between hot and warm paths, no sig
 
 ### From Pitwall: Confidence-Annotated Frame (ADR-001)
 
-Every signal from Racelogic and OBDLink carries confidence metadata. Even with pro hardware, this matters:
+Every signal from Racelogic and the USB-CAN adapter carries confidence metadata. Even with pro hardware, this matters:
 
 - Racelogic GPS in a tunnel or under trees → confidence drops from 0.95 to 0.40
-- OBDLink Bluetooth drops momentarily → CAN signals marked stale
+- USB-CAN adapter disconnects momentarily → CAN signals marked stale
 - Gemma 4 rules check confidence before firing — no coaching on bad data
 
 ### From Pitwall: Message Arbiter (ADR-002)
@@ -167,9 +162,9 @@ V1 had both paths sending audio simultaneously. The arbiter prevents:
 
 ### From Pitwall: Sensor Fusion (ADR-006)
 
-Even with Racelogic + OBDLink (both high quality), fusion adds value:
+Even with Racelogic + USB-CAN (both high quality), fusion adds value:
 
-- Racelogic GPS speed vs OBDLink CAN speed → Kalman filter for best estimate
+- Racelogic GPS speed vs CAN wheel speed → Kalman filter for best estimate
 - Racelogic IMU G-forces → Butterworth filter removes road surface vibration
 - Racelogic position between 20Hz GPS fixes → dead-reckoning from IMU for smooth 50Hz position
 
@@ -182,14 +177,14 @@ The biggest upgrade from Pitwall. Instead of hardcoded rules, the hot path runs 
 - Adapts language to driver skill level (beginner vs pro persona)
 - Sub-50ms inference on Pixel 10 TPU
 
-### New for Sprint: Antigravity Pipeline (ADR-004)
+### New for Sprint: Local Telemetry Persistence (ADR-004)
 
-Replaces raw SSE/UDP streaming with store-and-forward:
+Replaces raw SSE/UDP streaming with DuckDB-backed local persistence:
 
-- Telemetry bursts are buffered locally
-- Sent to Vertex AI when 5G is available
-- Survives cellular dropouts (common at racetracks)
-- Guaranteed delivery — no lost frames
+- Telemetry frames are persisted to DuckDB as they arrive
+- All analytics queries run locally on-device (zero cloud dependency)
+- Survives process restarts — no lost frames
+- Session data available immediately for warm-path analysis
 
 ### New for Sprint: Pedagogical Vector Retrieval (ADR-005)
 
@@ -243,21 +238,20 @@ The architecture has been validated against 183 VBO sessions (535K frames, 14.9 
 
 Turn 10 and Turn 11 are the heaviest braking corners — primary targets for trail brake coaching.
 
-## Technology Stack
+## Technology Stack (as-shipped)
 
 | Layer | Technology |
 |-------|-----------|
-| Edge compute | Pixel 10 TPU (Gemma 4 inference) |
-| Edge telemetry | Racelogic Mini SDK (10Hz VBO) + OBDLink MX Bluetooth (11 usable CAN signals) |
+| Edge compute | Pixel 10 Tensor G5 NPU (Gemma 4 inference via LiteRT-LM) |
+| Edge telemetry | Racelogic Mini (10Hz VBO) + USB-CAN adapters (CANable Pro / Macchina M2) |
 | Sensor fusion | Python / numpy (Kalman, Butterworth, complementary filter) |
-| Edge LLM | Gemma 4 via on-device inference API |
+| Hot-path coach | `sonic_model` + `RuleCoach` (<50 ms, no LLM) |
+| Warm-path coach | `LitertCoach` — Gemma 4 E2B via LiteRT-LM (<100 ms) |
+| Paddock agents | 18 ADK agents — Gemma 4 E4B via `lit serve` (2–15 s) |
 | Sequence predictor | LSTM v3 (272K params, 1.1 MB, ~10ms CPU / ~3ms GPU) |
-| Store-and-forward | Antigravity SDK (telemetry burst protocol) |
-| Cloud LLM | Gemini 3.0 on Vertex AI |
-| Cloud storage | Vertex AI Datasets |
-| Local analytics | DuckDB in-process |
+| HTTP bridge | Flask on :8765 — 56 endpoints |
+| Local analytics | DuckDB in-process (telemetry, laps, coaching_notes, agent_traces, conversations) |
 | Audio output | Pixel Earbuds via Android Audio API |
-| HUD | Android Canvas on Pixel 10 display |
 | Pedagogical vectors | JSON knowledge base with real Sonoma corner data |
 | Driver profile | Event-sourced JSON (DuckDB-computed) |
-| Rule testing | pytest + reference Sonoma laps |
+| Testing | pytest — 358 tests + 51-assertion end-to-end smoke test |

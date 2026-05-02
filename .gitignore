@@ -26,3 +26,13 @@ android/.idea/tasks.xml
 models/gemma-4-E2B-it.task
 
 .claude
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+coverage.xml
+scratch/
+
+# Database
+*.duckdb
+*.duckdb.wal

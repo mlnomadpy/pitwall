@@ -40,7 +40,7 @@ We deliberately hide lap times, deltas, and split timers from the on-track HUD. 
 
 ## User Journey — A Day at Sonoma
 
-The whole UX is structured around a track-day's natural arc. Each stage maps to specific endpoints in `tools/pitwall_bridge.py`.
+The whole UX is structured around a track-day's natural arc. Each stage maps to specific endpoints in `src/pitwall/__main__.py`.
 
 ```mermaid
 flowchart LR
@@ -61,7 +61,7 @@ flowchart LR
 
 | Stage | Duration | UX | API endpoint |
 |---|---|---|---|
-| **Arrive** | 5 min | Pair earbuds; bridge auto-detects Racelogic + OBDLink. Health check shows engine status, DuckDB ready, track loaded. | `GET /health` |
+| **Arrive** | 5 min | Pair earbuds; bridge auto-detects Racelogic + USB-CAN. Health check shows engine status, DuckDB ready, track loaded. | `GET /health` |
 | **Pre-brief** | 2–4 min | Driver picks 1–3 session goals (corner focus / lap-time delta / technique). System reads weather phase, surfaces danger zones, picks today's focus corners from prior driver profile. Goals are *spoken aloud once* before pulling out, then become coaching anchors during the session. | `GET /coach/brief`, `GET /track/weather`, `GET /track/danger_zones`, `GET /driver/<id>/profile` |
 | **Out-lap** | 1 lap (~2 min) | Co-pilot mode is on but **only safety cues fire** (P3). The driver hears no technique coaching while tires warm. Sonic-model grip tone is at 50% volume so the driver gets used to it. | `POST /analyze` (P3-only) |
 | **Hot laps** | 4–8 laps | Full co-pilot. Audio coaching gated by the arbiter; signal-light HUD in peripheral vision; the 4 audio layers (grip, brake, throttle, trail) plus pace notes. Cue volume scales with the *current* lap-time vs goal — closer to goal, less coaching. | `POST /analyze`, `POST /session/<sid>/frames`, `POST /session/<sid>/signals` |
@@ -179,7 +179,7 @@ graph TB
         CORNER[Corner Report Card<br/>per-corner scores]
         FRICTION[Friction Circle<br/>gLat vs gLong scatter]
         PROFILE[Driver Profile<br/>skill radar + trends]
-        DEBRIEF[AI Debrief<br/>Gemini 3.0 session analysis]
+        DEBRIEF[AI Debrief<br/>LitertCoach session analysis]
     end
 ```
 
@@ -228,7 +228,7 @@ Live gLat vs gLong scatter plot from the session. Shows grip envelope utilizatio
 Skill radar chart computed from DuckDB session data. Dimensions: Braking, Trail Braking, Corner Speed, Throttle Application, Consistency, Line Accuracy.
 
 #### AI Debrief
-Gemini 3.0 generates a narrative session summary:
+LitertCoach (Gemma 4 E2B) generates a narrative session summary:
 
 > "Good session. Best lap 1:42.3, 3.1s behind AJ. Your Turn 3 improved — exit speed up 4mph from last session. Focus area for next session: Turn 7 entry. You're braking 20m too early and losing 0.8s per lap. Try the 3-board as your brake reference. Overall consistency improved — lap time spread down from 2.1s to 1.4s."
 
@@ -261,7 +261,7 @@ Five states, not two. The intermediate ones are the ones drivers hit on real tra
 | **On-track** | Active driving | Signal-light HUD; full coaching |
 | **Pit lane** | Coming in or rolling out | HUD on; coaching reduced to safety only; *no debrief generation* (the lap isn't done) |
 | **Cool-down** | Just stopped, < 90 s | HUD fades; quiet "Lap complete." chime + corner score chimes; *not* full paddock yet |
-| **Paddock** | Stopped > 90 s | Engineer dashboard; Gemini debrief begins generating in background |
+| **Paddock** | Stopped > 90 s | Engineer dashboard; on-device debrief begins generating in background |
 
 ### Edge cases that previously caused trouble
 
@@ -343,7 +343,7 @@ The system *must* keep producing useful output when components fail. Each failur
 | Bridge process dies | HUD bars go amber once, "AI offline — basic cues only" spoken once | Falls back to in-app sonic_model rules; no LLM coaching, no debrief queue until recovery | Auto-reconnect attempted every 30 s |
 | Cloud Gemini timeout | Banner in paddock dashboard: "Debrief queued — generates when online" | On-device coach (Gemma 4 E2B via LiteRT-LM) handles real-time coaching unaffected | Queued debrief generated on next network |
 | Earbuds disconnect | Audio dies, three large glyph cards appear (brake/throttle/corner) | Coaching becomes visual; cadence drops to one cue per 2 s | Auto-pair on reconnect |
-| Bluetooth telemetry drop (Racelogic / OBDLink) | HUD bars freeze and dim 50%; "Telemetry lost" spoken once | Coaching uses last-known frame for ≤ 2 s, then suppressed | Auto-reconnect; resume mid-session_id |
+| Bluetooth telemetry drop (Racelogic / USB-CAN) | HUD bars freeze and dim 50%; "Telemetry lost" spoken once | Coaching uses last-known frame for ≤ 2 s, then suppressed | Auto-reconnect; resume mid-session_id |
 | Network drop (cell + WiFi) | Tiny "○" indicator at corner of HUD; debrief panel shows queued state | On-device pipeline unaffected | Sync resumes when network returns |
 | Low battery (< 15%) | "Battery saver" spoken once; HUD darkens to AMOLED black, drops 60→30 fps; gold-standard overlay disabled | Coaching continues at full quality | Plug in |
 | Phone overheats | Frame rate drops to 15 fps, optional non-essential signals (weather, danger zones) disabled; "Cooling" spoken once | Coaching continues; on-device LLM may slow | Cool the phone (shade, fan) |
@@ -365,15 +365,15 @@ flowchart LR
   classDef cloud fill:#2e5d3a,stroke:#5a8a6e,color:#e0e0e0
 
   RL[Racelogic VBO Mini<br/>10 Hz GPS+IMU<br/>BT serial]:::car
-  OBD[OBDLink MX+<br/>OBD-II BT Classic<br/>5–8 Hz]:::car
+  OBD[USB-CAN Adapter<br/>OBD-II via USB<br/>10 Hz]:::car
   PHONE[Pixel 10<br/>windshield mount<br/>USB-C charge]:::phone
   EAR[Pixel Earbuds<br/>BT audio]:::phone
-  CLOUD[Gemini Flash + Pro<br/>cloud — paddock only]:::cloud
+  CLOUD[LitertCoach<br/>on-device — paddock debrief]:::cloud
 
   RL -->|BT serial| PHONE
-  OBD -->|BT classic| PHONE
+  OBD -->|USB| PHONE
   PHONE -->|BT audio| EAR
-  PHONE -.->|paddock only| CLOUD
+  PHONE -->|local| CLOUD
 ```
 
 ### What goes where
@@ -381,7 +381,7 @@ flowchart LR
 | Item | Mounting | Power | Why |
 |---|---|---|---|
 | Racelogic VBO Mini | suction-cup on the dash, antenna with clear sky | car 12 V via cigarette lighter | The canonical 10 Hz GPS + IMU source. Per ADR-006, GPS clock anchors all telemetry. |
-| OBDLink MX+ | OBD-II port (driver footwell) | OBD-II port | Brake / throttle / steering / RPM — the channels GPS doesn't have |
+| USB-CAN Adapter | OBD-II port (driver footwell) → USB to Pixel 10 | OBD-II port 12V | Brake / throttle / steering / RPM — the channels GPS doesn't have |
 | Pixel 10 | windshield mount, eye-level peripheral, charger run to centre console | USB-C from car 12 V → 65 W PD adapter | Compute + display + audio gateway. Stays charged for 4-hour track day. |
 | Pixel Earbuds | in driver's ears, *over* foam earplugs | self-contained | Audio output. ANC + tight fit handles cabin noise. |
 
@@ -398,7 +398,7 @@ flowchart TD
   W3[Pick coaching persona<br/>T-Rod / Bentley / Drill Sergeant / Calm Pro / Buddy<br/>preview each with one sample line]
   W4[Pick car<br/>or skip — defaults to BMW M3 E46]
   W5[Pair Pixel Earbuds<br/>system dialog]
-  W6[Pair Racelogic + OBDLink<br/>auto-discover, auto-pair, no MAC entry]
+  W6[Pair Racelogic + USB-CAN<br/>auto-discover, plug USB, no pairing]
   W7[Pick today's track<br/>defaults to Sonoma]
   W8[Calibration: 10 s of telemetry<br/>verifies all sensors agree]
   DONE[Ready — go drive]
@@ -417,7 +417,7 @@ Bridge      ✓
 DuckDB      ✓ session-20260423-1004 ready
 Track       ✓ Sonoma Raceway
 Racelogic   ✓ 10.0 Hz, 11 sats
-OBDLink     ✓ 7.8 Hz
+USB-CAN     ✓ 10.0 Hz
 Earbuds     ✓ 87% battery
 Coach       ✓ T-Rod / intermediate
 Goals       ◐ 2 set (carry T7 apex, break 1:48)

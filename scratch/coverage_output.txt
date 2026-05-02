@@ -1,0 +1,92 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.3, pytest-9.0.3, pluggy-1.6.0
+rootdir: /Users/tahabsn/Documents/GitHub/pitwall
+configfile: pytest.ini
+testpaths: tests
+plugins: cov-7.1.0, jaxtyping-0.3.9, anyio-4.13.0
+collected 424 items
+
+tests/features/coaching/test_adk.py ...................................  [  8%]
+tests/features/coaching/test_api_coaching.py ..............              [ 11%]
+tests/features/coaching/test_coach_engine.py ........................... [ 17%]
+......................................                                   [ 26%]
+tests/features/coaching/test_coach_engine_litert.py ........             [ 28%]
+tests/features/coaching/test_litert_lm_model.py ........................ [ 34%]
+.......                                                                  [ 36%]
+tests/features/session/test_analytics.py ............................    [ 42%]
+tests/features/session/test_api_session.py ............................. [ 49%]
+......................                                                   [ 54%]
+tests/features/session/test_corner_grader.py .............               [ 57%]
+tests/features/session/test_driver_profile.py ..........                 [ 60%]
+tests/features/session/test_highlight_finder.py ........                 [ 62%]
+tests/features/session/test_session_analyzer.py ............             [ 64%]
+tests/features/session/test_vbo_parser.py ......                         [ 66%]
+tests/features/telemetry/test_api_signals.py ........................... [ 72%]
+.....................                                                    [ 77%]
+tests/features/telemetry/test_can_pipeline.py .........                  [ 79%]
+tests/features/test_api_core.py .....                                    [ 80%]
+tests/features/track/test_api_track.py ....                              [ 81%]
+tests/features/track/test_gold_standard.py .....                         [ 83%]
+tests/features/track/test_sonoma.py ..................                   [ 87%]
+tests/features/track/test_track_loader.py ....................           [ 91%]
+tests/test_dead_reckoning.py .............                               [ 95%]
+tests/test_tools.py .....................                                [100%]
+
+=============================== warnings summary ===============================
+tests/features/coaching/test_adk.py::test_runner_drives_orchestrator_with_stub_model
+  /Users/tahabsn/.pixi/envs/python/lib/python3.14/site-packages/authlib/_joserfc_helpers.py:8: AuthlibDeprecationWarning: authlib.jose module is deprecated, please use joserfc instead.
+  It will be compatible before version 2.0.0.
+    from authlib.jose import ECKey
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform darwin, python 3.14.3-final-0 _______________
+
+Name                                                  Stmts   Miss  Cover   Missing
+-----------------------------------------------------------------------------------
+src/pitwall/__init__.py                                  21      0   100%
+src/pitwall/__main__.py                                  76     76     0%   17-123
+src/pitwall/adk_tools.py                                306    210    31%   23, 31, 44, 106-116, 134-155, 169-200, 215-247, 256-264, 283-323, 342-388, 407-439, 460-479, 498-521, 548-590, 628, 631-633, 645-646, 670-707, 725-751, 769-783, 816-842, 857
+src/pitwall/db.py                                       170     29    83%   35, 207, 215, 230-231, 269, 273, 333, 338, 362-363, 371, 375, 390-402, 409, 413, 471, 503
+src/pitwall/dead_reckoning.py                            89      0   100%
+src/pitwall/features/__init__.py                          0      0   100%
+src/pitwall/features/bp_core.py                          42     14    67%   64, 71-100
+src/pitwall/features/bp_diagnostics.py                   62     11    82%   15, 20-21, 24-25, 33, 38, 101-102, 113, 137
+src/pitwall/features/coaching/__init__.py                 0      0   100%
+src/pitwall/features/coaching/adk_agents.py             363     87    76%   110-111, 117-118, 128-131, 196-197, 202-203, 212, 222, 227, 231, 276-277, 302, 308, 536-540, 546-547, 562-563, 566-567, 569-570, 608, 616-619, 629-632, 660-661, 682-683, 698-699, 731-732, 738-756, 775-776, 799-805, 833-848, 858, 874, 881-882, 892, 900
+src/pitwall/features/coaching/audio_engine.py           146    146     0%   16-259
+src/pitwall/features/coaching/bp_coaching.py            288    173    40%   20, 23-35, 38-71, 76-80, 86, 92-95, 101-108, 111-116, 118-124, 129-133, 137-142, 155-175, 197-240, 256-257, 270, 275-287, 302-303, 321-322
+src/pitwall/features/coaching/coach_engine.py           489     60    88%   303, 313, 316, 333, 359-364, 368, 384, 386, 401, 404-411, 417-420, 436-442, 817, 932-933, 940, 966-967, 975-976, 982, 986, 1131-1138, 1169-1170, 1184, 1197-1198, 1249-1251, 1352-1354, 1388-1391
+src/pitwall/features/coaching/litert_lm_model.py        430     80    81%   118-125, 131-164, 198-208, 286-287, 401-402, 417, 421-422, 451, 453, 464, 470-471, 484, 489-490, 502-503, 565, 618-621, 637, 641, 654-658, 660, 706-715, 717-718, 759
+src/pitwall/features/coaching/lstm_predictor.py         347    347     0%   17-633
+src/pitwall/features/coaching/lstm_predictor_v3.py      411    411     0%   15-690
+src/pitwall/features/coaching/sequence_predictor.py     275    275     0%   15-536
+src/pitwall/features/coaching/sonic_model.py             72     72     0%   13-224
+src/pitwall/features/coaching/sonic_model_v2.py         178    178     0%   18-366
+src/pitwall/features/realtime/__init__.py                 0      0   100%
+src/pitwall/features/realtime/bp_realtime.py            112     22    80%   43-50, 60-61, 63, 100-102, 106, 159-161, 165, 187, 226-227
+src/pitwall/features/session/__init__.py                  0      0   100%
+src/pitwall/features/session/analytics.py               247     11    96%   85, 93, 195-196, 279, 367, 385, 460-461, 494, 513
+src/pitwall/features/session/bp_analysis.py             346     82    76%   41, 47, 53, 59, 65, 71, 77-116, 129-144, 200, 242, 262, 280, 310-311, 316, 323, 366, 370, 378, 388-396, 422-423, 427, 435, 444, 478, 485, 502-506, 511-512, 529, 533, 542, 550-552, 558, 560-561, 563, 568-578, 582-584
+src/pitwall/features/session/bp_session.py              237     61    74%   37, 55, 101, 105, 121, 142, 149-150, 166, 199, 213, 258-259, 278, 284-331, 352, 366, 374, 378, 383, 401, 404-405, 411, 450, 454, 527, 541, 564-566, 576-579
+src/pitwall/features/session/corner_grader.py           229     17    93%   109, 111, 113, 115, 117, 119, 121, 123, 125, 153-154, 249, 311, 337, 374, 413-414
+src/pitwall/features/session/driver_profile.py           49      0   100%
+src/pitwall/features/session/highlight_finder.py         63      5    92%   47, 143, 169-170, 196
+src/pitwall/features/session/session_analyzer.py        125     15    88%   63, 75, 186, 190-200, 237, 281, 286
+src/pitwall/features/session/vbo_parser.py              101      5    95%   119, 131, 135, 141-142
+src/pitwall/features/telemetry/__init__.py                0      0   100%
+src/pitwall/features/telemetry/bp_signals.py            213     20    91%   18, 22, 50-51, 61, 72-73, 75, 81-82, 91, 127-128, 182, 193, 214-215, 237, 246, 250
+src/pitwall/features/telemetry/can_reader.py            227     49    78%   59-60, 142, 146, 155, 193-208, 226, 253-254, 263-270, 277, 280-281, 292-294, 325-326, 372, 376, 423, 437-464, 468
+src/pitwall/features/track/__init__.py                    0      0   100%
+src/pitwall/features/track/bp_track.py                  224     62    72%   24-27, 32-33, 44, 67, 72, 90, 104, 124, 132-134, 139, 150, 153, 156, 175-177, 186-194, 210-211, 231-232, 245-246, 262-276, 286, 300-310
+src/pitwall/features/track/gold_standard.py             215     68    68%   73-103, 108-113, 119-125, 130-164, 196, 249, 304, 329, 361-362
+src/pitwall/features/track/sonoma.py                     61      0   100%
+src/pitwall/features/track/track_builder.py             308    308     0%   15-635
+src/pitwall/features/track/track_loader.py              133     19    86%   145-146, 209, 214-226, 233, 242-243, 261, 296, 303
+src/pitwall/features/track/track_map.py                  31     31     0%   7-81
+src/pitwall/helpers.py                                  257     72    72%   38, 42, 57, 79-98, 143-144, 158, 164-174, 185, 189, 198, 206, 209, 219, 226, 228, 268-269, 283-284, 322, 326, 339-363, 373-410, 425, 427-428, 432, 434
+src/pitwall/state.py                                    113     62    45%   105-190
+-----------------------------------------------------------------------------------
+TOTAL                                                  7056   3078    56%
+Coverage XML written to file coverage.xml
+======================= 424 passed, 1 warning in 56.98s ========================

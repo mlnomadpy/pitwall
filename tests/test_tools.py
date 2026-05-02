@@ -1,4 +1,4 @@
-"""Unit tests for the helper functions inside `tools/` CLI scripts."""
+"""Unit tests for the helper functions inside `scripts/` CLI scripts."""
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT / "src"))
 
 import enrich_sonoma_track as enrich_mod
 import best_sonoma_lap as ranker

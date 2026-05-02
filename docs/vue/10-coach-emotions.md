@@ -77,7 +77,7 @@ First sub-1:48. Stack up another one — break the next plateau.
 ```
 
 The system prompt update lives in
-`src/simulator/coach_engine.py:build_system_prompt`. The change is
+`src/pitwall/features/coach_engine.py:build_system_prompt`. The change is
 small (~5 lines added per mode) and additive — older clients that
 don't know about `[EMOTION: ...]` keep working because the tag is
 just text they can ignore.
@@ -124,7 +124,7 @@ on the on-track HUD's mini-coach-badge.
 
 ## Coach-engine implementation
 
-In `src/simulator/coach_engine.py`:
+In `src/pitwall/features/coach_engine.py`:
 
 ```python
 @dataclass
@@ -209,7 +209,7 @@ Where each emotion shows up in the PWA:
 ## Pre-tagged canonical phrase library
 
 Every entry in
-`src/simulator/sonoma.py:TROD_VOICE` and the per-coach pre-rendered
+`src/pitwall/features/sonoma.py:TROD_VOICE` and the per-coach pre-rendered
 TTS phrase library (`pitwall-web/data/voices/<coach>-phrases.json`)
 carries an emotion tag:
 

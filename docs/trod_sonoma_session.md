@@ -87,7 +87,7 @@ The named landmarks from `data/tracks/sonoma.json` and the `markers.md` doc rema
 | T9 | (none authored) | "open the wheel, straight shot to T10" |
 | T11 | "the bump where the road widens left" (brake_ref) + "the third tire stack" (apex_ref) | "be closer, distance is king" |
 
-These technique phrasings are now reflected in the per-driver-level system prompts in `src/simulator/coach_engine.py:_LEVEL_SYSTEM_PROMPT["intermediate"]` and the Sonoma track lore in `_TRACK_LORE["Sonoma Raceway"]`.
+These technique phrasings are now reflected in the per-driver-level system prompts in `src/pitwall/features/coach_engine.py:_LEVEL_SYSTEM_PROMPT["intermediate"]` and the Sonoma track lore in `_TRACK_LORE["Sonoma Raceway"]`.
 
 ---
 

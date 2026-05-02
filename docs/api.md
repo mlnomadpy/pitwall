@@ -1,11 +1,16 @@
 # API — Pitwall HTTP Bridge
 
-The bridge (`tools/pitwall_bridge.py`) is the **Tier 1 warm path** for the Flutter Pixel 10 app and the canonical integration surface for any external client (telemetry adapters, dashboards, replay tools). It runs locally on `127.0.0.1:8765`, wraps the full Python coaching stack (`sonic_model`, `coach_engine`, `track_loader`), and persists session state to DuckDB.
+The bridge (`src/pitwall/__main__.py`) is the **central HTTP surface** for the Vue PWA, telemetry adapters, and any external client (dashboards, replay tools). It runs locally on `127.0.0.1:8765`, wraps the full Python coaching stack (`sonic_model`, `coach_engine`, `session_analyzer`, ADK agents), and persists session state to DuckDB. Currently serving **56 endpoints** across three tiers:
+
+- **Hot path (<50 ms):** `/analyze` burst — `sonic_model` + `RuleCoach` reflexive cues
+- **Warm path (<100 ms):** `/coach/brief`, `/coach/debrief` — `LitertCoach` (Gemma 4 E2B)
+- **Paddock path (2–15 s):** `/coach/ask` — 18 ADK agents (Gemma 4 E4B via `lit serve`)
 
 ```
-client (Flutter / curl / Termux) ──► HTTP :8765 ──► sonic_model.compute_cues  ─┐
+client (Vue PWA / curl / Termux) ──► HTTP :8765 ──► sonic_model.compute_cues  ─┐
                                             └────► coach_engine.propose       ├─► /analyze response
-                                            └────► duckdb (sessions/laps/notes)
+                                            └────► adk_agents.run_adk()      │
+                                            └────► duckdb (sessions/laps/notes/traces)
 ```
 
 See [ADR-010](adr/010-http-bridge-warm-path.md) for the design rationale.
@@ -16,21 +21,21 @@ See [ADR-010](adr/010-http-bridge-warm-path.md) for the design rationale.
 
 ```bash
 pip3 install flask duckdb requests python-can cantools     # one-time
-python3 tools/pitwall_bridge.py                            # uses default track + auto coach
+python3 -m src.pitwall                            # uses default track + auto coach
 ```
 
 Common variants:
 
 ```bash
 # Force the rule coach (no LLM dependency)
-python3 tools/pitwall_bridge.py --coach rule
+python3 -m src.pitwall --coach rule
 
 # Force on-device LiteRT-LM inference (Gemma 4 E2B via MediaPipe Genai)
-python3 tools/pitwall_bridge.py --coach litert \
+python3 -m src.pitwall --coach litert \
     --litert-model ~/storage/shared/Pitwall/models/gemma-4-E2B-it.task
 
 # Tune phrasing per pod
-python3 tools/pitwall_bridge.py --driver-level beginner
+python3 -m src.pitwall --driver-level beginner
 ```
 
 Emulator tunnel:
@@ -54,19 +59,19 @@ The bridge can spawn an in-process [python-can](https://python-can.readthedocs.i
 
 ```bash
 # Cross-platform dev / CI: virtual bus, no kernel modules required
-python3 tools/pitwall_bridge.py --can-channel pitwall_dev
+python3 -m src.pitwall --can-channel pitwall_dev
 
 # In another terminal — replay a real VBO as CAN frames at 2× realtime
-python3 tools/can_simulator.py \
+python3 src/simulator/can_simulator.py \
     --vbo "/path/Sonoma Intermediate - 1_47.5.vbo" \
     --channel pitwall_dev --speed 2.0
 
 # Linux dev with virtual CAN kernel module
 sudo modprobe vcan && sudo ip link add dev vcan0 type vcan && sudo ip link set up vcan0
-python3 tools/pitwall_bridge.py --can-interface socketcan --can-channel vcan0
+python3 -m src.pitwall --can-interface socketcan --can-channel vcan0
 
 # Production: USB-CAN adapter (CANable Pro / Macchina M2) on the Pixel via Termux
-python3 tools/pitwall_bridge.py \
+python3 -m src.pitwall \
     --can-interface slcan --can-channel /dev/ttyACM0 \
     --can-dbc data/dbc/pitwall.dbc --can-dbc data/dbc/bmw_e46_m3.dbc
 ```
@@ -97,7 +102,7 @@ Liveness probe and engine status.
 
 ### `POST /analyze`
 
-The main coaching endpoint. Receives a telemetry burst from `AntigravityPipeline.kt` and returns coaching text + audio cues + a rally-style pace note.
+The main coaching endpoint. Receives a telemetry burst from the Vue PWA, CAN reader, or any HTTP client and returns coaching text + audio cues + a rally-style pace note.
 
 **Request body** (subset; extra fields ignored):
 
@@ -169,7 +174,7 @@ Parse a `.vbo` file from disk, create a `sessions` row, persist every frame into
 - `409` — the requested `session_id` already has frames (idempotent guard). Use a different `session_id` or delete first.
 - `503` — DuckDB unavailable.
 
-The bulk equivalent for a directory of VBOs is `tools/bulk_import_sonoma_vbos.py`, which calls this same path internally per file.
+The bulk equivalent for a directory of VBOs is `scripts/bulk_import_sonoma_vbos.py`, which calls this same path internally per file.
 
 ### Session management
 
@@ -245,7 +250,7 @@ Read lap history. Without `session_id`, returns the most recent `limit` laps acr
 
 ## DuckDB schema
 
-The bridge initialises three tables on first use (`tools/pitwall_sessions.duckdb`):
+The bridge initialises three tables on first use (`pitwall_sessions.duckdb`):
 
 ```sql
 CREATE TABLE sessions (
@@ -294,7 +299,7 @@ The Flutter app consumes coaching from one source — the bridge. Per [ADR-013](
 
 | Tier | Transport | Latency | Requires |
 |---|---|---|---|
-| 1 | Bridge `127.0.0.1:8765/analyze` | < 50 ms | Bridge running (`tools/pitwall_bridge.py`) |
+| 1 | Bridge `127.0.0.1:8765/analyze` | < 50 ms | Bridge running (`src/pitwall/__main__.py`) |
 | 2 | Mock | 0 ms | Always works (used in tests / when bridge is unreachable) |
 
 The bridge runs the full `sonic_model` + `coach_engine` pipeline locally. With `--coach litert`, it executes Gemma 4 E2B inference in-process via MediaPipe Genai — no cloud round-trip, no API quota.
@@ -312,8 +317,8 @@ The bridge runs the full `sonic_model` + `coach_engine` pipeline locally. With `
 ## Tested clients
 
 - Flutter Pixel 10 app (`flutter/lib/platform/pitwall_channel.dart` → Kotlin `MessageArbiter`).
-- `python3 tools/pitwall_bridge.py` smoke test: 5 synthetic bursts produce one valid pace note before the 3-second arbiter cooldown silences the rest (works as designed).
-- `python3 tools/smoke_test_endpoints.py` end-to-end: ingests the Sonoma Intermediate VBO (8273 frames, 6.83 cumulative laps), streams 4 tall-store CAN-style signals into the ADR-015 sink, and asserts shape on every documented endpoint. 51/51 assertions green.
+- `python3 -m src.pitwall` smoke test: 5 synthetic bursts produce one valid pace note before the 3-second arbiter cooldown silences the rest (works as designed).
+- `python3 tests/test_endpoints_smoke.py` end-to-end: ingests the Sonoma Intermediate VBO (8273 frames, 6.83 cumulative laps), streams 4 tall-store CAN-style signals into the ADR-015 sink, and asserts shape on every documented endpoint. 51/51 assertions green.
 - `pitwall_app.py --simple --replay <vbo>` runs the same `coach_engine` in-process for development without the bridge.
 
 ---
@@ -343,7 +348,7 @@ All eleven of these endpoints follow a common contract:
 
 ### Lap detection model
 
-Several endpoints (all the lap-time and sector ones) need to slice the per-frame stream into laps. The backend (`tools/pitwall_bridge.py:_detect_laps`) tries three strategies in order, picking the first that yields any laps. This handles the three real shapes of session data: cumulative-distance Racelogic VBOs, per-lap-resetting synthetic frames, and any data without reliable distance integration.
+Several endpoints (all the lap-time and sector ones) need to slice the per-frame stream into laps. The backend (`src/pitwall/__main__.py:_detect_laps`) tries three strategies in order, picking the first that yields any laps. This handles the three real shapes of session data: cumulative-distance Racelogic VBOs, per-lap-resetting synthetic frames, and any data without reliable distance integration.
 
 **Strategy 1 — cumulative distance (Racelogic VBO, default).** Used when the final frame's `distance_m > 1.5 × track_length`. Lap boundary = `floor(d / track_length)` increments. Each multiple of `track_length` is one full lap; the pre-first-boundary segment (out-lap from pit lane) is discarded.
 

@@ -1,6 +1,6 @@
 # Telemetry Pipeline
 
-The pipeline has three stages: **ingestion** (sensors → raw data), **fusion** (raw → confidence-annotated frame), and **distribution** (frame → hot path + Antigravity burst).
+The pipeline has three stages: **ingestion** (sensors → raw data), **fusion** (raw → confidence-annotated frame), and **distribution** (frame → hot path + DuckDB persistence).
 
 ---
 
@@ -27,9 +27,9 @@ Professional-grade GPS + IMU. **Actual VBO output is 10Hz** (sample period 0.100
 !!! note "10Hz, Not 20Hz"
     The Racelogic hardware captures at 20Hz internally, but the VBO file output is 10Hz (sample period 0.100s confirmed across all 183 files). All latency budgets, frame rates, and model inference timings are based on 10Hz = 100ms per frame.
 
-### OBDLink MX
+### USB-CAN Adapter
 
-CAN bus extraction via Bluetooth. Verified across 183 VBO sessions:
+CAN bus extraction via USB (`python-can` + `cantools`). Signal ranges verified across 183 VBO sessions (originally recorded with OBDLink MX; the as-shipped architecture uses USB-CAN adapters for lower latency):
 
 | Signal | Rate | Range (Observed) | Confidence | Status |
 |--------|------|------------------|------------|--------|
@@ -52,9 +52,9 @@ CAN bus extraction via Bluetooth. Verified across 183 VBO sessions:
 **Connection:** Bluetooth SPP to Pixel 10.
 
 !!! warning "7 Broken Signals"
-    Gear, Clutch, AFR, EGT, Vehicle Speed, Head Temp, and Brake_Press_(Calc) are constant or mislabeled across all 183 files. These CAN IDs are not mapped in the OBDLink configuration for this car (BMW M3 S54). Gear must be derived from RPM/speed ratio.
+    Gear, Clutch, AFR, EGT, Vehicle Speed, Head Temp, and Brake_Press_(Calc) are constant or mislabeled across all 183 files. These CAN IDs are not mapped in the DBC configuration for this car (BMW M3 S54). Gear must be derived from RPM/speed ratio.
 
-**Confidence adjustment:** If Bluetooth connection drops, all CAN signals marked stale within 100ms. Reconnection triggers 2-second validation before restoring confidence.
+**Confidence adjustment:** If the USB-CAN adapter disconnects, all CAN signals are marked stale within 100ms. Reconnection triggers 2-second validation before restoring confidence.
 
 ---
 
@@ -65,8 +65,8 @@ Even with professional hardware, fusion adds value.
 ```mermaid
 graph TB
     subgraph Speed Fusion
-        RL_SPD[Racelogic Speed<br/>20Hz, 0.95 conf] --> KF[Kalman Filter<br/>Racelogic weight 0.7<br/>OBDLink weight 0.3]
-        OBD_SPD[OBDLink Speed<br/>via wheel speeds<br/>50Hz, 0.95 conf] --> KF
+        RL_SPD[Racelogic Speed<br/>10Hz, 0.95 conf] --> KF[Kalman Filter<br/>Racelogic weight 0.7<br/>CAN weight 0.3]
+        OBD_SPD[USB-CAN Speed<br/>via wheel speeds<br/>10Hz, 0.95 conf] --> KF
         KF --> SPEED[Fused Speed<br/>50Hz, conf 0.95]
     end
 
@@ -82,7 +82,7 @@ graph TB
     end
 
     subgraph Input Pass-Through
-        OBD_IN[OBDLink CAN<br/>throttle, brake, RPM,<br/>gear, steering] --> PASS[Pass-through<br/>no fusion needed<br/>direct CAN = ground truth]
+        OBD_IN[USB-CAN<br/>throttle, brake, RPM,<br/>gear, steering] --> PASS[Pass-through<br/>no fusion needed<br/>direct CAN = ground truth]
         PASS --> INPUTS[Driver Inputs<br/>50Hz, conf 0.95]
     end
 
@@ -96,7 +96,7 @@ graph TB
 
 1. **Racelogic GPS in a tunnel/tree cover:** GPS drops to 5Hz, HDOP spikes. Fusion detects this and reduces GPS confidence while IMU dead-reckoning maintains smooth position.
 2. **Road surface vibration:** Even Racelogic's IMU picks up bumps. Butterworth filter at 12Hz removes road noise while preserving real driving dynamics (which peak at ~5Hz for aggressive cornering).
-3. **Racelogic vs OBDLink speed disagreement:** If one sensor has a momentary glitch, the Kalman filter smooths through it instead of passing a spike to the coaching engine.
+3. **Racelogic vs CAN speed disagreement:** If one sensor has a momentary glitch, the Kalman filter smooths through it instead of passing a spike to the coaching engine.
 
 ### Confidence-Annotated Frame
 
@@ -107,7 +107,7 @@ Every signal carries metadata (from Pitwall ADR-001, adapted for pro hardware):
 class SignalValue:
     value: float
     confidence: float    # 0.0-1.0
-    source: str          # "racelogic:gps", "racelogic:imu", "obdlink:can"
+    source: str          # "racelogic:gps", "racelogic:imu", "usb_can:can"
     hz: float            # actual update rate
     stale: bool          # no update in >2x expected period
 
@@ -126,7 +126,7 @@ class TelemetryFrame:
     g_lat: SignalValue
     g_long: SignalValue
     
-    # Driver inputs (OBDLink CAN, direct)
+    # Driver inputs (USB-CAN, direct)
     throttle: SignalValue
     brake: SignalValue
     rpm: SignalValue
@@ -159,31 +159,30 @@ async def on_frame(frame: TelemetryFrame):
     if gemma_response:
         await arbiter.submit(gemma_response)
     
-    # Buffer for Antigravity burst
+    # Buffer for DuckDB persistence
     burst_buffer.append(frame)
 ```
 
-Frame rate: 50Hz (every 20ms). The hot path evaluates every frame.
+Frame rate: 10Hz (every 100ms). The hot path evaluates every frame.
 
-### Antigravity Burst (Cloud, store-and-forward)
+### DuckDB Persistence (Local, in-process)
 
-Telemetry frames are buffered locally and sent to Vertex AI in bursts.
+Telemetry frames are persisted locally to DuckDB as they arrive. No cloud dependency.
 
 ```mermaid
 graph LR
-    FRAMES[Fused Frames<br/>50Hz continuous] --> BUFFER[Local Buffer<br/>ring buffer, 10s window]
-    BUFFER -->|every 5-10s| BURST[Antigravity Burst<br/>~500 frames per burst]
-    BURST -->|5G when available| VERTEX[Vertex AI Ingestion<br/>parse + store + trigger Gemini]
+    FRAMES[Fused Frames<br/>10Hz continuous] --> BUFFER[Frame Buffer<br/>batch insert every 100ms]
+    BUFFER --> DUCK[DuckDB In-Process<br/>telemetry table<br/>session-local storage]
     
-    subgraph Reliability
-        BUFFER -->|5G unavailable| PERSIST[Persist to Disk<br/>guaranteed no data loss]
-        PERSIST -->|5G restored| BURST
+    subgraph Analytics
+        DUCK --> LITERT[LitertCoach<br/>warm-path analysis<br/>Gold Standard comparison]
+        DUCK --> ANALYTICS[Session Analytics<br/>lap times, corners,<br/>scorecard, highlights]
     end
 ```
 
-**Burst cadence:** Every 5-10 seconds (configurable). Contains all frames since last burst.
+**Persistence cadence:** Every 100ms (configurable via `--can-flush-ms`). Frames are batch-inserted into the `telemetry` wide table.
 
-**Reliability guarantee:** If 5G is unavailable (common at racetracks), bursts are persisted to local storage and sent when connectivity returns. The warm path coaching arrives late, but no telemetry is lost.
+**Reliability guarantee:** DuckDB runs in-process with zero network dependency. Session data is persisted to disk and survives process restarts.
 
 **Burst format:**
 
@@ -202,7 +201,7 @@ graph LR
       "timestamp": 1716483600.0,
       "speed": {"value": 42.5, "confidence": 0.95, "source": "fused:kalman"},
       "g_lat": {"value": 0.85, "confidence": 0.95, "source": "racelogic:imu"},
-      "brake": {"value": 72.0, "confidence": 0.95, "source": "obdlink:can"},
+      "brake": {"value": 72.0, "confidence": 0.95, "source": "usb_can:can"},
       ...
     }
   ]
@@ -213,7 +212,7 @@ graph LR
 
 ## Local Analytics: DuckDB
 
-In addition to feeding the hot path and Antigravity, the fusion engine maintains a DuckDB in-process database for local analytics:
+In addition to feeding the hot path, the fusion engine maintains a DuckDB in-process database for all analytics and warm-path coaching:
 
 ```python
 # Append every frame to DuckDB in-memory table
@@ -229,11 +228,11 @@ duckdb.execute("""
 - Corner-by-corner metrics for the event-sourced driver profile
 - Post-session aggregation that feeds the driver profile events
 
-**Why DuckDB alongside Vertex AI?** DuckDB runs locally with zero latency for on-device queries. Vertex AI stores cross-session, cross-pod data in the cloud. They serve different purposes:
+**DuckDB is the sole persistence layer.** All analytics, coaching, and session queries run locally with zero latency. There is no cloud dependency.
 
 | Query | Engine | Latency |
 |-------|--------|---------|
 | "What's my rolling max gLat?" | DuckDB | <1ms |
 | "How does this lap compare to my best?" | DuckDB | <10ms |
-| "How does Driver A compare to Driver B across all sessions?" | Vertex AI | 2-5s |
-| "Generate the post-session debrief" | Gemini 3.0 + Vertex AI data | 5-10s |
+| "How does Driver A compare to Driver B across all sessions?" | DuckDB | <100ms |
+| "Generate the post-session debrief" | LitertCoach + DuckDB data | 2–15s |

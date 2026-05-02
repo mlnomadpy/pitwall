@@ -306,7 +306,7 @@ Each widget then calls `/session/$sid/signals?names=oil_temp_c&axis=gps&rate_hz=
 | New table `session_capabilities` | Created at bridge startup; populated by `_compute_capabilities(session_id)` at end of `/session/import` and `/session/<sid>/frames` (last batch) |
 | New endpoints | `/signals/registry`, `/session/<sid>/capabilities`, `/session/<sid>/signals` |
 | `coach_engine.py` | Add `@coach_rule(requires=[...], min_rates={...})` decorator; gate rule activation on capabilities at session-load |
-| `tools/pitwall_bridge.py` | New `_signal_id(name)` helper (registry lookup + insert-on-novel); new ingest path `POST /session/<sid>/signals` for non-12-field data |
+| `src/pitwall/__main__.py` | New `_signal_id(name)` helper (registry lookup + insert-on-novel); new ingest path `POST /session/<sid>/signals` for non-12-field data |
 | `data/registry/obd2_pids.json` | New static seed file with the standard OBD-II mode 01 PID catalog |
 | `data/dbc/` (optional) | Per-car DBC files; ingest-time loader pulls names + units |
 | Existing wide ingest paths | Unchanged — `/session/<sid>/frames` keeps writing the 12-field table; per-frame the bridge also fans out to `telemetry_signals` only for fields not in the wide schema (no-op today, becomes useful when adapters start sending extra fields) |

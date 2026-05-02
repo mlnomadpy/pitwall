@@ -152,7 +152,7 @@ Sonoma's full 12-turn 2.52-mile circuit underwent its first full repave in 23 ye
 - Any reference dataset captured pre-2024 has *materially lower grip* than the current surface.
 - Brake-point and apex-speed gold standards from pre-2024 may be slow by ~2.5 s per lap on the repaved surface for similar cars.
 - *"Dirty off-line"* is more pronounced on the new surface — the rubbered groove is narrower until enough laps run ([NASCAR.com](https://www.nascar.com/news-media/2024/03/28/drivers-offer-feedback-on-sonoma-repave-at-goodyear-test-a-whole-new-ballgame/)).
-- **Implication for `data/reference/sonoma_gold.json`**: source-file date matters. Pre-2024 reference = "achievable on the old surface"; 2024+ field tests should use a repave-era reference if available. This fact is now baked into `src/simulator/sonoma.py:SURFACE_HISTORY` and the system-prompt lore.
+- **Implication for `data/reference/sonoma_gold.json`**: source-file date matters. Pre-2024 reference = "achievable on the old surface"; 2024+ field tests should use a repave-era reference if available. This fact is now baked into `src/pitwall/features/sonoma.py:SURFACE_HISTORY` and the system-prompt lore.
 
 ## A.8 Named driver-error patterns (Sonoma-cited)
 
@@ -230,9 +230,9 @@ The coaching system can use Part C content as *hypotheses for future field-test 
 
 The previous version of this document (compiled earlier on 2026-04-28) cited [Track Mustangs forum — Cold Weather Track Advice](https://trackmustangsonline.com/threads/cold-weather-track-advice.15474/) under "Morning fog & cool-tire warm-up routine." On audit, the forum thread is **about cold-weather track driving in general, not Sonoma**. Quotes like *"first 4 laps felt like ice"*, *"+2 psi cold setting"*, and *"R-compound tires above 50°F"* are universal cold-tire advice attributed to no specific track.
 
-Sonoma's morning fog pattern is a real and well-documented phenomenon ([AccuWeather — Sonoma Raceway forecast](https://www.accuweather.com/en/us/sonoma-raceway/95476/weather-forecast/35265_poi)). The pattern itself is Sonoma-specific (see `src/simulator/sonoma.py:WEATHER_PHASES`), but the *quoted forum content* is not.
+Sonoma's morning fog pattern is a real and well-documented phenomenon ([AccuWeather — Sonoma Raceway forecast](https://www.accuweather.com/en/us/sonoma-raceway/95476/weather-forecast/35265_poi)). The pattern itself is Sonoma-specific (see `src/pitwall/features/sonoma.py:WEATHER_PHASES`), but the *quoted forum content* is not.
 
-Action taken: the cold-weather forum citation has been removed. The Sonoma-fog-specific framing now lives in `src/simulator/sonoma.py:WEATHER_PHASES["morning_fog"]` with the coaching note *"First session of the day — surface is cool and possibly damp. Build pace gradually; T6 carousel and T11 hairpin grip is below normal."* Part B.5 above acknowledges generic cold-tire HPDE practice as a universal principle, not a Sonoma manoeuvre.
+Action taken: the cold-weather forum citation has been removed. The Sonoma-fog-specific framing now lives in `src/pitwall/features/sonoma.py:WEATHER_PHASES["morning_fog"]` with the coaching note *"First session of the day — surface is cool and possibly damp. Build pace gradually; T6 carousel and T11 hairpin grip is below normal."* Part B.5 above acknowledges generic cold-tire HPDE practice as a universal principle, not a Sonoma manoeuvre.
 
 ---
 
@@ -280,4 +280,4 @@ This doc complements but does not replace:
 - [`sonoma_track_intelligence.md`](sonoma_track_intelligence.md) — per-corner brake refs and base technique tips
 - [`trod_sonoma_session.md`](trod_sonoma_session.md) — verbatim T-Rod coaching transcript
 - [`markers.md`](markers.md) — 16 named landmark markers with kinds and source attribution
-- [`adr/014-sonoma-as-the-product.md`](adr/014-sonoma-as-the-product.md) — the system-design ADR that consumes Part A as canonical Sonoma vocabulary in `src/simulator/sonoma.py:SYSTEM_PROMPT_LORE`
+- [`adr/014-sonoma-as-the-product.md`](adr/014-sonoma-as-the-product.md) — the system-design ADR that consumes Part A as canonical Sonoma vocabulary in `src/pitwall/features/sonoma.py:SYSTEM_PROMPT_LORE`
