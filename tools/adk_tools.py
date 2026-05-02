@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -50,9 +51,21 @@ def _q(sql: str, params: list | None = None) -> list[dict[str, Any]]:
 
 # ── 1. General query tool ──────────────────────────────────────────────────────
 
+_QUERY_ALLOWED_PREFIXES = ("SELECT", "WITH", "PRAGMA", "DESCRIBE", "SHOW", "EXPLAIN")
+_TOP_LEVEL_LIMIT_RE = re.compile(r"\bLIMIT\s+\d+\s*(?:OFFSET\s+\d+)?\s*;?\s*$", re.IGNORECASE)
+
+
 @_adk_tool
 def query_pitwall_db(sql: str) -> list[dict[str, Any]]:
-    """Query pitwall session data. Read-only SELECT only.
+    """Query pitwall session data. Read-only.
+
+    Allowed prefixes: SELECT, WITH (CTE), PRAGMA, DESCRIBE, SHOW, EXPLAIN.
+    Anything else (INSERT/UPDATE/DELETE/CREATE/ATTACH/COPY) is rejected.
+
+    A row cap of 500 is enforced by wrapping the query in
+    ``SELECT * FROM (<sql>) AS _capped LIMIT 500`` unless the query already
+    ends in a top-level LIMIT clause. Wrapping is safer than concat-suffix —
+    a subquery LIMIT 1 followed by no outer limit no longer escapes the cap.
 
     Tables:
       laps(session_id, lap_number, lap_time_s, avg_speed_kmh, max_combo_g, coast_pct)
@@ -64,15 +77,20 @@ def query_pitwall_db(sql: str) -> list[dict[str, Any]]:
       driver_events(driver_id, session_id, corner, event_kind, value_num, value_str)
       llm_friction(session_id, role, latency_ms, fell_back, emotion, ts)
       conversations(session_id, driver_id, role, text, focus_items, emotion, recorded_at)
+      agent_traces(trace_id, pitwall_sid, agent_name, event_type, detail, latency_ms, success, ts)
 
     Always filter by session_id or driver_id to avoid full-table scans.
     """
-    stripped = sql.strip().upper()
-    if not stripped.startswith("SELECT"):
-        return [{"error": "Only SELECT statements are permitted"}]
-    if "LIMIT" not in stripped:
-        sql = sql.rstrip().rstrip(";") + " LIMIT 500"
-    return _q(sql)
+    stripped = sql.strip().rstrip(";").strip()
+    if not stripped:
+        return [{"error": "Empty SQL"}]
+    head = stripped.split(None, 1)[0].upper()
+    if head not in _QUERY_ALLOWED_PREFIXES:
+        return [{"error": f"Statement '{head}' is not allowed (read-only tool)"}]
+    if not _TOP_LEVEL_LIMIT_RE.search(stripped) and head in ("SELECT", "WITH"):
+        wrapped = f"SELECT * FROM ({stripped}) AS _capped LIMIT 500"
+        return _q(wrapped)
+    return _q(stripped)
 
 
 # ── 2. Lap delta tool ──────────────────────────────────────────────────────────
@@ -582,34 +600,79 @@ def get_goal_targets(driver_id: str) -> dict[str, Any]:
 
 # ── 13. Track variance map tool ────────────────────────────────────────────────
 
+_CORNER_BOUNDS_FALLBACK: dict[str, tuple[float, float]] = {
+    "Turn 1":  (0,    150),
+    "Turn 2":  (200,  380),
+    "Turn 3":  (420,  560),
+    "Turn 4":  (600,  780),
+    "Turn 5":  (830,  980),
+    "Turn 6":  (1050, 1450),
+    "Turn 7":  (1500, 1700),
+    "Turn 8":  (1720, 1900),
+    "Turn 9":  (1950, 2100),
+    "Turn 10": (2200, 2550),
+    "Turn 11": (2750, 3100),
+}
+
+_corner_bounds_cache: dict[str, tuple[float, float]] | None = None
+
+
+def _load_corner_bounds() -> dict[str, tuple[float, float]]:
+    """Read Sonoma corner entry/exit distances from data/tracks/sonoma.json.
+
+    Cached for the life of the process. Falls back to the hard-coded table
+    if the JSON is missing or malformed so this never breaks pure-tool tests.
+    """
+    global _corner_bounds_cache
+    if _corner_bounds_cache is not None:
+        return _corner_bounds_cache
+    try:
+        import sonoma as _sonoma
+    except ImportError:
+        _corner_bounds_cache = dict(_CORNER_BOUNDS_FALLBACK)
+        return _corner_bounds_cache
+
+    candidates = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", _sonoma.TRACK_JSON_RELATIVE)),
+        os.path.join(_SIM_DIR, "sonoma.json"),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as fh:
+                doc = json.load(fh)
+        except Exception:
+            continue
+        bounds: dict[str, tuple[float, float]] = {}
+        for c in doc.get("corners", []) or []:
+            name = c.get("name")
+            entry = (c.get("entry") or {}).get("distance")
+            exit_ = (c.get("exit") or {}).get("distance")
+            if name and entry is not None and exit_ is not None:
+                bounds[name] = (float(entry), float(exit_))
+        if bounds:
+            _corner_bounds_cache = bounds
+            return _corner_bounds_cache
+    _corner_bounds_cache = dict(_CORNER_BOUNDS_FALLBACK)
+    return _corner_bounds_cache
+
+
 @_adk_tool
 def get_track_variance_map(session_id: str) -> dict[str, Any]:
     """Corner-by-corner consistency map from telemetry speed variance.
 
     High variance = inconsistent through that corner.
     Low variance  = repeatable but not necessarily fast.
-    Uses Sonoma's named corner distance bounds.
+    Corner distance bounds come from data/tracks/sonoma.json (canonical source);
+    falls back to a hard-coded table only if the JSON isn't reachable.
     """
     try:
         import sonoma as _sonoma
     except ImportError:
         return {"error": "sonoma not importable"}
 
-    # Sonoma corner distance bounds (approximate, from track geometry)
-    CORNER_BOUNDS = {
-        "Turn 1":  (0,    150),
-        "Turn 2":  (200,  380),
-        "Turn 3":  (420,  560),
-        "Turn 4":  (600,  780),
-        "Turn 5":  (830,  980),
-        "Turn 6":  (1050, 1450),
-        "Turn 7":  (1500, 1700),
-        "Turn 8":  (1720, 1900),
-        "Turn 9":  (1950, 2100),
-        "Turn 10": (2200, 2550),
-        "Turn 11": (2750, 3100),
-    }
-
+    CORNER_BOUNDS = _load_corner_bounds()
     leverage = _sonoma.LAP_TIME_LEVERAGE
     results  = []
     conn = _db()

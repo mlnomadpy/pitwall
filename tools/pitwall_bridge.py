@@ -112,6 +112,7 @@ try:
         HAS_ADK as _adk_loaded,
         AGENT_REGISTRY as _adk_agent_registry,
         run_adk as _run_adk,
+        stream_adk as _stream_adk,
         get_pending_traces as _get_adk_traces,
         reset_driver_session as _reset_adk_session,
     )
@@ -122,6 +123,7 @@ try:
         print("⚠  adk_agents imported but google-adk not installed — ADK disabled")
 except ImportError as _e:
     print(f"⚠  adk_agents not importable ({_e}) — ADK disabled")
+    _stream_adk = None  # type: ignore[assignment]
 
 # ── Global state ───────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -2170,8 +2172,8 @@ def coach_debrief():
                 f"and telemetry highlights for this session. "
                 f"Structure: 1 highlight sentence, then a FOCUS list of 3 items for next session."
             )
-            adk_narrative = _run_adk(adk_prompt)
-            _drain_adk_traces(pitwall_sid=sid)
+            adk_narrative, _adk_sid = _run_adk(adk_prompt, user_id=driver_id or "driver")
+            _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid)
             import re as _re
             _em = _re.search(r"\[EMOTION:(\w+)\]", adk_narrative)
             if _em:
@@ -2180,7 +2182,8 @@ def coach_debrief():
             bundle["narrative"] = adk_narrative
             bundle["narrative_source"] = "adk"
         except Exception as _e:
-            print(f"⚠  ADK debrief failed ({_e}), keeping analyze_session narrative")
+            print(f"⚠  ADK debrief failed ({type(_e).__name__}: {_e}), "
+                  f"keeping analyze_session narrative")
 
     with _BUNDLES_LOCK:
         _session_bundles[sid] = bundle
@@ -3416,8 +3419,8 @@ def coach_brief():
                 f"Danger zones today: {danger_today or 'none'}. "
                 f"Keep the brief to 2–4 sentences followed by a FOCUS list of 3 items."
             )
-            narrative = _run_adk(adk_prompt)
-            _drain_adk_traces()
+            narrative, _adk_sid = _run_adk(adk_prompt, user_id=driver_id or "driver")
+            _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid_param or "")
             focus = markers_selected[:3] or []
             # Extract [EMOTION:tag] if present, same convention as LitertCoach
             import re as _re
@@ -3426,7 +3429,8 @@ def coach_brief():
                 emotion = _em.group(1)
                 narrative = _re.sub(r"\[EMOTION:\w+\]\s*", "", narrative).strip()
         except Exception as _e:
-            print(f"⚠  ADK brief failed ({_e}), falling back to LitertCoach")
+            print(f"⚠  ADK brief failed ({type(_e).__name__}: {_e}), "
+                  f"falling back to LitertCoach")
             HAS_ADK_THIS_REQUEST = False
         else:
             HAS_ADK_THIS_REQUEST = True
@@ -4188,12 +4192,18 @@ def _qa_cleanup_stale() -> None:
         _qa_timestamps.pop(k, None)
 
 
-def _drain_adk_traces(pitwall_sid: str = "") -> None:
-    """Flush buffered ADK agent traces to the agent_traces DuckDB table."""
+def _drain_adk_traces(adk_session_id: str | None = None,
+                      pitwall_sid: str = "") -> None:
+    """Flush buffered ADK agent traces to the agent_traces DuckDB table.
+
+    When ``adk_session_id`` is provided, only rows for that ADK session are
+    drained. Without it, every buffered trace is consumed — only safe when no
+    other Flask request can be running ADK in parallel.
+    """
     if not HAS_ADK or not HAS_DUCKDB:
         return
     try:
-        traces = _get_adk_traces()
+        traces = _get_adk_traces(adk_session_id)
         if not traces:
             return
         with _db_lock:
@@ -4236,6 +4246,7 @@ def coach_ask():
     driver_id = data.get("driver_id", "")
     session_id = data.get("session_id", "")
     question = data.get("question", "").strip()
+    intent_override = (data.get("intent") or "").strip().lower()
 
     if not question:
         return jsonify({"error": "question is required"}), 400
@@ -4257,16 +4268,17 @@ def coach_ask():
                 for t in recent
             ) + "\n\n"
 
-    prompt = (
-        f"Driver: {driver_id or 'unknown'}. "
-        f"Session context: {session_id or 'general'}.\n"
-        f"{history_text}"
-        f"Driver question: {question}"
-    )
+    prompt_lines = [
+        f"Driver: {driver_id or 'unknown'}.",
+        f"Session context: {session_id or 'general'}.",
+    ]
+    if intent_override:
+        prompt_lines.append(f"[intent_override:{intent_override}]")
+    prompt = "\n".join(prompt_lines) + "\n" + history_text + f"Driver question: {question}"
 
     try:
-        answer = _run_adk(prompt)
-        _drain_adk_traces(pitwall_sid=session_id)
+        answer, _adk_sid = _run_adk(prompt, user_id=driver_id or "driver")
+        _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=session_id)
 
         import re as _re
         _em = _re.search(r"\[EMOTION:(\w+)\]", answer)
@@ -4286,7 +4298,7 @@ def coach_ask():
             "turn": turn_number,
         })
     except Exception as e:
-        return jsonify({"error": f"ADK agent error: {e}"}), 500
+        return jsonify({"error": f"ADK agent error: {type(e).__name__}: {e}"}), 500
 
 
 @app.route("/coach/ask/end", methods=["POST"])
@@ -4328,6 +4340,99 @@ def coach_ask_end():
                 conn.close()
 
     return jsonify({"flushed": flushed, "qa_key": qa_key})
+
+
+@app.route("/coach/ask/stream", methods=["POST"])
+def coach_ask_stream():
+    """Server-Sent Events streaming variant of /coach/ask.
+
+    Yields {"delta": "..."} JSON payloads as the model produces tokens, then
+    a final {"done": true, "answer": "...", "emotion": "..."} event. The Vue
+    PWA can render tokens as they arrive instead of staring at a 12-second
+    spinner during a debrief.
+
+    Body: {"driver_id": "...", "session_id": "...", "question": "...",
+           "intent": "<optional override>"}
+    """
+    if not HAS_ADK or _stream_adk is None:
+        return jsonify({"error": "ADK streaming unavailable"}), 503
+
+    data = request.get_json(force=True, silent=True) or {}
+    driver_id = data.get("driver_id", "")
+    session_id = data.get("session_id", "")
+    question = data.get("question", "").strip()
+    intent_override = (data.get("intent") or "").strip().lower()
+
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    qa_key = f"{driver_id}:{session_id}"
+    import time as _time
+    with _qa_lock:
+        _qa_cleanup_stale()
+        _qa_timestamps[qa_key] = _time.time()
+        history = list(_qa_histories.setdefault(qa_key, []))
+
+    history_text = ""
+    if history:
+        recent = history[-6:]
+        history_text = "Conversation so far:\n" + "\n".join(
+            f"{'DRIVER' if t['role'] == 'user' else 'COACH'}: {t['text']}"
+            for t in recent
+        ) + "\n\n"
+
+    prompt_lines = [
+        f"Driver: {driver_id or 'unknown'}.",
+        f"Session context: {session_id or 'general'}.",
+    ]
+    if intent_override:
+        prompt_lines.append(f"[intent_override:{intent_override}]")
+    prompt = "\n".join(prompt_lines) + "\n" + history_text + f"Driver question: {question}"
+
+    def generate():
+        import re as _re
+        accum = ""
+        try:
+            for chunk in _stream_adk(prompt, user_id=driver_id or "driver"):
+                if not chunk:
+                    continue
+                # ADK may yield accumulating text or deltas; emit the new tail
+                # so the client always sees forward progress without dupes.
+                if chunk.startswith(accum) and len(chunk) > len(accum):
+                    delta = chunk[len(accum):]
+                    accum = chunk
+                else:
+                    delta = chunk
+                    accum += chunk
+                yield f"data: {json.dumps({'delta': delta})}\n\n"
+
+            _em = _re.search(r"\[EMOTION:(\w+)\]", accum)
+            emotion = _em.group(1) if _em else "neutral"
+            answer = _re.sub(r"\[EMOTION:\w+\]\s*", "", accum).strip()
+
+            with _qa_lock:
+                hist = _qa_histories.setdefault(qa_key, [])
+                hist.append({"role": "user", "text": question})
+                hist.append({"role": "assistant", "text": answer, "emotion": emotion})
+
+            yield ("data: " + json.dumps({
+                "done": True, "answer": answer, "emotion": emotion,
+                "qa_key": qa_key,
+            }) + "\n\n")
+        except Exception as exc:
+            yield ("event: error\ndata: " + json.dumps({
+                "error": f"{type(exc).__name__}: {exc}"
+            }) + "\n\n")
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # nginx: don't buffer
+            "Connection": "keep-alive",
+        },
+    )
 
 
 @app.route("/coach/agents", methods=["GET"])
