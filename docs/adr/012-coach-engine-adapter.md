@@ -8,14 +8,14 @@
 
 The Pitwall pipeline grew two coaching surfaces in parallel:
 
-1. **`sonic_model.compute_cues()`** — rule-driven, emits `AudioCue` objects (continuous tones), used since the v1 prototype and wrapped by `tools/pitwall_bridge.py`.
+1. **`sonic_model.compute_cues()`** — rule-driven, emits `AudioCue` objects (continuous tones), used since the v1 prototype and wrapped by `src/pitwall/__main__.py`.
 2. **A verbal coach** — short, rally-style pace notes per situation ("brake at the bridge", "trail to the apex"), tunable per driver level (beginner / intermediate / pro), grounded in the Ross Bentley curriculum (PDF + intel doc).
 
 The verbal coach must run **on-device** with no cloud dependency, because cellular service at racetracks is unreliable and per-call API spend doesn't suit a free-tier deployment. The Pixel 10's Tensor TPU is the right hardware target. The deployable artifact is the **LiteRT-LM `.task`** bundle published by Google at `litert-community/gemma-4-E2B-it-litert-lm` on HuggingFace, executed via **MediaPipe Genai** (`mediapipe.tasks.python.genai.inference.LlmInference`). On Android the same `.task` file is reachable from Termux Python — the MediaPipe runtime handles backend selection (XNNPack on CPU, ML Drift on GPU, Tensor TPU when available) without us touching delegate APIs by hand.
 
 ## Decision
 
-`src/simulator/coach_engine.py` defines two implementations behind one interface:
+`src/pitwall/features/coach_engine.py` defines two implementations behind one interface:
 
 ```python
 class CoachEngine:

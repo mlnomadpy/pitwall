@@ -7,7 +7,7 @@
 
 Two parallel runtime stacks have grown side-by-side:
 
-- **Python backend** in `src/simulator/` + `tools/pitwall_bridge.py` — sensor fusion, sonic model, coach engine, pedagogical vectors, LLM clients, arbiter, DuckDB.
+- **Python backend** in `src/pitwall/features/` + `src/pitwall/__main__.py` — sensor fusion, sonic model, coach engine, pedagogical vectors, LLM clients, arbiter, DuckDB.
 - **Flutter / Kotlin frontend** in `flutter/` — Pixel 10 app with on-track HUD, paddock review screen, sensor Bluetooth I/O, audio output, **and a parallel reimplementation of sensor fusion, sonic model, message arbiter, and pedagogical vectors in Kotlin**.
 
 The duplication was useful during the merge to validate the architecture in two languages, but it creates drift risk: a coaching change has to land twice, and Bentley pedagogy / system prompts live in two places. As coaching gets richer (markers, named pace notes, LLM-grounded prompts) the cost grows.
@@ -23,7 +23,7 @@ The product team's directive on 2026-04-28 is unambiguous: **the frontend owns v
 - Session lifecycle UI: START / STOP / RECORD / REVIEW buttons that call the backend.
 - VBO file picker / replay UX (the file lives on the device; the parsing logic does not).
 
-**Backend (`src/simulator/` + `tools/pitwall_bridge.py`) responsibilities:**
+**Backend (`src/pitwall/features/` + `src/pitwall/__main__.py`) responsibilities:**
 - Sensor fusion (Kalman / Butterworth / complementary filters, confidence annotation).
 - Track loader, marker resolution, corner geometry.
 - Sonic model (rule-based + LSTM-driven `compute_cues`).

@@ -6,7 +6,7 @@ Pure domain logic with no Flask dependency. Can be unit-tested independently.
 import json
 import math
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from pitwall.state import state, SIM_DIR
@@ -455,7 +455,7 @@ def new_session_id(track_name: str | None = None) -> str:
     supply their own session_id.
     """
     slug = (track_name or "session").lower().replace(" ", "-")
-    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{slug}-{stamp}"
 
 

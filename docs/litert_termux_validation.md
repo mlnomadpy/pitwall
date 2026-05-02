@@ -122,7 +122,7 @@ Expected output on success looks like:
 The architecture in ADR-012 + ADR-013 is validated. Proceed to wire the bridge with `--coach litert`:
 
 ```bash
-python3 tools/pitwall_bridge.py --coach litert \
+python3 -m src.pitwall --coach litert \
     --litert-model ~/storage/shared/Pitwall/models/gemma-4-E2B-it.task
 ```
 

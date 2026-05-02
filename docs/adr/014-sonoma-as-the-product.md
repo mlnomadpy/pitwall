@@ -43,7 +43,7 @@ Three bodies of work land under this ADR:
 | `data/reference/sonoma_aj_trace.parquet` | Full per-frame telemetry of the Gold Standard lap. **NEW** — for delta-overlay rendering. |
 | `data/tracks/training_data/track2.json`, `track8.json` | Moved out of the active path. Kept for ML training reference. |
 
-### `src/simulator/sonoma.py` (NEW)
+### `src/pitwall/features/sonoma.py` (NEW)
 
 A module of hardcoded Sonoma constants — not data-driven, not parameterised. The things we *know* about this track:
 
@@ -137,7 +137,7 @@ Already shipped. `RuleCoach` + `LitertCoach` produce one-line pace notes per bur
 
 ---
 
-## Analysis pipeline (Python, in `src/simulator/`)
+## Analysis pipeline (Python, in `src/pitwall/features/`)
 
 Three new modules, all Sonoma-specific:
 
@@ -293,9 +293,9 @@ Post-session writes events; pre-brief reads them. Profile is computed, not store
 | `coach_engine._TRACK_LORE` (dict) | Replace with `from src.simulator.sonoma import SYSTEM_PROMPT_LORE` |
 | `--track` CLI flag in `pitwall_app.py` and bridge | Default to Sonoma; flag becomes optional override for ML reproducibility |
 | `track_loader.find_nearest_corner` etc. | API unchanged; every caller passes the canonical Sonoma path |
-| New `src/simulator/sonoma.py` | Hardcoded constants module |
-| New `src/simulator/{corner_grader,highlight_finder,session_analyzer}.py` | Analysis pipeline modules |
-| New endpoints: `/coach/brief`, `/coach/debrief`, `/session/<id>/{scorecard,highlights,map,clips}`, `/driver/<id>/profile` | Add to `tools/pitwall_bridge.py` |
+| New `src/pitwall/features/sonoma.py` | Hardcoded constants module |
+| New `src/pitwall/features/{corner_grader,highlight_finder,session_analyzer}.py` | Analysis pipeline modules |
+| New endpoints: `/coach/brief`, `/coach/debrief`, `/session/<id>/{scorecard,highlights,map,clips}`, `/driver/<id>/profile` | Add to `src/pitwall/__main__.py` |
 | New `data/tracks/sonoma_real_gps.json` | Author from OSM centerline + marker distance + reference_line trace |
 | New `data/reference/sonoma_gold.json` + `sonoma_aj_trace.parquet` | Extract from dataset's fastest Sonoma lap |
 | Frontend (`flutter/lib/screens/`) | Consumes the JSON bundles above; does not implement scoring/highlighting/grading. Per ADR-013. |
@@ -348,7 +348,7 @@ What follows is the full menu of coaching modes, analyses, visualizations, and e
 
 ### Analysis types — what the backend computes per session
 
-These all live in `src/simulator/` as analyser modules; outputs land in DuckDB and feed both the post-session narrative and the visualization bundles.
+These all live in `src/pitwall/features/` as analyser modules; outputs land in DuckDB and feed both the post-session narrative and the visualization bundles.
 
 | # | Analysis | What it measures | Data | Cost | Phase |
 |---|---|---|---|---|---|

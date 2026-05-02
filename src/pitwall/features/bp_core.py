@@ -6,7 +6,7 @@ endpoint that fires sonic_model + coach_engine per burst.
 
 import time
 import types
-from datetime import datetime
+from datetime import datetime, timezone
 
 from flask import Blueprint, request, jsonify
 
@@ -27,7 +27,7 @@ def health():
         "engine":    "sonic_model" if state.has_sonic else "rules",
         "track":     state.track.name if state.track else None,
         "duckdb":    state.has_duckdb,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     })
 
 

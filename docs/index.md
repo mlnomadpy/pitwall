@@ -13,7 +13,7 @@ This is the engineering documentation for the Trustable AI racing coach sprint (
 | Data analysis + documentation | ✅ Done | 52 hot lap sessions profiled, 6 data docs written |
 | LSTM sequence predictor (v3) | ✅ Done | **Speed: 3.3 km/h MAE, Brake: 2.7 bar MAE** (unseen track, 1s horizon) |
 | Sonic model v2 (LSTM-driven) | ✅ Done | Delta-based coaching cues tested on Sonoma replay |
-| **Python HTTP bridge** | ✅ Done | `tools/pitwall_bridge.py` :8765 — 56 endpoints, DuckDB-backed, CAN ingest |
+| **Python HTTP bridge** | ✅ Done | `src/pitwall/__main__.py` :8765 — 56 endpoints, DuckDB-backed, CAN ingest |
 | **Rally-style coach engine** | ✅ Done | `RuleCoach` + `LitertCoach` (Gemma 4 E2B via LiteRT-LM), Bentley pedagogy, T-Rod voice |
 | **ADK multi-agent paddock backend** | ✅ Done | 18 agents, 15 tools, `PitwallOrchestrator`, DuckDB tracing (ADR-019–021) |
 | **CAN pipeline** | ✅ Done | `python-can` + `cantools` DBC decoding, USB-CAN adapters (CANable Pro / Macchina M2) |

@@ -1,6 +1,6 @@
 # Pitwall Backend Audit — 2026-04-28
 
-Audit of all Python code shipped in this work cycle (`src/simulator/`, `tools/`). Catalogs:
+Audit of all Python code shipped in this work cycle (`src/pitwall/features/`, `tools/`). Catalogs:
 
 - **Bugs** — incorrect behaviour observed or trivially provable.
 - **Weak spots** — code that works but has known fragility (data dependence, edge cases).
@@ -10,68 +10,68 @@ Each item is tagged **[FIX]** if it gets patched in this turn or **[DEFER]** if 
 
 ---
 
-## src/simulator/sonoma.py
+## src/pitwall/features/sonoma.py
 
 - ✅ Constants module is straightforward; `LAP_TIME_LEVERAGE` weights validated to sum to 1.0 at import time.
 - **[FIX]** `WeatherPhase.start_hour=18, end_hour=18` is missed at hour 18+ — `weather_phase_for_hour(20)` should return `late_session`. The current loop with `<` end_hour misses the boundary. Patch the loop to use `<=` or extend the last phase.
 - **[FIX]** No test asserts `LAP_TIME_LEVERAGE` covers exactly the 11 entries of `CORNER_ORDER`. Drift between the two would silently miscompute weighted scores.
 
-## src/simulator/track_loader.py
+## src/pitwall/features/track_loader.py
 
 - ✅ `MarkerDef` dataclass + `find_nearest_marker` + `find_marker_for_next_corner` work correctly on the canonical sonoma.json.
 - **[FIX]** `find_nearest_marker` with `kind=None` and `corner=None` and a marker exactly at `track_dist` returns None because the gap-check is `0 < gap < lookahead`. A marker exactly at the car's position should be the answer; current code skips it. Change to `0 <= gap < lookahead` and let the cooldown logic deduplicate.
 - **[DEFER]** `cross_track_error` does point-to-point haversine to the nearest reference_line vertex, not perpendicular distance to the polyline segment. Approximate but introduces ~1 m error near corners with sparse reference points. Acceptable for current use; noted for future.
 
-## src/simulator/vbo_parser.py
+## src/pitwall/features/vbo_parser.py
 
 - ✅ Now extracts the `avitime` field for video sync. `TelemetryFrame.avitime` defaults to 0 when absent.
 - **[DEFER]** Per-frame `import math` inside the parsing loop — minor inefficiency, doesn't justify a refactor.
 - **[DEFER]** No unit conversion check on `avitime` — assumes milliseconds (correct for Racelogic VBO format but brittle if a different vendor's file is used).
 
-## src/simulator/gold_standard.py
+## src/pitwall/features/gold_standard.py
 
 - **[KNOWN — DEFER]** Lap detection still imperfect with the dataset's distance counter. The fastest detected single lap is usually a partial slice rather than a full lap when the file contains many runs. Per-corner aggregation (the more important output) is robust; the headline `lap_time_s` is the weak number.
 - ✅ The "best pass per corner" picker now scores by `(min_speed_kmh, exit_speed_kmh)` with a slowed-at-apex sanity filter, not `corner_time_s` alone — fixes the earlier "blew through the corner at 170 km/h" bug.
 - **[FIX]** `_aggregate_corner_pass_abs` returns 0 for `brake_point_m` and `brake_release_m` when the driver never brakes for that corner. Should return None or `nan` so the grader can distinguish "no data" from "brake at entry". Patch the dataclass + grader to handle None.
 
-## src/simulator/corner_grader.py
+## src/pitwall/features/corner_grader.py
 
 - ✅ Weighted A-F formula matches `feedback-system.md:118-140` spec.
 - ✅ Time-loss decomposition has 8 cause categories with capped attribution to prevent over-counting.
 - **[FIX]** `_trod_voice_for` returns "Nice — keep that line." for any corner with empty attribution, including high-leverage corners where it should suggest something more nuanced. Add a corner-specific positive voice line for graded-A passes.
 - **[DEFER]** Time-loss attribution coefficients (e.g. `0.025 * apex_delta` for low_apex_speed) are heuristic, not calibrated. Calibration requires multiple gold-vs-driver lap pairings — Phase 4 work.
 
-## src/simulator/analytics.py
+## src/pitwall/features/analytics.py
 
 - ⚠ **[FIX] Critical bug in `smoothness_per_corner`**: the `_track_corners_cache` helper is a stub that returns inert tuples `(name, 0, track_len)` for every corner. As a result, the function reports the SAME corner span (the entire track) for every corner — meaning all "in-corner" frames are everything, the std-devs are computed over the whole lap, not per-corner. The output is a dict keyed by corner name but the values are session-wide, not corner-specific. **Patch needed**: refactor `smoothness_per_corner` to take the `track` object (already loaded by the caller) and use real corner entry/exit distances.
 - ✅ `friction_circle`, `hustle_map`, `consistency`, `eob_summary`, `slip_angle_band`, `change_in_speed_events`, `trail_brake_events`, `flight_recorder`, `limit_oscillation`, `plateau_detector` are all correct against synthetic inputs.
 - **[FIX]** `friction_circle` `samples` field caps at 1500 entries with no downsampling — a 8000-frame lap's first 1500 frames don't represent the whole session well. Use stride sampling (`frames[::n]` so all parts of the lap are represented).
 
-## src/simulator/highlight_finder.py
+## src/pitwall/features/highlight_finder.py
 
 - ✅ All 7 Sonoma-specific categories detect from synthetic frames as expected.
 - **[FIX]** "Perfect trail brake at T4" detector: the condition `0.5 <= (apex/peak) <= 0.20` is malformed — `0.5 <= x <= 0.20` is always False. Should be `0.05 <= ... <= 0.20`. The detector currently never fires.
 - **[DEFER]** Severity ordering puts "engineering" lowest (correct) but "positive" sits between "medium" and "engineering". For the post-session debrief we may want positives before engineering events. Acceptable default.
 
-## src/simulator/driver_profile.py
+## src/pitwall/features/driver_profile.py
 
 - ✅ Schema is append-only, idempotent. `compute_profile` correctly identifies weakest_recent_corner and biggest_improvement.
 - **[FIX]** `compute_profile` `biggest_improvement` compares `hs[0] - hs[1]` after ordering DESC by `recorded_at`. If the most-recent score is the *worst*, it returns a negative delta (regression, not improvement). Filter to `delta > 0` before picking the biggest.
 
-## src/simulator/session_analyzer.py
+## src/pitwall/features/session_analyzer.py
 
 - ✅ `_segment_into_laps` correctly assigns lap indices via cumulative-distance progression.
 - **[FIX]** Templated narrative writes `Δ: +-63.00 s` when the best lap is *shorter* than the gold (negative delta). The format string `+{delta:.2f}` produces `+-63.00` instead of `-63.00`. Use `{delta:+.2f}` consistently OR special-case the sign.
 - **[FIX]** When `_no_gold_bundle` triggers, `consistency` and `eob_summary` are empty dicts but `friction` and `slip_band` still get computed — inconsistent behaviour. Either compute all-of-them or none-of-them.
 
-## src/simulator/coach_engine.py
+## src/pitwall/features/coach_engine.py
 
 - ✅ `RuleCoach`, `LitertCoach`, `CoachContext`, `CoachArbiter`, all three system-prompt builders work correctly with synthetic inputs.
 - ✅ `LitertCoach` falls back to `RuleCoach` when MediaPipe is missing — verified by smoke test.
 - ✅ `make_coach("auto")` priority `litert > rule` works.
 - **[DEFER]** No way to inject a custom system prompt at runtime. `build_system_prompt` is pure (deterministic) but doesn't accept overrides for testing variant prompts. Could be added without breaking the contract.
 
-## tools/pitwall_bridge.py
+## src/pitwall/__main__.py
 
 - ✅ 26 endpoints, all importable cleanly. Schema initialises on first use.
 - **[FIX]** `_section()` returns a `Response` with implicit 200 when bundle is missing. Should return `(jsonify(...), 404)` consistently — already done in `session_detail` and `session_clips`, missing in `_section` itself. Fix returns to be `(response, status)` tuples.

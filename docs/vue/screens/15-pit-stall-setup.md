@@ -82,7 +82,7 @@ plays while that step verifies. On failure: turns into ✗.
 - Shows: bind address, engine status (sonic_model / rules), coach
   status (rule / litert), DuckDB enabled flag, total sessions in DB
 - Failure: ✗ with "PROCESS NOT REACHABLE — start the bridge with
-  `python3 tools/pitwall_bridge.py`"
+  `python3 -m src.pitwall`"
 
 ### USB-CAN row
 

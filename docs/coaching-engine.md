@@ -8,7 +8,7 @@ Two reasoning paths, one message arbiter, one driver.
     - **Backend owns all LLM logic and system prompts** per [ADR-013](adr/013-frontend-backend-boundary.md). The Flutter / Kotlin frontend consumes coaching from the Python bridge; it does not run inference itself.
     - **One LLM coach**: `LitertCoach` (Gemma 4 E2B via MediaPipe Genai's LiteRT-LM runtime) per [ADR-012](adr/012-coach-engine-adapter.md). No `LlamaCppCoach`, no cloud Gemini tier.
     - **Pace-note voice** is grounded in Sonoma research: per-corner Bentley + T-Rod tips loaded from `data/tracks/sonoma.json`, named landmark labels surfaced in `CoachContext`. See [`pedagogy.md`](pedagogy.md), [`markers.md`](markers.md), [`sonoma_track_intelligence.md`](sonoma_track_intelligence.md), [`trod_sonoma_session.md`](trod_sonoma_session.md).
-    - **Bridge is wired**: `tools/pitwall_bridge.py:/analyze` returns `pace_note` + `coach_source` alongside the original `coaching` field, persists notes to a DuckDB `coaching_notes` table when `session_id` is on the burst. See [`api.md`](api.md) for the contract.
+    - **Bridge is wired**: `src/pitwall/__main__.py:/analyze` returns `pace_note` + `coach_source` alongside the original `coaching` field, persists notes to a DuckDB `coaching_notes` table when `session_id` is on the burst. See [`api.md`](api.md) for the contract.
 
     The hot/warm split below remains the design vocabulary; the implementation puts both paths under one Python backend.
 

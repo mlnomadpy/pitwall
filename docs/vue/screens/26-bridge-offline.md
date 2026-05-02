@@ -57,7 +57,7 @@ shove other content down.
 │                                                            │
 │  TROUBLESHOOTING                                           │
 │  ▸ Is the bridge running?                                  │
-│      python3 tools/pitwall_bridge.py                       │
+│      python3 -m src.pitwall                       │
 │  ▸ Is `adb reverse tcp:8765 tcp:8765` set up?              │
 │  ▸ Is Termux's foreground service alive?                   │
 │      sv status pitwall-bridge                              │

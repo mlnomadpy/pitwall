@@ -356,7 +356,7 @@ The tone is continuous — its pitch IS the delta. The driver doesn't need to de
 ## Reproducibility
 
 ```bash
-cd pitwall-sprint/src/simulator
+cd pitwall-sprint/src/pitwall/features
 
 # Build track definition from VBO files
 python3 track_builder.py /path/to/vbo/*.vbo -n "Track Name" -o track.json

@@ -40,7 +40,7 @@ We deliberately hide lap times, deltas, and split timers from the on-track HUD. 
 
 ## User Journey — A Day at Sonoma
 
-The whole UX is structured around a track-day's natural arc. Each stage maps to specific endpoints in `tools/pitwall_bridge.py`.
+The whole UX is structured around a track-day's natural arc. Each stage maps to specific endpoints in `src/pitwall/__main__.py`.
 
 ```mermaid
 flowchart LR

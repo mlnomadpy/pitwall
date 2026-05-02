@@ -17,7 +17,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-sys.path.insert(0, str(ROOT / "src" / "simulator"))
+
 
 
 # ─── Synthetic frame builder ─────────────────────────────────────────────────
@@ -228,3 +228,67 @@ def forza_vbo_path():
     if not p.exists():
         pytest.skip(f"forza dataset not available at {FORZA_VBO}")
     return p
+
+import pitwall as br
+from pitwall.features.track.track_loader import load_track
+from pitwall.features.session.session_analyzer import analyze_session
+import pitwall.features.track.sonoma as sonoma
+from pitwall.helpers import estimate_tts_ms, detect_laps, quantile
+from pitwall.db import log_llm_friction
+from pitwall.features.realtime.bp_realtime import cue_bus
+
+@pytest.fixture(autouse=True)
+def isolated_bridge(monkeypatch, tmp_path):
+    """Each test gets a clean DuckDB file + fresh in-memory state."""
+    monkeypatch.setattr(br.state, "db_path", str(tmp_path / "test.duckdb"))
+    monkeypatch.setattr(br.state, "has_duckdb", True)
+    monkeypatch.setattr(br.state, "has_analyzer", True)
+    monkeypatch.setattr(br.state, "has_adk", False)
+    monkeypatch.setattr(br.state, "has_genai", False)
+    monkeypatch.setattr(br.state, "has_coach", False)
+    monkeypatch.setattr(br.state, "has_sonic", False)
+    monkeypatch.setattr(br.state, "analyze_session", analyze_session)
+    monkeypatch.setattr(br.state, "sonoma", sonoma)
+    monkeypatch.setattr(br.state, "session_bundles", {})
+    monkeypatch.setattr(br.state, "session_bursts", [])
+    monkeypatch.setattr(br.state, "qa_histories", {})
+    monkeypatch.setattr(
+        br.state, "track",
+        load_track(str(ROOT / "data" / "tracks" / "sonoma.json")),
+    )
+    monkeypatch.setattr(br.state, "coach", None)
+    monkeypatch.setattr(br.state, "arbiter", None)
+
+
+@pytest.fixture
+def client():
+    app = br.create_app()
+    app.config["TESTING"] = True
+    return app.test_client()
+
+
+def _frames_to_payload(frames):
+    return [{
+        "timestamp": f.timestamp, "distance": f.distance,
+        "speed": f.speed, "g_lat": f.g_lat, "g_long": f.g_long,
+        "combo_g": f.combo_g, "brake_pressure": f.brake_pressure,
+        "throttle": f.throttle, "steering": f.steering,
+        "rpm": f.rpm, "lat": f.lat, "lon": f.lon,
+    } for f in frames]
+
+
+_SID_COUNTER = [0]
+
+
+def _start_session(client, **body):
+    """Generate a synthetic session_id.
+
+    Master removed the explicit /session/start lifecycle in favour of an
+    implicit model: any string can be a session_id, and per-frame /
+    per-burst endpoints accept it as-is. This helper preserves the
+    previous test-suite shape while matching the new API.
+    """
+    _SID_COUNTER[0] += 1
+    return f"test-sid-{_SID_COUNTER[0]:03d}"
+
+

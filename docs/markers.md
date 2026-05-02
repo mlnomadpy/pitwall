@@ -115,7 +115,7 @@ These currently surface in `CoachContext.next_corner_tip` and are available to `
 
 ## Authoring + sync
 
-The canonical track JSON lives at `data/tracks/sonoma.json`. Three duplicates exist (in `src/simulator/`, `flutter/assets/tracks/`, `flutter/android/app/src/main/assets/tracks/`) for different runtime consumers; running `python3 tools/enrich_sonoma_track.py` syncs all four from the canonical source.
+The canonical track JSON lives at `data/tracks/sonoma.json`. Three duplicates exist (in `src/pitwall/features/`, `flutter/assets/tracks/`, `flutter/android/app/src/main/assets/tracks/`) for different runtime consumers; running `python3 tools/enrich_sonoma_track.py` syncs all four from the canonical source.
 
 To re-author or extend marker data, edit `tools/enrich_sonoma_track.py:ENRICHMENT` (one entry per corner) and re-run:
 

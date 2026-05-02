@@ -6,7 +6,7 @@ This is the **as-shipped** view of the Python backend (post 2026-04-28). [`archi
 
 ## High-level system
 
-The Python backend is the source of truth. The Flutter Pixel app is a renderer per [ADR-013](adr/013-frontend-backend-boundary.md). All LLM logic, system prompts, and analytics live in `src/simulator/`. The bridge (`tools/pitwall_bridge.py`) exposes them over HTTP.
+The Python backend is the source of truth. The Flutter Pixel app is a renderer per [ADR-013](adr/013-frontend-backend-boundary.md). All LLM logic, system prompts, and analytics live in `src/pitwall/features/`. The bridge (`src/pitwall/__main__.py`) exposes them over HTTP.
 
 ```mermaid
 flowchart LR
@@ -16,14 +16,14 @@ flowchart LR
     CAM[Pixel dashcam<br/>MP4 chunks]
   end
 
-  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 56 endpoints"]
+  subgraph BRIDGE["🌉 src/pitwall/ — 56 endpoints"]
     direction TB
     INGEST["/session/&lt;id&gt;/frames<br/>/session/&lt;id&gt;/video_frames<br/>/analyze (burst)"]
     QUERY["/session/&lt;id&gt;/scorecard<br/>/highlights /map /sync<br/>/coach/brief /debrief"]
     META["/track/markers<br/>/track/danger_zones<br/>/track/weather"]
   end
 
-  subgraph BACKEND["🐍 src/simulator/ — analytics + coach"]
+  subgraph BACKEND["🐍 src/pitwall/features/ — analytics + coach"]
     direction TB
     SONOMA[(sonoma.py<br/>hardcoded constants)]
     GRADER[corner_grader.py<br/>A-F + time-loss]
@@ -93,7 +93,7 @@ flowchart LR
 
 ---
 
-## Module dependency graph (`src/simulator/`)
+## Module dependency graph (`src/pitwall/features/`)
 
 ```mermaid
 graph TD
@@ -483,7 +483,7 @@ flowchart LR
 
 ---
 
-## File tree (post 2026-04-28)
+## File tree (FSD Migration)
 
 ```
 pitwall/
@@ -503,36 +503,25 @@ pitwall/
 │           └── track8.json
 ├── docs/                              (mkdocs site)
 │   ├── architecture.md                (sprint design — concept)
-│   ├── internal_architecture.md      (this file — code)
+│   ├── internal_architecture.md       (this file — code)
 │   ├── api.md                         (endpoint reference)
-│   ├── markers.md
-│   ├── sonoma_track_intelligence.md
-│   ├── sonoma_maneuvers.md            (Part A/B/C attribution)
-│   ├── trod_sonoma_session.md
-│   ├── litert_termux_validation.md
-│   ├── AUDIT.md                       (this turn's audit)
-│   └── adr/
-│       ├── 001…013-*.md               (sprint ADRs)
-│       └── 014-sonoma-as-the-product.md
-├── flutter/                           (Pixel 10 deployment, ADR-013)
+│   └── ...
 ├── src/
+│   ├── pitwall/
+│   │   ├── __main__.py                (Flask app, 56 endpoints)
+│   │   └── features/                  (Feature-Sliced Design)
+│   │       ├── telemetry/             (can_reader, signals API)
+│   │       ├── session/               (analyzer, profiles, debrief)
+│   │       ├── coaching/              (ADK agents, coach engine, LiteRT)
+│   │       ├── track/                 (sonoma, track loaders)
+│   │       └── realtime/              (live cue streaming via SSE)
 │   └── simulator/
-│       ├── sonoma.py                  (constants + lore)
-│       ├── track_loader.py
-│       ├── vbo_parser.py
-│       ├── gold_standard.py
-│       ├── corner_grader.py
-│       ├── analytics.py
-│       ├── highlight_finder.py
-│       ├── driver_profile.py
-│       ├── session_analyzer.py
-│       ├── coach_engine.py            (RuleCoach + LitertCoach + 3 modes)
-│       ├── audio_engine.py
-│       ├── sonic_model_v2.py
-│       └── pitwall_app.py
-├── tests/                             (this turn's audit suite)
-└── tools/
-    ├── pitwall_bridge.py              (Flask, 56 endpoints)
+│       ├── pitwall_app.py             (TUI / replay)
+│       ├── simulator.py               (VBO-driven simulation)
+│       └── can_simulator.py           (CAN bus synthetic playback)
+├── tests/
+│   └── features/                      (Modularized tests mirroring FSD)
+└── scripts/
     ├── enrich_sonoma_track.py
     ├── extract_gold_lap.py
     ├── best_sonoma_lap.py             (S/F line-projection)
@@ -778,7 +767,7 @@ flowchart TB
     CAM[Pixel dashcam]:::sensor
   end
 
-  subgraph TOOLS["🛠 tools/"]
+  subgraph TOOLS["🛠 scripts/"]
     BULK[bulk_import_<br/>sonoma_vbos.py]:::tools
     BEST[best_sonoma_lap.py<br/>S/F line projection]:::tools
     EXTRACT[extract_gold_lap.py]:::tools
@@ -788,7 +777,7 @@ flowchart TB
     VAL[validate_litert.py]:::tools
   end
 
-  subgraph BRIDGE["🌉 tools/pitwall_bridge.py — 56 endpoints"]
+  subgraph BRIDGE["🌉 src/pitwall/ — 56 endpoints"]
     direction TB
 
     subgraph BRG_INGEST["ingest"]
@@ -828,7 +817,7 @@ flowchart TB
     end
   end
 
-  subgraph SIM["🐍 src/simulator/"]
+  subgraph SIM["🐍 src/pitwall/features/"]
     direction TB
     S_SONOMA[sonoma.py<br/>constants + lore]:::sim
     S_VBO[vbo_parser.py]:::sim

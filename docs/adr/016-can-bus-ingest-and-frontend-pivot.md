@@ -9,7 +9,7 @@ Through April we shipped a Flutter + Kotlin Pixel app talking to `pitwall_bridge
 
 1. BLE pairing of Racelogic VBO Mini + OBDLink MX
 2. Sensor fusion + filtering (`SensorFusion.kt`, `Filters.kt`)
-3. Mid-tier coaching primitives (`SonicModel.kt`, `MessageArbiter.kt`, `PedagogicalVectors.kt` — all duplicates of Python in `src/simulator/`)
+3. Mid-tier coaching primitives (`SonicModel.kt`, `MessageArbiter.kt`, `PedagogicalVectors.kt` — all duplicates of Python in `src/pitwall/features/`)
 4. Audio routing + the 4-layer mixer (`AudioEngine.kt`)
 5. UI — `on_track_screen.dart`, `paddock_screen.dart`, ~1,200 LoC
 
@@ -22,7 +22,7 @@ Two things changed the calculus on this stack:
 These two facts collapse the whole native stack:
 
 - Without BLE, `SensorFusion.kt` + `Filters.kt` + `PitwallService.kt` lose their reason to exist.
-- Without native UI, the duplicated `SonicModel.kt` / `MessageArbiter.kt` / `PedagogicalVectors.kt` / `AudioEngine.kt` lose theirs (the Python equivalents in `src/simulator/` are the canonical implementations anyway).
+- Without native UI, the duplicated `SonicModel.kt` / `MessageArbiter.kt` / `PedagogicalVectors.kt` / `AudioEngine.kt` lose theirs (the Python equivalents in `src/pitwall/features/` are the canonical implementations anyway).
 - `flutter/lib/**/*.dart` (~1,200 LoC) is replaced by a Vue 3 PWA that any browser can load.
 
 This ADR records the pivot.
@@ -90,7 +90,7 @@ pitwall/                              ← brain. All non-presentation lives here
 ├── data/
 │   ├── dbc/pitwall.dbc               ← NEW; per-car DBCs added alongside later
 │   └── registry/obd2_pids.json       ← seed (54 entries)
-├── src/simulator/                    ← unchanged: sonic_model, coach_engine, etc.
+├── src/pitwall/features/                    ← unchanged: sonic_model, coach_engine, etc.
 ├── docs/
 │   ├── adr/016-can-bus-ingest-and-frontend-pivot.md  ← THIS DOC
 │   └── api.md                        ← + --can-channel section

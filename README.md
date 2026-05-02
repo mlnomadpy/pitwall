@@ -1,7 +1,7 @@
 # Pitwall — Trustable AI Racing Coach
 
 [![Tests](https://img.shields.io/badge/tests-358%20passed-2aa198?style=flat-square)](tests/)
-[![Smoke](https://img.shields.io/badge/smoke-51%20assertions-2aa198?style=flat-square)](tools/smoke_test_endpoints.py)
+[![Smoke](https://img.shields.io/badge/smoke-51%20assertions-2aa198?style=flat-square)](tests/test_endpoints_smoke.py)
 [![Routes](https://img.shields.io/badge/routes-56-859900?style=flat-square)](docs/api.md)
 [![ADRs](https://img.shields.io/badge/ADRs-21-b58900?style=flat-square)](docs/adr/index.md)
 [![Agents](https://img.shields.io/badge/ADK%20agents-18-6c71c4?style=flat-square)](docs/adk-agent-architecture.md)
@@ -115,27 +115,22 @@ driver skill level.
 
 ```
 pitwall/
-├── tools/
-│   ├── pitwall_bridge.py             # 56-route Flask app, CAN reader hookup, SSE
-│   ├── adk_agents.py                 # 18 ADK agents + PitwallOrchestrator + Runner
-│   ├── adk_tools.py                  # 15 @_adk_tool functions backed by DuckDB
-│   ├── audio_cache/                  # TTS phrase cache written by VoiceScriptAgent
-│   ├── can_reader.py                 # python-can consumer → DuckDB sink
-│   ├── can_simulator.py              # VBO replay or synthetic CAN producer
-│   ├── dead_reckoning.py             # ADR-018: 1D Kalman filter for distance
-│   ├── smoke_test_endpoints.py       # end-to-end test against a real VBO
-│   ├── generate_sample_vbo.py        # 3-lap synthetic VBO
-│   └── …                             # bulk import, gold-lap extraction, etc.
-├── src/simulator/
-│   ├── sonic_model.py + sonic_model_v2.py    # hot-path audio cue engine
-│   ├── coach_engine.py               # rule + LiteRT-LM coach, capability gating
-│   ├── session_analyzer.py           # post-session orchestrator
-│   ├── analytics.py + corner_grader.py + highlight_finder.py
-│   ├── driver_profile.py             # event-sourced profile store
-│   ├── gold_standard.py + track_loader.py + track_builder.py
-│   ├── sonoma.py + sonoma.json       # track constants + geometry
-│   ├── pitwall_app.py + simulator.py # standalone replay TUI
-│   └── lstm_predictor.py + lstm_predictor_v3.py + models/
+├── src/pitwall/                      # Pitwall Backend (Flask API)
+│   ├── __main__.py                   # Application entrypoint
+│   └── features/                     # Feature-Sliced Design domains
+│       ├── telemetry/                # can_reader, signals API
+│       ├── session/                  # vbo_parser, analytics, profiles, debrief API
+│       ├── coaching/                 # ADK agents, coach engine, TTS, LiteRT
+│       ├── track/                    # sonoma lore, track loaders, track API
+│       └── realtime/                 # Live cue streaming via SSE
+├── src/simulator/                    # Standalone HTTP Clients
+│   ├── simulator.py                  # VBO-driven simulation runner
+│   ├── pitwall_app.py                # Standalone replay TUI
+│   └── vbo_client.py                 # Standalone VBO parser for clients
+├── scripts/                          # Utility scripts
+│   ├── best_sonoma_lap.py            # S/F line projection utility
+│   ├── import_sonoma_real_gps.py     # OSM Overpass import
+│   └── generate_sample_vbo.py        # Synthetic VBO generation
 ├── data/
 │   ├── dbc/pitwall.dbc               # synthetic DBC (29 signals)
 │   ├── registry/obd2_pids.json       # signal registry seed (54 entries)
@@ -158,7 +153,7 @@ pitwall/
 │   │   └── …
 │   ├── adr/                          # 21 ADRs (019–021 cover ADK)
 │   └── …                             # pedagogy, telemetry-pipeline, etc.
-├── tests/                            # 358 passing, 0 skipped
+├── tests/                            # 424 tests passing, modularised in tests/features/
 ├── android/  +  android-app/         # FROZEN v1 native; deletes post-PWA
 ├── .claude/commands/adk.md           # /adk slash command — ADK reference + audit tool
 ├── mkdocs.yml
@@ -207,7 +202,7 @@ phrase coach always works.
 
 ```bash
 # HTTP-only (no live CAN, no E4B server needed for basic operation)
-python3 tools/pitwall_bridge.py --track src/simulator/sonoma.json
+python3 -m src.pitwall --track src/pitwall/features/track/sonoma.json
 # →  ✓  sonic_model loaded
 #    ✓  Track: Sonoma Raceway (12 corners)
 #    ✓  ADK coach_orchestrator loaded — 18 agents (LiteRT-LM E4B)   ← if lit serve running
@@ -220,15 +215,15 @@ curl -s http://127.0.0.1:8765/health | python3 -m json.tool
 
 ```bash
 # Dev/test (virtual bus, no hardware needed)
-python3 tools/pitwall_bridge.py --can-channel pitwall_dev
+python3 -m src.pitwall --can-channel pitwall_dev
 
 # Replay a VBO file as CAN frames
-python3 tools/can_simulator.py \
+python3 src/simulator/can_simulator.py \
     --vbo "/path/Sonoma Intermediate - 1_47.5.vbo" \
     --channel pitwall_dev --speed 2.0
 
 # Production — USB-CAN on Pixel via Termux
-python3 tools/pitwall_bridge.py \
+python3 -m src.pitwall \
     --can-interface slcan --can-channel /dev/ttyACM0 \
     --can-dbc data/dbc/pitwall.dbc
 ```
@@ -237,9 +232,9 @@ python3 tools/pitwall_bridge.py \
 
 ```bash
 python3 -m pytest tests/ -q
-# → 358 passed, 0 skipped
+# → 424 passed, 0 skipped
 
-python3 tools/smoke_test_endpoints.py --keep-db
+python3 tests/test_endpoints_smoke.py --keep-db
 # Ingests 8273-frame Sonoma VBO → exercises 56 endpoints → 51 assertions
 ```
 
@@ -363,9 +358,9 @@ See [`docs/adk-agent-architecture.md`](docs/adk-agent-architecture.md) for the f
 | Post-session debrief LLM (E2B) | **8–12 s** | measured |
 | ADK paddock — cold call (new session) | **2–15 s** | E4B via `lit serve`, Tensor G5 NPU |
 | ADK paddock — warm call (persistent session) | **~30–50% less** | KV cache clone; session instructions pre-filled |
-| CAN frame → DuckDB row | **< 5 ms** | `tools/can_reader.py` |
+| CAN frame → DuckDB row | **< 5 ms** | `src/pitwall/features/telemetry/can_reader.py` |
 | Agent trace DuckDB write | **< 1 ms** | batch drain after `run_adk()` |
-| End-to-end smoke (8273 frames + every endpoint) | **~12 s** | `tools/smoke_test_endpoints.py` |
+| End-to-end smoke (8273 frames + every endpoint) | **~12 s** | `tests/test_endpoints_smoke.py` |
 | Parquet export (90-min session) | **< 500 ms** | `GET /session/<sid>/export.parquet` |
 
 ## Hardware
@@ -444,20 +439,20 @@ mkdocs serve -a 127.0.0.1:8889
 
 | Suite | Count | Notes |
 |---|---|---|
-| `tests/` (pytest) | **358 passed, 0 skipped** | Unit + integration; vendored fixtures, no network |
-| `tests/test_can_pipeline.py` | 9 of 358 | Round-trip on `interface='virtual'` + ADR-018 dead-reckoner wiring |
-| `tests/test_dead_reckoning.py` | 13 of 358 | ADR-018 1D Kalman filter unit suite |
-| `tests/test_coach_engine_litert.py` | 8 of 358 | Live-Gemma tests; auto-skip when model file is absent |
-| `tools/smoke_test_endpoints.py` | **51 assertions, 0 failed** | End-to-end against a real 8273-frame Sonoma VBO |
+| `tests/` (pytest) | **424 passed, 0 skipped** | Unit + integration; vendored fixtures, no network |
+| `tests/features/telemetry/test_can_pipeline.py` | 9 of 424 | Round-trip on `interface='virtual'` + ADR-018 dead-reckoner wiring |
+| `tests/features/telemetry/test_dead_reckoning.py` | 13 of 424 | ADR-018 1D Kalman filter unit suite |
+| `tests/features/coaching/test_coach_engine_litert.py` | 8 of 424 | Live-Gemma tests; auto-skip when model file is absent |
+| `tests/test_endpoints_smoke.py` | **51 assertions, 0 failed** | End-to-end against a real 8273-frame Sonoma VBO |
 
 ```bash
-python3 -m pytest tests/test_bridge.py -q
-python3 -m pytest tests/test_can_pipeline.py -q
-python3 -m pytest tests/test_dead_reckoning.py -q
-python3 -m pytest tests/test_coach_engine.py -q
-python3 -m pytest tests/test_coach_engine_litert.py -q   # auto-skip without model
-python3 -m pytest tests/test_session_analyzer.py -q
-python3 tools/smoke_test_endpoints.py
+python3 -m pytest tests/features/test_api_core.py -q
+python3 -m pytest tests/features/telemetry/test_can_pipeline.py -q
+python3 -m pytest tests/features/telemetry/test_dead_reckoning.py -q
+python3 -m pytest tests/features/coaching/test_coach_engine.py -q
+python3 -m pytest tests/features/coaching/test_coach_engine_litert.py -q   # auto-skip without model
+python3 -m pytest tests/features/session/test_api_session.py -q
+python3 tests/test_endpoints_smoke.py
 ```
 
 ## Roadmap
@@ -516,7 +511,7 @@ field test. External contributions are not currently accepted.
 For team members:
 
 - Branch from `master`; merge via PR. Tests must pass before merge.
-- Run `python3 -m pytest tests/ -q` and `python3 tools/smoke_test_endpoints.py` before opening a PR that touches ingest, lap detection, or the sink.
+- Run `python3 -m pytest tests/ -q` and `python3 tests/test_endpoints_smoke.py` before opening a PR that touches ingest, lap detection, or the sink.
 - New endpoints get an entry in [`docs/api.md`](docs/api.md) plus a test in `tests/test_bridge.py`.
 - New ADK agents get an entry in `AGENT_REGISTRY` in `adk_agents.py` and a row in the agent catalogue in [`docs/adk-agent-architecture.md`](docs/adk-agent-architecture.md).
 - Architectural changes get a new ADR in `docs/adr/` (ADR-NNN-slug.md). Update `docs/adr/index.md` in the same PR.
