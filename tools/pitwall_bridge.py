@@ -100,6 +100,29 @@ except ImportError:
     pass
     print("⚠  duckdb not installed — lap history disabled. pip3 install duckdb")
 
+# ADK multi-agent backend (Phase 2 — paddock coaching orchestration).
+# Requires: pip install google-adk  +  lit serve --port 8001 (LiteRT-LM E4B).
+# Falls back silently to the existing LitertCoach / RuleCoach when unavailable.
+HAS_ADK = False
+_adk_orchestrator = None
+_adk_agent_registry: list = []
+try:
+    from adk_agents import (
+        coach_orchestrator as _adk_orchestrator,
+        HAS_ADK as _adk_loaded,
+        AGENT_REGISTRY as _adk_agent_registry,
+        run_adk as _run_adk,
+        get_pending_traces as _get_adk_traces,
+        reset_driver_session as _reset_adk_session,
+    )
+    HAS_ADK = _adk_loaded and _adk_orchestrator is not None
+    if HAS_ADK:
+        print(f"✓  ADK coach_orchestrator loaded — {len(_adk_agent_registry)} agents (LiteRT-LM E4B)")
+    else:
+        print("⚠  adk_agents imported but google-adk not installed — ADK disabled")
+except ImportError as _e:
+    print(f"⚠  adk_agents not importable ({_e}) — ADK disabled")
+
 # ── Global state ───────────────────────────────────────────────────────────────
 app = Flask(__name__)
 _track = None           # loaded on startup via --track
@@ -236,6 +259,41 @@ def get_db():
         );
         CREATE INDEX IF NOT EXISTS idx_llm_friction_session_ts
             ON llm_friction (session_id, ts);
+
+        CREATE SEQUENCE IF NOT EXISTS conversations_id_seq;
+        CREATE TABLE IF NOT EXISTS conversations (
+            id           INTEGER PRIMARY KEY DEFAULT nextval('conversations_id_seq'),
+            session_id   VARCHAR,
+            driver_id    VARCHAR,
+            role         VARCHAR,
+            text         TEXT,
+            focus_items  VARCHAR,
+            emotion      VARCHAR,
+            recorded_at  TIMESTAMP DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_conversations_session
+            ON conversations(session_id, recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_conversations_driver
+            ON conversations(driver_id, recorded_at);
+
+        -- ADK agent telemetry (ADR-021): one row per agent run or tool call.
+        -- trace_id groups all events from a single run_adk() invocation.
+        CREATE SEQUENCE IF NOT EXISTS agent_traces_id_seq;
+        CREATE TABLE IF NOT EXISTS agent_traces (
+            id          INTEGER PRIMARY KEY DEFAULT nextval('agent_traces_id_seq'),
+            trace_id    VARCHAR,    -- ADK session UUID — groups one run_adk() call
+            pitwall_sid VARCHAR,    -- pitwall session_id (may be empty for Q&A)
+            agent_name  VARCHAR,
+            event_type  VARCHAR,    -- 'agent' | 'tool'
+            detail      VARCHAR,    -- tool name, or intent for orchestrator
+            latency_ms  DOUBLE,
+            success     BOOLEAN DEFAULT true,
+            ts          TIMESTAMP DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_traces_trace
+            ON agent_traces(trace_id, ts);
+        CREATE INDEX IF NOT EXISTS idx_agent_traces_agent
+            ON agent_traces(agent_name, ts);
     """)
     return conn
 
@@ -1852,14 +1910,19 @@ def session_start():
     data = request.get_json(force=True, silent=True) or {}
     track_name = data.get("track") or (_track.name if _track else None)
     sid = data.get("session_id") or _new_session_id(track_name)
+    driver_id = data.get("driver", "")
     _ensure_session_row(
         sid,
-        driver=data.get("driver"),
+        driver=driver_id,
         driver_level=data.get("driver_level"),
         track=track_name,
         car=data.get("car"),
         note=data.get("note"),
     )
+    # Expire the ADK session so the next run_adk() call gets a fresh KV cache
+    # baseline — cold start is acceptable here (driver expects a moment to start).
+    if HAS_ADK and driver_id:
+        _reset_adk_session(driver_id)
     return jsonify({"started": True, "session_id": sid})
 
 
@@ -2099,6 +2162,26 @@ def coach_debrief():
         driver_level=getattr(_coach, "driver_level", "intermediate") if _coach else "intermediate",
     )
 
+    if HAS_ADK:
+        try:
+            adk_prompt = (
+                f"Generate a post-session debrief for session '{sid}', driver '{driver_id}'. "
+                f"Query the DuckDB database for lap times, corner grades, coaching notes, "
+                f"and telemetry highlights for this session. "
+                f"Structure: 1 highlight sentence, then a FOCUS list of 3 items for next session."
+            )
+            adk_narrative = _run_adk(adk_prompt)
+            _drain_adk_traces(pitwall_sid=sid)
+            import re as _re
+            _em = _re.search(r"\[EMOTION:(\w+)\]", adk_narrative)
+            if _em:
+                bundle["emotion"] = _em.group(1)
+                adk_narrative = _re.sub(r"\[EMOTION:\w+\]\s*", "", adk_narrative).strip()
+            bundle["narrative"] = adk_narrative
+            bundle["narrative_source"] = "adk"
+        except Exception as _e:
+            print(f"⚠  ADK debrief failed ({_e}), keeping analyze_session narrative")
+
     with _BUNDLES_LOCK:
         _session_bundles[sid] = bundle
 
@@ -2117,7 +2200,60 @@ def coach_debrief():
         except Exception:
             pass
 
+    if HAS_DUCKDB and driver_id and bundle.get("narrative"):
+        try:
+            with _db_lock:
+                conn = get_db()
+                if conn is not None:
+                    conn.execute(
+                        "INSERT INTO conversations "
+                        "(session_id, driver_id, role, text, focus_items, emotion) "
+                        "VALUES (?, ?, 'coach_debrief', ?, ?, ?)",
+                        [sid, driver_id,
+                         bundle.get("narrative", ""),
+                         json.dumps(bundle.get("focus") or []),
+                         bundle.get("emotion", "neutral")],
+                    )
+                    conn.close()
+        except Exception:
+            pass
+
     return jsonify(bundle)
+
+
+@app.route("/conversations/<sid>", methods=["GET"])
+def conversations_for_session(sid: str):
+    """All paddock turns (brief, debrief, Q&A) for a session, ordered by time."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    with _db_lock:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT role, text, focus_items, emotion, recorded_at "
+            "FROM conversations WHERE session_id = ? ORDER BY recorded_at",
+            [sid],
+        ).fetchdf().to_dict("records")
+        conn.close()
+    return jsonify({"session_id": sid, "turns": rows})
+
+
+@app.route("/conversations/driver/<driver_id>", methods=["GET"])
+def conversations_for_driver(driver_id: str):
+    """Brief + debrief history across all sessions for a driver."""
+    if not HAS_DUCKDB:
+        return jsonify({"error": "duckdb not available"}), 503
+    limit = min(int(request.args.get("limit", 20)), 200)
+    with _db_lock:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT session_id, role, text, focus_items, emotion, recorded_at "
+            "FROM conversations WHERE driver_id = ? "
+            "AND role IN ('coach_brief', 'coach_debrief') "
+            "ORDER BY recorded_at DESC LIMIT ?",
+            [driver_id, limit],
+        ).fetchdf().to_dict("records")
+        conn.close()
+    return jsonify({"driver_id": driver_id, "history": rows})
 
 
 def _section(sid: str, key: str):
@@ -3268,40 +3404,84 @@ def coach_brief():
 
     emotion = "neutral"
     sid_param = (request.args.get("session_id") or "").strip() or None
-    if hasattr(_coach, "brief"):
+
+    if HAS_ADK:
         try:
-            result = _coach.brief(
-                driver_id=driver_id,
-                today_iso=today,
-                weather_phase=weather_phase.id,
-                surface_state=weather_phase.surface_state,
-                markers_selected=markers_selected,
-                weakest_recent_corner=profile.get("weakest_recent_corner"),
-                biggest_recent_improvement=profile.get("biggest_improvement"),
-                danger_zones_today=danger_today,
-                goal=goal,
-                session_id=sid_param,
+            adk_prompt = (
+                f"Generate a pre-session brief for driver '{driver_id}'. "
+                f"Date: {today}, weather: {weather_phase.id} ({weather_phase.surface_state}), "
+                f"focus corners: {markers_selected or 'any'}, goal: {goal}. "
+                f"Driver profile — weakest corner: {profile.get('weakest_recent_corner')}, "
+                f"biggest improvement: {profile.get('biggest_improvement')}. "
+                f"Danger zones today: {danger_today or 'none'}. "
+                f"Keep the brief to 2–4 sentences followed by a FOCUS list of 3 items."
             )
-        except TypeError:
-            # Older coach signature without session_id (test stubs etc.)
-            result = _coach.brief(
-                driver_id=driver_id,
-                today_iso=today,
-                weather_phase=weather_phase.id,
-                surface_state=weather_phase.surface_state,
-                markers_selected=markers_selected,
-                weakest_recent_corner=profile.get("weakest_recent_corner"),
-                biggest_recent_improvement=profile.get("biggest_improvement"),
-                danger_zones_today=danger_today,
-                goal=goal,
-            )
-        # New shape (3-tuple) for emotion-aware coaches; old shape (2-tuple) tolerated.
-        if len(result) == 3:
-            narrative, focus, emotion = result
+            narrative = _run_adk(adk_prompt)
+            _drain_adk_traces()
+            focus = markers_selected[:3] or []
+            # Extract [EMOTION:tag] if present, same convention as LitertCoach
+            import re as _re
+            _em = _re.search(r"\[EMOTION:(\w+)\]", narrative)
+            if _em:
+                emotion = _em.group(1)
+                narrative = _re.sub(r"\[EMOTION:\w+\]\s*", "", narrative).strip()
+        except Exception as _e:
+            print(f"⚠  ADK brief failed ({_e}), falling back to LitertCoach")
+            HAS_ADK_THIS_REQUEST = False
         else:
-            narrative, focus = result
+            HAS_ADK_THIS_REQUEST = True
     else:
-        narrative, focus = "", markers_selected[:3]
+        HAS_ADK_THIS_REQUEST = False
+
+    if not HAS_ADK_THIS_REQUEST:
+        if hasattr(_coach, "brief"):
+            try:
+                result = _coach.brief(
+                    driver_id=driver_id,
+                    today_iso=today,
+                    weather_phase=weather_phase.id,
+                    surface_state=weather_phase.surface_state,
+                    markers_selected=markers_selected,
+                    weakest_recent_corner=profile.get("weakest_recent_corner"),
+                    biggest_recent_improvement=profile.get("biggest_improvement"),
+                    danger_zones_today=danger_today,
+                    goal=goal,
+                    session_id=sid_param,
+                )
+            except TypeError:
+                result = _coach.brief(
+                    driver_id=driver_id,
+                    today_iso=today,
+                    weather_phase=weather_phase.id,
+                    surface_state=weather_phase.surface_state,
+                    markers_selected=markers_selected,
+                    weakest_recent_corner=profile.get("weakest_recent_corner"),
+                    biggest_recent_improvement=profile.get("biggest_improvement"),
+                    danger_zones_today=danger_today,
+                    goal=goal,
+                )
+            if len(result) == 3:
+                narrative, focus, emotion = result
+            else:
+                narrative, focus = result
+        else:
+            narrative, focus = "", markers_selected[:3]
+
+    if HAS_DUCKDB and driver_id and narrative:
+        try:
+            with _db_lock:
+                conn = get_db()
+                if conn is not None:
+                    conn.execute(
+                        "INSERT INTO conversations "
+                        "(session_id, driver_id, role, text, focus_items, emotion) "
+                        "VALUES (?, ?, 'coach_brief', ?, ?, ?)",
+                        [sid_param or "", driver_id,
+                         narrative, json.dumps(focus), emotion],
+                    )
+                    conn.close()
+        except Exception:
+            pass
 
     return jsonify({
         "driver_id":               driver_id,
@@ -3985,6 +4165,185 @@ def save_lap():
         ])
         conn.close()
     return jsonify({"saved": True})
+
+
+# ── ADK paddock Q&A (Phase 3) ──────────────────────────────────────────────────
+
+# In-memory conversation history per (driver_id, session_id) pair.
+# Keyed as "driver_id:session_id". Flushed to DuckDB on /coach/ask/end.
+# TTL: entries older than 1 hour are purged on next access (abandoned sessions).
+_qa_histories: dict[str, list[dict]] = {}
+_qa_timestamps: dict[str, float] = {}
+_qa_lock = threading.Lock()
+_QA_TTL_S = 3600  # 1 hour
+
+
+def _qa_cleanup_stale() -> None:
+    """Remove abandoned Q&A sessions. Must be called under _qa_lock."""
+    import time as _time
+    cutoff = _time.time() - _QA_TTL_S
+    stale = [k for k, ts in _qa_timestamps.items() if ts < cutoff]
+    for k in stale:
+        _qa_histories.pop(k, None)
+        _qa_timestamps.pop(k, None)
+
+
+def _drain_adk_traces(pitwall_sid: str = "") -> None:
+    """Flush buffered ADK agent traces to the agent_traces DuckDB table."""
+    if not HAS_ADK or not HAS_DUCKDB:
+        return
+    try:
+        traces = _get_adk_traces()
+        if not traces:
+            return
+        with _db_lock:
+            conn = get_db()
+            if conn is None:
+                return
+            try:
+                for t in traces:
+                    conn.execute(
+                        "INSERT INTO agent_traces "
+                        "(trace_id, pitwall_sid, agent_name, event_type, detail, latency_ms, success) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        [t["trace_id"], pitwall_sid, t["agent_name"],
+                         t["event_type"], t["detail"], t["latency_ms"], t["success"]],
+                    )
+            finally:
+                conn.close()
+    except Exception as _e:
+        print(f"⚠  agent_traces write failed: {_e}")
+
+
+@app.route("/coach/ask", methods=["POST"])
+def coach_ask():
+    """Multi-turn driver Q&A. Maintains conversation context across calls.
+
+    Body: {"driver_id": "...", "session_id": "...", "question": "..."}
+    Returns: {"answer": "...", "qa_key": "...", "turn": N}
+
+    PitwallOrchestrator routes the question to the right specialist agent
+    (CornerCoachAgent, LapComparisonAgent, SetupAdvisorAgent, etc.) then
+    NarrativeAgent produces the final conversational response.
+
+    Call POST /coach/ask/end when the driver is done to persist the full
+    exchange to the conversations table.
+    """
+    if not HAS_ADK:
+        return jsonify({"error": "ADK not available — install google-adk and start lit serve"}), 503
+
+    data = request.get_json(force=True, silent=True) or {}
+    driver_id = data.get("driver_id", "")
+    session_id = data.get("session_id", "")
+    question = data.get("question", "").strip()
+
+    if not question:
+        return jsonify({"error": "question is required"}), 400
+
+    qa_key = f"{driver_id}:{session_id}"
+
+    import time as _time
+    with _qa_lock:
+        _qa_cleanup_stale()
+        _qa_timestamps[qa_key] = _time.time()
+        history = _qa_histories.setdefault(qa_key, [])
+        # Build context window from last 6 turns (3 exchanges) to stay within
+        # E4B's context budget while preserving conversational coherence
+        history_text = ""
+        if history:
+            recent = history[-6:]
+            history_text = "Conversation so far:\n" + "\n".join(
+                f"{'DRIVER' if t['role'] == 'user' else 'COACH'}: {t['text']}"
+                for t in recent
+            ) + "\n\n"
+
+    prompt = (
+        f"Driver: {driver_id or 'unknown'}. "
+        f"Session context: {session_id or 'general'}.\n"
+        f"{history_text}"
+        f"Driver question: {question}"
+    )
+
+    try:
+        answer = _run_adk(prompt)
+        _drain_adk_traces(pitwall_sid=session_id)
+
+        import re as _re
+        _em = _re.search(r"\[EMOTION:(\w+)\]", answer)
+        emotion = _em.group(1) if _em else "neutral"
+        answer = _re.sub(r"\[EMOTION:\w+\]\s*", "", answer).strip()
+
+        with _qa_lock:
+            history = _qa_histories[qa_key]
+            history.append({"role": "user", "text": question})
+            history.append({"role": "assistant", "text": answer, "emotion": emotion})
+            turn_number = len(history) // 2
+
+        return jsonify({
+            "answer": answer,
+            "emotion": emotion,
+            "qa_key": qa_key,
+            "turn": turn_number,
+        })
+    except Exception as e:
+        return jsonify({"error": f"ADK agent error: {e}"}), 500
+
+
+@app.route("/coach/ask/end", methods=["POST"])
+def coach_ask_end():
+    """Flush an in-memory Q&A session to the conversations table and release it.
+
+    Body: {"driver_id": "...", "session_id": "..."}
+    Returns: {"flushed": N}  where N is the number of turns persisted.
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    driver_id = data.get("driver_id", "")
+    session_id = data.get("session_id", "")
+    qa_key = f"{driver_id}:{session_id}"
+
+    with _qa_lock:
+        history = _qa_histories.pop(qa_key, [])
+        _qa_timestamps.pop(qa_key, None)
+
+    if not history or not HAS_DUCKDB:
+        return jsonify({"flushed": 0})
+
+    flushed = 0
+    with _db_lock:
+        conn = get_db()
+        if conn is not None:
+            try:
+                for turn in history:
+                    conn.execute(
+                        "INSERT INTO conversations "
+                        "(session_id, driver_id, role, text, emotion) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        [session_id, driver_id, turn["role"],
+                         turn["text"], turn.get("emotion", "neutral")],
+                    )
+                    flushed += 1
+            except Exception:
+                pass
+            finally:
+                conn.close()
+
+    return jsonify({"flushed": flushed, "qa_key": qa_key})
+
+
+@app.route("/coach/agents", methods=["GET"])
+def coach_agents():
+    """Discover available ADK coaching agents and their capabilities.
+
+    Returns the full agent registry so the Vue PWA can render a
+    'what can I ask?' helper UI in the paddock Q&A screen.
+    """
+    if not HAS_ADK:
+        return jsonify({
+            "available": False,
+            "reason": "google-adk not installed or lit serve not running",
+            "agents": [],
+        })
+    return jsonify({"available": True, "agents": _adk_agent_registry})
 
 
 # ── CAN reader hookup (ADR-015 + ADR-016) ──────────────────────────────────

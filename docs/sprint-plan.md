@@ -197,3 +197,70 @@ Your scope on the Pipeline Guild:
 - [ ] Post-session analysis comparing 3 pods
 - [x] Architecture documentation updated with field test findings (data analysis complete)
 - [ ] Reference architecture ready for Google I/O narrative
+
+---
+
+## ADK Backend Upgrade — Shipped 2026-05-01
+
+All phases delivered ahead of schedule. 358/358 tests passing.
+See [ADR-019](adr/019-adk-multi-agent-backend.md), [ADR-020](adr/020-adk-agent-architecture-refactor.md), [ADR-021](adr/021-adk-second-audit.md), and [adk-agent-architecture.md](adk-agent-architecture.md).
+
+```mermaid
+gantt
+    title ADK Backend Upgrade — SHIPPED
+    dateFormat YYYY-MM-DD
+
+    section Phase 1 - Conversation persistence
+    conversations table + brief/debrief write     :done, e1, 2026-05-01, 3d
+    GET /conversations endpoints                  :done, e2, 2026-05-01, 3d
+
+    section Phase 2 - ADK agents (18 agents)
+    15 tools + PitwallOrchestrator                :done, f1, 2026-05-01, 3d
+    DebriefPipeline + BriefPipeline               :done, f2, 2026-05-01, 3d
+    Runner + persistent sessions + KV cache       :done, f3, 2026-05-01, 3d
+    DuckDB agent_traces + PitwallTracingPlugin    :done, f4, 2026-05-01, 3d
+
+    section Phase 3 - Driver Q&A
+    POST /coach/ask + POST /coach/ask/end         :done, g1, 2026-05-01, 3d
+    GET /coach/agents (Vue PWA discovery)         :done, g2, 2026-05-01, 1d
+
+    section Remaining backlog
+    SSE streaming /coach/ask/stream               :h1, 2026-06-01, 7d
+    Vue PWA paddock Q&A screen                    :h2, 2026-06-08, 14d
+    ADK state scopes + plugin hooks               :h3, 2026-06-15, 7d
+```
+
+### Phase 1 — delivered ✅
+
+- [x] `conversations` table in `get_db()` schema
+- [x] `brief()` + `debrief()` write narratives to `conversations`
+- [x] `GET /conversations/<session_id>`
+- [x] `GET /conversations/driver/<driver_id>`
+
+### Phase 2 — delivered ✅
+
+- [x] `google-adk` installed, `tools/adk_tools.py` (15 tools), `tools/adk_agents.py` (18 agents)
+- [x] `PitwallOrchestrator(BaseAgent)` with `_classify_intent()` deterministic routing
+- [x] `DebriefPipeline`: `SequentialAgent` → `ParallelAgent([Highlights, Telemetry, Pedagogy])` → `NarrativeAgentDebrief`
+- [x] `BriefPipeline`: `SequentialAgent` → `PedagogyAgent` → `NarrativeAgentBrief`
+- [x] `Runner` + `InMemorySessionService` + `run_adk()` (canonical sync entry point)
+- [x] Persistent sessions per driver — KV cache reuse via session cloning, `reset_driver_session()` called at `POST /session/start`
+- [x] `PitwallTracingPlugin(BasePlugin)` + `agent_traces` DuckDB table — full agent + tool telemetry
+- [x] `AgentMetaAgent` — queries `agent_traces` for system observability
+- [x] All 7 ADR-020 audit fixes + 6 ADR-021 audit fixes shipped
+- [x] 358/358 tests passing
+
+### Phase 3 — delivered ✅
+
+- [x] `POST /coach/ask` — multi-turn Q&A, 6-turn rolling context, `_qa_histories` with 1-hour TTL
+- [x] `POST /coach/ask/end` — flush turns to `conversations` table
+- [x] `GET /coach/agents` — `AGENT_REGISTRY` for Vue PWA discovery
+
+### Remaining backlog
+
+- [ ] `POST /coach/ask/stream` — SSE streaming (RunConfig + StreamingMode.SSE)
+- [ ] Vue PWA paddock Q&A screen
+- [ ] ADK state scopes (`user:`, `app:`, `temp:`) — driver prefs persist across sessions
+- [ ] `before_tool_callback` per-agent SQL validation
+- [ ] `LoopAgent` for Q&A refinement (max 3 iterations)
+- [ ] Artifact storage for session PDF export
