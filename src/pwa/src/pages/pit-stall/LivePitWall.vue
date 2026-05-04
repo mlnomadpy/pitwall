@@ -20,10 +20,31 @@ const sectorTimes = ref([
 ])
 
 const carPos = ref(0)
+const trackMapRef = ref<any>(null)
+const activeTurnId = ref<number | null>(null)
 
 const tick = () => {
   timer.value++
   carPos.value = (carPos.value + 1) % 100
+  
+  if (trackMapRef.value && trackMapRef.value.trackTurns) {
+    const pt = trackMapRef.value.getPointAtProgress(carPos.value)
+    let closest: any = null
+    let minDist = Infinity
+    trackMapRef.value.trackTurns.forEach((t: any) => {
+      const dist = Math.hypot(t.cx - pt.x, t.cy - pt.y)
+      if (dist < minDist) {
+        minDist = dist
+        closest = t
+      }
+    })
+    // Highlight if within ~150 units of the SVG coordinate
+    if (closest && minDist < 150) {
+      activeTurnId.value = closest.id
+    } else {
+      activeTurnId.value = null
+    }
+  }
   
   if (timer.value % 20 === 0) {
     // simulate new lap
@@ -82,7 +103,7 @@ const getColorClass = (state: string) => {
         <CyberPanel class="flex-grow flex flex-col items-center justify-center bg-black border-slate relative overflow-hidden p-2">
           <div class="absolute top-2 left-2 text-silver text-small font-bold uppercase z-10">TRACK MAP</div>
           
-          <TrackMap :carProgress="carPos" />
+          <TrackMap ref="trackMapRef" :carProgress="carPos" :activeTurnId="activeTurnId" />
         </CyberPanel>
 
         <CyberPanel class="h-32 shrink-0 bg-ink border-slate p-2 flex flex-col justify-between">

@@ -261,54 +261,7 @@ body .viewport {
     );
 }
 
-/* ── Page background (Synthwave 3D Grid) ── */
-.page-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background-color: var(--color-charcoal);
-  overflow: hidden;
-}
 
-.page-bg::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: -50%;
-  width: 200%;
-  height: 100%;
-  background-image: 
-    linear-gradient(transparent 65%, rgba(78, 205, 196, 0.4) 66%, transparent 67%),
-    linear-gradient(90deg, transparent 65%, rgba(78, 205, 196, 0.4) 66%, transparent 67%);
-  background-size: 40px 40px;
-  transform: perspective(600px) rotateX(60deg) translateY(100px);
-  animation: grid-move 3s linear infinite;
-  mask-image: linear-gradient(to top, black 20%, transparent 80%);
-  -webkit-mask-image: linear-gradient(to top, black 20%, transparent 80%);
-}
-
-@keyframes grid-move {
-  0% { transform: perspective(600px) rotateX(60deg) translateY(0); }
-  100% { transform: perspective(600px) rotateX(60deg) translateY(40px); }
-}
-
-/* ── Page background color variants ── */
-.page-bg-warm { background-color: #2a1f2d; }
-.page-bg-warm::after { background-image:
-  linear-gradient(transparent 65%, rgba(254, 202, 87, 0.3) 66%, transparent 67%),
-  linear-gradient(90deg, transparent 65%, rgba(254, 202, 87, 0.3) 66%, transparent 67%); }
-
-.page-bg-cool { background-color: #1a2233; }
-.page-bg-cool::after { background-image:
-  linear-gradient(transparent 65%, rgba(69, 183, 209, 0.3) 66%, transparent 67%),
-  linear-gradient(90deg, transparent 65%, rgba(69, 183, 209, 0.3) 66%, transparent 67%); }
-
-.page-bg-danger { background-color: #2d1a1a; }
-.page-bg-danger::after { background-image:
-  linear-gradient(transparent 65%, rgba(255, 71, 87, 0.3) 66%, transparent 67%),
-  linear-gradient(90deg, transparent 65%, rgba(255, 71, 87, 0.3) 66%, transparent 67%); }
-
-.page-bg-neutral { background-color: var(--color-charcoal); }
 
 /* ── Staggered entry animation ── */
 @keyframes stagger-in {

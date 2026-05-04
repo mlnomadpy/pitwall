@@ -21,13 +21,13 @@ const cursorIndex = ref(0)
 
 // Mock markers around the track
 const pointsOfInterest = ref([
-  { id: 'T1', progress: 8, cx: 0, cy: 0, type: 'marker', name: 'the K-wall bend', text: 'Apex tight at the K-wall — bumpy on entry. Do not run wide.' },
-  { id: 'T2', progress: 14, cx: 0, cy: 0, type: 'danger', name: 'Off-camber exit', text: 'T2 falls away from you. Get the turning done early or you are in the dirt.' },
-  { id: 'T3', progress: 18, cx: 0, cy: 0, type: 'marker', name: 'Blind crest', text: 'Spot your braking point before the sky fills your windshield.' },
-  { id: 'T4', progress: 24, cx: 0, cy: 0, type: 'marker', name: 'The chute', text: 'Downhill braking. Rear gets light. Trail brake gently.' },
-  { id: 'T7', progress: 55, cx: 0, cy: 0, type: 'danger', name: 'T7 braking zone', text: 'Heavy Gs. If you lock up here, you are going straight into the tires.' },
-  { id: 'T10', progress: 80, cx: 0, cy: 0, type: 'marker', name: 'Sweeping right', text: 'Fastest corner on the track. Need absolute commitment.' },
-  { id: 'T11', progress: 90, cx: 0, cy: 0, type: 'danger', name: 'The Hairpin', text: 'Everyone tries to out-brake each other here. Focus on the exit.' }
+  { id: 'T1', progress: 8, svgTurnId: undefined as number | undefined, type: 'marker', name: 'the K-wall bend', text: 'Apex tight at the K-wall — bumpy on entry. Do not run wide.' },
+  { id: 'T2', progress: 14, svgTurnId: undefined as number | undefined, type: 'danger', name: 'Off-camber exit', text: 'T2 falls away from you. Get the turning done early or you are in the dirt.' },
+  { id: 'T3', progress: 18, svgTurnId: undefined as number | undefined, type: 'marker', name: 'Blind crest', text: 'Spot your braking point before the sky fills your windshield.' },
+  { id: 'T4', progress: 24, svgTurnId: undefined as number | undefined, type: 'marker', name: 'The chute', text: 'Downhill braking. Rear gets light. Trail brake gently.' },
+  { id: 'T7', progress: 55, svgTurnId: undefined as number | undefined, type: 'danger', name: 'T7 braking zone', text: 'Heavy Gs. If you lock up here, you are going straight into the tires.' },
+  { id: 'T10', progress: 80, svgTurnId: undefined as number | undefined, type: 'marker', name: 'Sweeping right', text: 'Fastest corner on the track. Need absolute commitment.' },
+  { id: 'T11', progress: 90, svgTurnId: undefined as number | undefined, type: 'danger', name: 'The Hairpin', text: 'Everyone tries to out-brake each other here. Focus on the exit.' }
 ])
 
 const trackMapRef = ref<any>(null)
@@ -35,11 +35,23 @@ const trackMapRef = ref<any>(null)
 import { onMounted } from 'vue'
 onMounted(() => {
   setTimeout(() => {
-    if (trackMapRef.value) {
+    if (trackMapRef.value && trackMapRef.value.trackTurns) {
       pointsOfInterest.value.forEach(p => {
         const pt = trackMapRef.value.getPointAtProgress(p.progress)
-        p.cx = pt.x
-        p.cy = pt.y
+        
+        let closest: any = null
+        let minDist = Infinity
+        trackMapRef.value.trackTurns.forEach((t: any) => {
+          const dist = Math.hypot(t.cx - pt.x, t.cy - pt.y)
+          if (dist < minDist) {
+            minDist = dist
+            closest = t
+          }
+        })
+        
+        if (closest) {
+          p.svgTurnId = closest.id
+        }
       })
     }
   }, 100)
@@ -54,6 +66,12 @@ const visiblePoints = computed(() => {
     if (p.type === 'danger' && !showDanger.value) return false
     return true
   })
+})
+
+const dangerTurnIds = computed(() => {
+  return showDanger.value 
+    ? pointsOfInterest.value.filter(p => p.type === 'danger' && p.svgTurnId !== undefined).map(p => p.svgTurnId!)
+    : []
 })
 
 const currentVisibleIndex = computed(() => {
@@ -139,7 +157,12 @@ useKeyboard((e: KeyboardEvent) => {
       <template #left>
         <!-- Track Map Area -->
         <CyberPanel class="h-full relative flex items-center justify-center bg-[#1A252C] overflow-hidden p-2">
-          <TrackMap ref="trackMapRef" :strokeClass="showElevation ? 'stroke-[url(#elevationGradient)] stroke-[20]' : 'stroke-[#A0AAB5] stroke-[20]'">
+          <TrackMap ref="trackMapRef" 
+                    :strokeClass="showElevation ? 'stroke-[url(#elevationGradient)] stroke-[20]' : 'stroke-[#A0AAB5] stroke-[20]'"
+                    :activeTurnId="cur.svgTurnId"
+                    :dangerTurns="dangerTurnIds"
+                    @turn-click="(id: number) => { const marker = pointsOfInterest.find(p => p.svgTurnId === id); if (marker) selectMarker(marker.id); }"
+          >
             <defs v-if="showElevation">
               <linearGradient id="elevationGradient" x1="0%" y1="100%" x2="0%" y2="0%">
                 <stop offset="0%" stop-color="#3B82F6" />
@@ -147,35 +170,6 @@ useKeyboard((e: KeyboardEvent) => {
                 <stop offset="100%" stop-color="#EF4444" />
               </linearGradient>
             </defs>
-            
-            <!-- Markers & Danger Zones -->
-            <template v-for="p in pointsOfInterest" :key="p.id">
-              <g v-if="((p.type === 'marker' && showMarkers) || (p.type === 'danger' && showDanger)) && p.cx !== 0" 
-                 :class="[cur.id === p.id ? 'animate-bounce' : '', 'cursor-pointer touch-target']"
-                 style="transform-origin: center; transform-box: fill-box;"
-                 @click="selectMarker(p.id)">
-                
-                <!-- Invisible large touch target -->
-                <circle :cx="p.cx" :cy="p.cy" r="60" fill="transparent" />
-                
-                <circle 
-                  :cx="p.cx" :cy="p.cy" 
-                  :r="cur.id === p.id ? 40 : 20" 
-                  :fill="p.type === 'danger' ? '#EF4444' : '#5EED71'"
-                  :stroke="cur.id === p.id ? '#FFFFFF' : '#1A252C'"
-                  stroke-width="5"
-                  class="pointer-events-none transition-all"
-                />
-                
-                <circle v-if="p.type === 'danger' && showDanger"
-                  :cx="p.cx" :cy="p.cy" 
-                  r="80" 
-                  fill="#EF4444"
-                  opacity="0.2"
-                  class="pointer-events-none transition-all"
-                />
-              </g>
-            </template>
           </TrackMap>
           
           <div class="absolute bottom-2 left-2 text-body text-silver">

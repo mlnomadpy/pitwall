@@ -5,6 +5,7 @@ import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import Sprite from '@/entities/coach/Sprite.vue'
 import CyberButton from '@/shared/ui/core/CyberButton.vue'
+import CyberBackground from '@/shared/ui/core/CyberBackground.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -67,23 +68,7 @@ onUnmounted(() => {
 <template>
   <div class="viewport relative w-full h-full overflow-hidden font-ui cursor-pointer select-none" @click="handleStart">
     
-    <!-- Sky gradient background -->
-    <div class="sky absolute inset-0 z-0"></div>
-    
-    <!-- Animated stars -->
-    <div class="stars absolute inset-0 z-1"></div>
-    <div class="stars stars-2 absolute inset-0 z-1"></div>
-
-    <!-- Horizon line: track surface -->
-    <div class="track-surface absolute bottom-0 left-0 w-full z-2"></div>
-
-    <!-- Racing stripes on the track -->
-    <div class="racing-stripe absolute bottom-0 left-0 w-full z-3"></div>
-
-    <!-- Curb pattern at the horizon -->
-    <div class="curb absolute z-4"></div>
-
-    <!-- Ambient vignette -->
+    <CyberBackground variant="landscape" />
 
     <!-- CRT scanlines -->
     <div class="crt-overlay"></div>
@@ -138,86 +123,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* ── Sky ── */
-.sky {
-  background: linear-gradient(
-    180deg,
-    #0d0e1a 0%,        /* deep night at top */
-    #1a1d3e 25%,        /* sky-night */
-    #3a2a4a 45%,        /* purple-dusk transition */
-    #c8786a 65%,        /* sky-dusk — the warm horizon */
-    #d8b878 78%,        /* sky-dawn — golden band */
-    #2c3242 79%,        /* hard cut to asphalt */
-    #1f2230 100%        /* asphalt-deep */
-  );
-}
-
-/* ── Stars ── */
-.stars {
-  background-image:
-    radial-gradient(1px 1px at 10% 15%, rgba(255,255,255,0.7), transparent),
-    radial-gradient(1px 1px at 25% 8%, rgba(255,255,255,0.5), transparent),
-    radial-gradient(1.5px 1.5px at 40% 22%, rgba(255,255,255,0.8), transparent),
-    radial-gradient(1px 1px at 55% 5%, rgba(255,255,255,0.4), transparent),
-    radial-gradient(1px 1px at 70% 18%, rgba(255,255,255,0.6), transparent),
-    radial-gradient(1.5px 1.5px at 85% 12%, rgba(255,255,255,0.7), transparent),
-    radial-gradient(1px 1px at 15% 30%, rgba(255,255,255,0.3), transparent),
-    radial-gradient(1px 1px at 60% 28%, rgba(255,255,255,0.5), transparent),
-    radial-gradient(1px 1px at 92% 25%, rgba(255,255,255,0.4), transparent),
-    radial-gradient(1px 1px at 35% 35%, rgba(255,255,255,0.3), transparent);
-  animation: twinkle 4s steps(4) infinite alternate;
-}
-
-.stars-2 {
-  background-image:
-    radial-gradient(1px 1px at 5% 20%, rgba(255,255,255,0.5), transparent),
-    radial-gradient(1px 1px at 20% 32%, rgba(255,255,255,0.4), transparent),
-    radial-gradient(1.5px 1.5px at 48% 10%, rgba(255,255,255,0.6), transparent),
-    radial-gradient(1px 1px at 75% 28%, rgba(255,255,255,0.3), transparent),
-    radial-gradient(1px 1px at 90% 8%, rgba(255,255,255,0.5), transparent),
-    radial-gradient(1px 1px at 30% 5%, rgba(255,255,255,0.7), transparent),
-    radial-gradient(1px 1px at 65% 15%, rgba(255,255,255,0.4), transparent);
-  animation: twinkle 5s steps(4) infinite alternate-reverse;
-}
-
-@keyframes twinkle {
-  0% { opacity: 0.4; }
-  100% { opacity: 1; }
-}
-
-/* ── Track surface ── */
-.track-surface {
-  height: 22vh;
-  background: linear-gradient(180deg, #2c3242 0%, #1f2230 100%);
-}
-
-/* ── Racing stripe ── */
-.racing-stripe {
-  height: 22vh;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent 0,
-    transparent 8vw,
-    rgba(255,255,255,0.03) 8vw,
-    rgba(255,255,255,0.03) 16vw
-  );
-}
-
-/* ── Curb ── */
-.curb {
-  bottom: 22vh;
-  left: 0;
-  width: 100%;
-  height: clamp(4px, 1vh, 8px);
-  background: repeating-linear-gradient(
-    90deg,
-    #c93838 0,
-    #c93838 3vw,
-    #f5f5e8 3vw,
-    #f5f5e8 6vw
-  );
-}
-
 /* ── Title text ── */
 .title-text {
   font-size: clamp(32px, 12vmin, 80px);

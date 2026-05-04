@@ -111,7 +111,7 @@ onUnmounted(() => {
             <span :class="bars.throttle === 100 ? 'text-ui-good' : ''">{{ bars.throttle }}%</span>
           </div>
           <div class="h-4 border border-charcoal bg-ink relative overflow-hidden">
-            <div class="h-full bg-ui-good transition-all" :style="`width: ${bars.throttle}%`"></div>
+            <div class="h-full bg-ui-good" :style="`width: ${bars.throttle}%`"></div>
             <div class="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.2)_4px,rgba(0,0,0,0.2)_8px)]"></div>
           </div>
         </div>
@@ -122,7 +122,7 @@ onUnmounted(() => {
             <span :class="bars.brake === 100 ? 'text-ui-warn' : ''">{{ bars.brake }}%</span>
           </div>
           <div class="h-4 border border-charcoal bg-ink relative overflow-hidden">
-            <div class="h-full bg-ui-warn transition-all" :style="`width: ${bars.brake}%`"></div>
+            <div class="h-full bg-ui-warn" :style="`width: ${bars.brake}%`"></div>
             <div class="absolute inset-0 bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgba(0,0,0,0.2)_4px,rgba(0,0,0,0.2)_8px)]"></div>
           </div>
         </div>

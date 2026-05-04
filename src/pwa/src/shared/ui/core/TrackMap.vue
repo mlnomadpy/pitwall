@@ -5,6 +5,7 @@ const props = defineProps<{
   carProgress?: number | null // 0 to 100
   strokeClass?: string
   activeTurnId?: number | null
+  dangerTurns?: number[]
 }>()
 
 const trackPath = ref<SVGPathElement | null>(null)
@@ -74,7 +75,10 @@ onMounted(updateCarPos)
          style="transform-origin: center; transform-box: fill-box;"
       >
         <circle class="cls-7 transition-colors duration-300" :cx="t.cx" :cy="t.cy" r="41.2" 
-                :class="activeTurnId === t.id ? 'fill-slate text-ink border-ink' : ''" />
+                :class="[
+                  activeTurnId === t.id ? 'fill-slate text-ink border-ink' : '',
+                  dangerTurns?.includes(t.id) ? 'stroke-ui-warn drop-shadow-[0_0_15px_#ef4444] stroke-[8px]' : ''
+                ]" />
         <g class="cls-8 transition-colors duration-300" v-html="t.html" :class="activeTurnId === t.id ? 'fill-ink' : ''"></g>
       </g>
       <g>

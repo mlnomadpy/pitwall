@@ -7,6 +7,7 @@ import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import TrackMap from '@/shared/ui/core/TrackMap.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -84,7 +85,7 @@ useKeyboard((e: KeyboardEvent) => {
             </div>
             
             <div class="flex gap-4 items-center pl-4">
-              <span class="text-title font-bold text-white">
+              <span class="text-title font-nums font-bold text-white">
                 {{ s.speed }} km/h
               </span>
               
@@ -110,19 +111,9 @@ useKeyboard((e: KeyboardEvent) => {
       </template>
       
       <template #right>
-        <!-- Mock Track Highlight -->
-        <CyberPanel class="h-full relative flex items-center justify-center bg-[#1A252C] overflow-hidden p-2">
-          <!-- Sonoma-ish SVG shape -->
-          <svg viewBox="0 0 100 100" class="w-full h-full opacity-50 drop-shadow-[2px_2px_0_#000]">
-            <!-- Track outline -->
-            <path d="M 20 80 L 10 50 L 30 20 L 70 10 L 90 40 L 70 80 Z" fill="none" stroke="#A0AAB5" stroke-width="2" stroke-linejoin="round"/>
-            
-            <!-- Highlights based on selected straight -->
-            <path v-if="cur.id === 'front'" d="M 70 80 L 20 80" fill="none" stroke="#5EED71" stroke-width="4" class="animate-pulse" stroke-linecap="round"/>
-            <path v-if="cur.id === 't4'" d="M 30 20 L 70 10" fill="none" stroke="#5EED71" stroke-width="4" class="animate-pulse" stroke-linecap="round"/>
-            <path v-if="cur.id === 't7'" d="M 90 40 L 70 80" fill="none" stroke="#5EED71" stroke-width="4" class="animate-pulse" stroke-linecap="round"/>
-          </svg>
-          <div class="absolute bottom-2 right-2 text-body text-silver font-bold bg-ink px-1 rounded">
+        <CyberPanel class="h-full relative flex items-center justify-center bg-[#1A252C] overflow-hidden p-0 border-b border-slate">
+          <TrackMap class="absolute inset-[-10%] w-[120%] h-[120%] opacity-80" />
+          <div class="absolute top-2 left-2 text-small text-silver font-bold z-10">
             TRACK MAP
           </div>
         </CyberPanel>

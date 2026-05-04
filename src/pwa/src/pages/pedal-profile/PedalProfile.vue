@@ -125,16 +125,16 @@ onUnmounted(() => {
       
       <!-- Stacked Bar -->
       <div class="w-full h-4 flex mt-2 border border-slate">
-        <div class="h-full bg-ui-good transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.throttle}%` }">
+        <div class="h-full bg-ui-good flex items-center overflow-hidden" :style="{ width: `${distribution.throttle}%` }">
           <span v-if="distribution.throttle > 10" class="text-small text-ink font-bold ml-1">THROTTLE</span>
         </div>
-        <div class="h-full bg-ui-warn transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.brake}%` }">
+        <div class="h-full bg-ui-warn flex items-center overflow-hidden" :style="{ width: `${distribution.brake}%` }">
           <span v-if="distribution.brake > 10" class="text-small text-ink font-bold ml-1">BRAKE</span>
         </div>
-        <div class="h-full bg-[#F59E0B] transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.trail}%` }">
+        <div class="h-full bg-[#F59E0B] flex items-center overflow-hidden" :style="{ width: `${distribution.trail}%` }">
           <span v-if="distribution.trail > 10" class="text-small text-ink font-bold ml-1">TRAIL</span>
         </div>
-        <div class="h-full bg-charcoal transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.coast}%` }">
+        <div class="h-full bg-charcoal flex items-center overflow-hidden" :style="{ width: `${distribution.coast}%` }">
           <span v-if="distribution.coast > 10" class="text-small text-white font-bold ml-1">COAST</span>
         </div>
       </div>

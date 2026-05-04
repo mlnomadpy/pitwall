@@ -6,36 +6,58 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import TrackMap from '@/shared/ui/core/TrackMap.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
 
 // Mock corner data
-const corners = [
-  { id: 'T1', name: 'Turn 1', grade: 'B', entry: 140, apex: 120, exit: 145, brake: 20, glat: 1.1, time: 2.1, delta: '+0.1', class: 'med' },
-  { id: 'T2', name: 'Turn 2', grade: 'A', entry: 120, apex: 85, exit: 110, brake: 60, glat: 1.3, time: 3.4, delta: '-0.2', class: 'low' },
-  { id: 'T3', name: 'Turn 3', grade: 'C+', entry: 140, apex: 115, exit: 135, brake: 35, glat: 1.2, time: 2.8, delta: '+0.4', class: 'med' },
-  { id: 'T3a', name: 'Turn 3a', grade: 'B-', entry: 135, apex: 125, exit: 140, brake: 15, glat: 1.0, time: 1.5, delta: '+0.2', class: 'high' },
-  { id: 'T4', name: 'Turn 4', grade: 'A+', entry: 160, apex: 130, exit: 155, brake: 40, glat: 1.4, time: 2.5, delta: '-0.4', class: 'med' },
-  { id: 'T5', name: 'Turn 5', grade: 'B', entry: 140, apex: 105, exit: 125, brake: 50, glat: 1.2, time: 3.0, delta: '+0.1', class: 'low' },
-  { id: 'T6', name: 'Carousel', grade: 'B+', entry: 150, apex: 110, exit: 135, brake: 45, glat: 1.3, time: 4.5, delta: '-0.1', class: 'med' },
-  { id: 'T7', name: 'Turn 7', grade: 'F', entry: 165, apex: 82, exit: 105, brake: 85, glat: 1.1, time: 4.8, delta: '+0.8', class: 'low' },
-  { id: 'T8', name: 'Esses 1', grade: 'A', entry: 155, apex: 140, exit: 160, brake: 10, glat: 1.3, time: 1.8, delta: '-0.2', class: 'high' },
-  { id: 'T8a', name: 'Esses 2', grade: 'A-', entry: 160, apex: 145, exit: 165, brake: 5, glat: 1.2, time: 1.7, delta: '-0.1', class: 'high' },
-  { id: 'T9', name: 'Turn 9', grade: 'B', entry: 170, apex: 135, exit: 150, brake: 30, glat: 1.1, time: 2.4, delta: '+0.2', class: 'med' },
-  { id: 'T10', name: 'Turn 10', grade: 'C', entry: 180, apex: 110, exit: 130, brake: 65, glat: 1.2, time: 3.2, delta: '+0.5', class: 'low' },
-  { id: 'T11', name: 'Hairpin', grade: 'B+', entry: 175, apex: 64, exit: 95, brake: 90, glat: 1.4, time: 5.1, delta: '-0.1', class: 'low' },
-]
+const corners = ref([
+  { id: 'T1', progress: 8, svgTurnId: undefined as number | undefined, name: 'Turn 1', grade: 'B', entry: 140, apex: 120, exit: 145, brake: 20, glat: 1.1, time: 2.1, delta: '+0.1', class: 'med' },
+  { id: 'T2', progress: 14, svgTurnId: undefined as number | undefined, name: 'Turn 2', grade: 'A', entry: 120, apex: 85, exit: 110, brake: 60, glat: 1.3, time: 3.4, delta: '-0.2', class: 'low' },
+  { id: 'T3', progress: 18, svgTurnId: undefined as number | undefined, name: 'Turn 3', grade: 'C+', entry: 140, apex: 115, exit: 135, brake: 35, glat: 1.2, time: 2.8, delta: '+0.4', class: 'med' },
+  { id: 'T3a', progress: 21, svgTurnId: undefined as number | undefined, name: 'Turn 3a', grade: 'B-', entry: 135, apex: 125, exit: 140, brake: 15, glat: 1.0, time: 1.5, delta: '+0.2', class: 'high' },
+  { id: 'T4', progress: 24, svgTurnId: undefined as number | undefined, name: 'Turn 4', grade: 'A+', entry: 160, apex: 130, exit: 155, brake: 40, glat: 1.4, time: 2.5, delta: '-0.4', class: 'med' },
+  { id: 'T5', progress: 30, svgTurnId: undefined as number | undefined, name: 'Turn 5', grade: 'B', entry: 140, apex: 105, exit: 125, brake: 50, glat: 1.2, time: 3.0, delta: '+0.1', class: 'low' },
+  { id: 'T6', progress: 45, svgTurnId: undefined as number | undefined, name: 'Carousel', grade: 'B+', entry: 150, apex: 110, exit: 135, brake: 45, glat: 1.3, time: 4.5, delta: '-0.1', class: 'med' },
+  { id: 'T7', progress: 55, svgTurnId: undefined as number | undefined, name: 'Turn 7', grade: 'F', entry: 165, apex: 82, exit: 105, brake: 85, glat: 1.1, time: 4.8, delta: '+0.8', class: 'low' },
+  { id: 'T8', progress: 65, svgTurnId: undefined as number | undefined, name: 'Esses 1', grade: 'A', entry: 155, apex: 140, exit: 160, brake: 10, glat: 1.3, time: 1.8, delta: '-0.2', class: 'high' },
+  { id: 'T8a', progress: 68, svgTurnId: undefined as number | undefined, name: 'Esses 2', grade: 'A-', entry: 160, apex: 145, exit: 165, brake: 5, glat: 1.2, time: 1.7, delta: '-0.1', class: 'high' },
+  { id: 'T9', progress: 70, svgTurnId: undefined as number | undefined, name: 'Turn 9', grade: 'B', entry: 170, apex: 135, exit: 150, brake: 30, glat: 1.1, time: 2.4, delta: '+0.2', class: 'med' },
+  { id: 'T10', progress: 80, svgTurnId: undefined as number | undefined, name: 'Turn 10', grade: 'C', entry: 180, apex: 110, exit: 130, brake: 65, glat: 1.2, time: 3.2, delta: '+0.5', class: 'low' },
+  { id: 'T11', progress: 90, svgTurnId: undefined as number | undefined, name: 'Hairpin', grade: 'B+', entry: 175, apex: 64, exit: 95, brake: 90, glat: 1.4, time: 5.1, delta: '-0.1', class: 'low' },
+])
 
 const cursorIndex = ref(0)
-const cur = computed(() => corners[cursorIndex.value])
+const cur = computed(() => corners.value[cursorIndex.value])
 
-const getClassColor = (c: string) => {
-  if (c === 'low') return 'text-ui-warn'
-  if (c === 'med') return 'text-silver'
-  if (c === 'high') return 'text-ui-good'
-  return 'text-silver'
-}
+const trackMapRef = ref<any>(null)
+
+import { onMounted } from 'vue'
+onMounted(() => {
+  setTimeout(() => {
+    if (trackMapRef.value && trackMapRef.value.trackTurns) {
+      corners.value.forEach(c => {
+        const pt = trackMapRef.value.getPointAtProgress(c.progress)
+        
+        let closest: any = null
+        let minDist = Infinity
+        trackMapRef.value.trackTurns.forEach((t: any) => {
+          const dist = Math.hypot(t.cx - pt.x, t.cy - pt.y)
+          if (dist < minDist) {
+            minDist = dist
+            closest = t
+          }
+        })
+        
+        if (closest) {
+          c.svgTurnId = closest.id
+        }
+      })
+    }
+  }, 100)
+})
+
 
 const getGradeColor = (g: string) => {
   if (g.startsWith('A')) return 'text-ui-good font-bold drop-shadow-[1px_1px_0_#000]'
@@ -46,11 +68,11 @@ const getGradeColor = (g: string) => {
 
 useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
-    cursorIndex.value = Math.min(cursorIndex.value + 1, corners.length - 1)
+    cursorIndex.value = Math.min(cursorIndex.value + 1, corners.value.length - 1)
     
-    if (corners[cursorIndex.value].grade.startsWith('A')) {
+    if (corners.value[cursorIndex.value].grade.startsWith('A')) {
       audio.playSfx('goal_complete')
-    } else if (corners[cursorIndex.value].grade === 'F') {
+    } else if (corners.value[cursorIndex.value].grade === 'F') {
       audio.playSfx('error_quiet')
     } else {
       audio.playSfx('cursor_move')
@@ -58,9 +80,9 @@ useKeyboard((e: KeyboardEvent) => {
   } else if (e.key === 'ArrowLeft') {
     cursorIndex.value = Math.max(cursorIndex.value - 1, 0)
     
-    if (corners[cursorIndex.value].grade.startsWith('A')) {
+    if (corners.value[cursorIndex.value].grade.startsWith('A')) {
       audio.playSfx('goal_complete')
-    } else if (corners[cursorIndex.value].grade === 'F') {
+    } else if (corners.value[cursorIndex.value].grade === 'F') {
       audio.playSfx('error_quiet')
     } else {
       audio.playSfx('cursor_move')
@@ -76,22 +98,13 @@ useKeyboard((e: KeyboardEvent) => {
 
 <template>
   <PageShell title="CORNER MASTERY" subtitle="session 2026-04-29-1503" :hints="['A · DRILL DOWN (SOON)', '◀ ▶ MOVE', 'B · BACK']" bg="cool">
-    <!-- Stylized Track Map -->
-    <CyberPanel class="flex items-center justify-center py-2 px-1 text-body overflow-hidden whitespace-nowrap bg-charcoal">
-      <div class="flex gap-[6px]">
-        <div 
-          v-for="(c, i) in corners" 
-          :key="c.id"
-          class="flex flex-col items-center justify-center transition-transform"
-          :class="cursorIndex === i ? 'scale-125 font-bold z-10' : 'opacity-70'"
-        >
-          <span v-if="cursorIndex === i" class="text-ui-good text-small absolute -top-2">▼</span>
-          <span class="text-body" :class="getClassColor(c.class)">
-            {{ c.class === 'low' ? '◓' : c.class === 'med' ? '◐' : '◑' }}
-          </span>
-          <span :class="cursorIndex === i ? 'text-white' : 'text-silver'">{{ c.id }}</span>
-        </div>
-      </div>
+    <!-- Interactive Track Minimap -->
+    <CyberPanel class="h-[25vh] flex items-center justify-center bg-[#1A252C] overflow-hidden p-0 relative border-b border-slate">
+      <TrackMap ref="trackMapRef" 
+                class="absolute inset-[-10%] w-[120%] h-[120%] opacity-80"
+                :activeTurnId="cur.svgTurnId"
+                @turn-click="(id: number) => { const idx = corners.findIndex(c => c.svgTurnId === id); if (idx !== -1) { cursorIndex = idx; audio.playSfx('cursor_select'); } }" />
+      <div class="absolute top-2 left-2 text-silver text-small font-bold z-10">TRACK MINIMAP</div>
     </CyberPanel>
     
     <!-- Drill Panel -->

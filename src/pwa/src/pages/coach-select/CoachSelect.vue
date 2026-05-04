@@ -116,7 +116,7 @@ const trySelect = async (c: any) => {
       <!-- Coach Preview Area -->
       <div class="coach-preview-container relative w-[clamp(180px,40vw,280px)] h-[clamp(180px,40vw,280px)] flex flex-col items-center justify-center">
         <!-- Backdrop Glow -->
-        <div class="sprite-backdrop absolute inset-0 rounded-full transition-all duration-300"
+        <div class="sprite-backdrop absolute inset-0 rounded-full"
              :class="isLocked(cursorIndex) ? 'locked-backdrop' : (activeSlot?.preferredCoach === coaches[cursorIndex].id ? 'active-backdrop' : 'unlocked-backdrop')">
         </div>
         
@@ -134,7 +134,7 @@ const trySelect = async (c: any) => {
             🔒 LV {{ coaches[cursorIndex].levelReq }}
           </div>
           <div v-else-if="activeSlot?.preferredCoach === coaches[cursorIndex].id" class="flex flex-col items-center gap-2">
-            <div class="bg-ui-good/20 border border-ui-good text-ui-good text-body font-bold px-6 py-2 shadow-[0_0_15px_rgba(42,161,152,0.4)] backdrop-blur-sm rounded">
+            <div class="bg-ui-good/20 border border-ui-good text-ui-good text-body font-bold px-6 py-2 shadow-[0_0_15px_rgba(42,161,152,0.4)] rounded">
               ACTIVE COACH
             </div>
             <div class="text-small text-silver bg-ink/80 px-2 py-1 rounded border border-slate" @click="router.push('/garage/coach/bios')">
@@ -149,7 +149,7 @@ const trySelect = async (c: any) => {
         <div 
           v-for="(c, i) in coaches" 
           :key="c.id"
-          class="coach-option px-[clamp(10px,2vw,20px)] py-[clamp(8px,1.5vh,16px)] border-2 cursor-pointer transition-all duration-150 uppercase flex items-center justify-center"
+          class="coach-option px-[clamp(10px,2vw,20px)] py-[clamp(8px,1.5vh,16px)] border-2 cursor-pointer uppercase flex items-center justify-center"
           :class="[
             cursorIndex === i 
               ? 'border-ui-good bg-ui-good/20 text-white font-bold transform -translate-y-1 shadow-[0_0_12px_rgba(42,161,152,0.4)]' 

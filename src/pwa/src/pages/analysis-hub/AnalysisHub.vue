@@ -64,7 +64,7 @@ useKeyboard((e: KeyboardEvent) => {
         
         <!-- Left Pane: Hero Section -->
         <template #left>
-          <div class="h-full bg-ink/80 border border-slate flex flex-col relative overflow-hidden group">
+          <CyberPanel class="h-full bg-ink/80 border-slate flex flex-col relative overflow-hidden group p-0">
             <div class="absolute inset-0 bg-ui-info/5 pointer-events-none"></div>
             
             <div class="p-[3vmin] flex flex-col h-full z-10">
@@ -102,7 +102,7 @@ useKeyboard((e: KeyboardEvent) => {
             <div class="absolute -bottom-10 -right-10 text-[150px] text-slate/5 font-bold leading-none select-none">
               #01
             </div>
-          </div>
+          </CyberPanel>
         </template>
         
         <!-- Right Pane: Analysis Modules -->

@@ -183,7 +183,7 @@ const distScale = (val: number) => {
                    :style="{ left: distScale(out) }"></div>
               
               <!-- Cursor Marker -->
-              <div class="absolute text-ui-good font-bold text-body top-[18px] transition-all duration-200 -ml-1 drop-shadow-[1px_1px_0_#000]"
+              <div class="absolute text-ui-good font-bold text-body top-[18px] -ml-1 drop-shadow-[1px_1px_0_#000]"
                    :style="{ left: distScale(parseLapToSeconds(laps[cursorIndex].total)) }">
                 ▲
               </div>

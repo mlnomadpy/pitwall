@@ -7,6 +7,7 @@ import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
 import PageShell from '@/shared/ui/PageShell.vue'
+import CyberBackground from '@/shared/ui/core/CyberBackground.vue'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -78,14 +79,7 @@ const onDialogueDone = () => {
 <template>
   <PageShell :show-heading="false" bg="neutral" :hints="['ENTER · NEXT', 'B · BACK']">
     <div class="relative w-full h-full flex flex-col items-center justify-center p-4 z-10">
-    <!-- Starry background mock -->
-    <div class="absolute inset-0 z-0 bg-asphalt">
-       <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[20%] top-[30%] opacity-50"></div>
-       <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[80%] top-[40%] opacity-80 animate-pulse"></div>
-       <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[50%] top-[20%] opacity-30"></div>
-       <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[30%] top-[70%] opacity-60"></div>
-       <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[70%] top-[80%] opacity-40"></div>
-    </div>
+    <CyberBackground variant="stars" />
     
     <div class="relative z-10 w-full h-full flex flex-col items-center">
       <h1 class="text-title-lg text-white font-bold mb-4 mt-8 tracking-widest drop-shadow-[2px_2px_0_#000]">END OF DAY</h1>

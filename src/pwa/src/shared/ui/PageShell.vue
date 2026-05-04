@@ -2,12 +2,14 @@
 import StatusBar from '@/widgets/status-bar/StatusBar.vue'
 import HintBar from '@/widgets/hint-bar/HintBar.vue'
 import PageHeading from '@/shared/ui/PageHeading.vue'
+import CyberBackground from '@/shared/ui/core/CyberBackground.vue'
 
 interface Props {
   title?: string
   subtitle?: string
   hints: string[]
   bg?: 'default' | 'warm' | 'cool' | 'danger' | 'neutral'
+  bgVariant?: 'grid' | 'landscape' | 'stars'
   showHeading?: boolean
   headingAlign?: 'center' | 'left'
   statusExtra?: string
@@ -16,6 +18,7 @@ interface Props {
 
 withDefaults(defineProps<Props>(), {
   bg: 'default',
+  bgVariant: 'grid',
   showHeading: true,
   headingAlign: 'center',
   hideStatus: false
@@ -26,15 +29,7 @@ withDefaults(defineProps<Props>(), {
   <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui">
     <StatusBar v-if="!hideStatus" :extra="statusExtra" />
 
-    <div
-      class="page-bg"
-      :class="{
-        'page-bg-warm': bg === 'warm',
-        'page-bg-cool': bg === 'cool',
-        'page-bg-danger': bg === 'danger',
-        'page-bg-neutral': bg === 'neutral'
-      }"
-    ></div>
+    <CyberBackground :variant="bgVariant" :color="bg" />
 
     <div class="shell-content">
       <!-- Heading -->
