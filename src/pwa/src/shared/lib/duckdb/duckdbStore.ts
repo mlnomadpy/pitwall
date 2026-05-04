@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
+import { markRaw } from 'vue'
 import * as duckdb from '@duckdb/duckdb-wasm'
+import { bridge } from '@/shared/api/bridge'
 
 export const useDuckDBStore = defineStore('duckdb', {
   state: () => ({
     db: null as duckdb.AsyncDuckDB | null,
-    cachedSessionIds: new Set<string>(),
+    cachedSessionIds: markRaw(new Set<string>()),
   }),
   actions: {
     async init() {
@@ -22,8 +24,7 @@ export const useDuckDBStore = defineStore('duckdb', {
     async ensureSession(sid: string) {
       if (this.cachedSessionIds.has(sid)) return
       // Fetch from bridge -> register with DuckDB-Wasm -> save to OPFS
-      const r = await fetch(`http://127.0.0.1:8765/session/${sid}/export.parquet?table=telemetry`)
-      const buf = new Uint8Array(await r.arrayBuffer())
+      const buf = await bridge.getBuffer(`/session/${sid}/export.parquet?table=telemetry`)
       
       await this.db!.registerFileBuffer(`${sid}.parquet`, buf)
       
@@ -32,8 +33,12 @@ export const useDuckDBStore = defineStore('duckdb', {
       const dir = await root.getDirectoryHandle('sessions', { create: true })
       const fh = await dir.getFileHandle(`${sid}.parquet`, { create: true })
       const ws = await fh.createWritable()
-      await ws.write(buf)
+      await ws.write(buf.buffer as ArrayBuffer)
       await ws.close()
+      
+      const conn = await this.db!.connect()
+      await conn.query(`CREATE OR REPLACE VIEW telemetry AS SELECT * FROM '${sid}.parquet'`)
+      await conn.close()
       
       this.cachedSessionIds.add(sid)
     },

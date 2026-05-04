@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
 import Tile from './ui/Tile.vue'
 import type { TileData } from './ui/Tile.vue'
-import Sprite from '@/entities/coach/Sprite.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 
 const router = useRouter()
@@ -18,9 +18,11 @@ const tiles: TileData[] = [
   { id: 'track', title: 'TRACK', subText: 'GO RACING', route: '/briefing' },
   { id: 'pit-stall', title: 'PIT STALL', subText: 'CONNECT · TUNE', route: '/garage/pit-stall' },
   { id: 'trainer-card', title: 'TRAINER CARD', subText: 'STATS · MEDALS', route: '/garage/trainer' },
-  { id: 'analysis', title: 'ANALYSIS', subText: 'LAPS · CORNERS', route: '/garage/analysis', disabled: save.slots[save.activeSlotId! - 1]?.sessions.length === 0 },
+  { id: 'analysis', title: 'ANALYSIS', subText: 'LAPS · CORNERS', route: '/garage/analysis' },
   { id: 'coaches', title: 'COACHES', subText: '+1 AVAILABLE', route: '/garage/coach' },
+  { id: 'leaderboard', title: 'HIGH SCORES', subText: 'GLOBAL RANKING', route: '/leaderboard' },
   { id: 'quests', title: 'QUEST LOG', subText: '0 ACTIVE GOALS', route: '/garage/quests' },
+  { id: 'setup', title: 'CAR SETUP', subText: 'AERO · BRAKES', route: '/garage/setup' }
 ]
 
 const cursorIndex = ref(0)
@@ -28,15 +30,7 @@ const greetingActive = ref(true)
 const greetingText = "Welcome to the Garage! Ready to hit the track?"
 const hints = ['▲ ▼ ◀ ▶ MOVE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE']
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-})
-
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
     cursorIndex.value = (cursorIndex.value + 1) % tiles.length
     audio.playSfx('cursor_move')
@@ -67,7 +61,7 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cursor_select')
     router.push('/settings')
   }
-}
+})
 
 const onSelect = (tileId: string) => {
   const tile = tiles.find(t => t.id === tileId)
@@ -78,16 +72,13 @@ const onSelect = (tileId: string) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden">
-    <StatusBar />
+  <PageShell title="GARAGE" :hints="hints" bg="neutral" :show-heading="false">
+    <!-- Layered background overrides -->
+    <div class="garage-bg absolute inset-0 z-0 pointer-events-none"></div>
+    <div class="garage-floor absolute bottom-0 left-0 w-full z-1 pointer-events-none"></div>
+    <div class="crt-overlay pointer-events-none"></div>
     
-    <!-- Layered background -->
-    <div class="garage-bg absolute inset-0 z-0"></div>
-    <div class="garage-floor absolute bottom-0 left-0 w-full z-1"></div>
-    <div class="crt-overlay"></div>
-    
-    <!-- Grid content -->
-    <div class="content flex flex-col items-center justify-center h-full pt-[6vh] pb-[6vh] relative z-10">
+    <div class="content flex flex-col items-center justify-center relative z-10 w-full flex-grow">
       <!-- Section heading -->
       <div class="section-heading mb-[2vmin]">
         <span class="text-title text-slate tracking-[0.3em] font-title">GARAGE</span>
@@ -116,21 +107,21 @@ const onSelect = (tileId: string) => {
       <!-- NPC Band -->
       <div class="npc-band absolute bottom-[6vh] left-0 w-full flex items-end px-[3vw]" style="height: clamp(48px, 10vh, 80px);">
         <div class="npc-ground flex items-end">
-          <Sprite :sheet="save.slots[save.activeSlotId! - 1]?.preferredCoach ?? 'trod'" animation="idle" />
+          <CyberAvatar :sheet="save.activeSlot?.preferredCoach ?? 'trod'" size="sm" variant="ghost" />
         </div>
       </div>
     </div>
     
-    <DialogueBox 
-      v-if="greetingActive"
-      :coach-id="save.slots[save.activeSlotId! - 1]?.preferredCoach ?? 'trod'"
-      :text="greetingText"
-      emotion="idle"
-      @done="greetingActive = false" 
-    />
-    
-    <HintBar :hints="hints" />
-  </div>
+    <template #floating>
+      <CoachFloat 
+        v-if="greetingActive"
+        :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
+        :text="greetingText"
+        emotion="idle"
+        @done="greetingActive = false" 
+      />
+    </template>
+  </PageShell>
 </template>
 
 <style scoped>
@@ -190,7 +181,7 @@ const onSelect = (tileId: string) => {
 .spatial-item {
   position: absolute;
   width: clamp(240px, 60vw, 400px);
-  transition: all 0.4s cubic-bezier(0.25, 1.5, 0.5, 1);
+  transition: transform 0.15s steps(4), opacity 0.15s steps(4);
   transform-origin: center center;
   opacity: 0;
   pointer-events: none;
@@ -201,7 +192,7 @@ const onSelect = (tileId: string) => {
   opacity: 1;
   z-index: 10;
   pointer-events: auto;
-  filter: drop-shadow(0 0 20px rgba(78, 205, 196, 0.4));
+  filter: drop-shadow(8px 8px 0 rgba(0, 0, 0, 0.8));
 }
 
 .spatial-item.prev {

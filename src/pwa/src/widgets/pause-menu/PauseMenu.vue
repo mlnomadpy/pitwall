@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import { usePauseStore } from '@/shared/api/pauseStore'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import { usePauseStore } from '@/shared/lib/pauseStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
-
 const router = useRouter()
-const route = useRoute()
 const save = useSaveStore()
 const audio = useAudioStore()
 const store = usePauseStore()
@@ -71,13 +69,11 @@ const handleKey = (e: KeyboardEvent) => {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKey, { capture: true })
-})
+const triggerEnter = () => {
+  handleKey(new KeyboardEvent('keydown', { key: 'Enter' }))
+}
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey, { capture: true })
-})
+useKeyboard(handleKey, { capture: true })
 </script>
 
 <template>
@@ -96,8 +92,9 @@ onUnmounted(() => {
             <li 
               v-for="(item, i) in items" 
               :key="item"
-              class="pause-item"
+              class="pause-item touch-target"
               :class="cursorIndex === i ? 'item-focused' : 'item-default'"
+              @click="cursorIndex === i ? triggerEnter() : (cursorIndex = i, audio.playSfx('cursor_move'))"
             >
               <span class="item-cursor" v-if="cursorIndex === i">▶</span>
               <span class="item-cursor item-invisible" v-else>&nbsp;</span>
@@ -107,14 +104,14 @@ onUnmounted(() => {
 
           <DialogueBox 
             v-if="store.confirmingQuit"
-            :coach-id="save.slots[save.activeSlotId?-1:0]?.preferredCoach ?? 'trod'"
+            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="disappointed"
             text="Are you sure? Unsaved laps will stay in the bridge. (Y/N)"
             class="pause-dialogue"
           />
           <DialogueBox 
             v-else
-            :coach-id="save.slots[save.activeSlotId?-1:0]?.preferredCoach ?? 'trod'"
+            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="idle"
             text="Take your time."
             class="pause-dialogue"

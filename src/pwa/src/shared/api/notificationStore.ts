@@ -14,53 +14,7 @@ export interface AppNotification {
 
 export const useNotificationsStore = defineStore('notifications', {
   state: () => ({
-    items: [
-      {
-        id: '1',
-        kind: 'debrief-ready',
-        title: '⭕ DEBRIEF READY',
-        subText: 'session-20260423-1004 · Tap to read',
-        timestamp: '2 min ago',
-        isRead: false,
-        route: '/stage-clear'
-      },
-      {
-        id: '2',
-        kind: 'medal-earned',
-        title: '⭐ NEW MEDAL · TRAIL BRAKE APPRENTICE',
-        subText: 'Tap to view in Quest Log',
-        timestamp: '12 min ago',
-        isRead: false,
-        route: '/garage/quests'
-      },
-      {
-        id: '3',
-        kind: 'hardware-warning',
-        title: '⚠️ HARDWARE WARNING',
-        subText: 'TPMS data rate dropped — replace battery?',
-        timestamp: '1 hr ago',
-        isRead: false,
-        route: '/garage/pit-stall/hardware'
-      },
-      {
-        id: '4',
-        kind: 'evolution-ready',
-        title: '📈 EVOLUTION SNAPSHOT READY',
-        subText: 'Last 5 sessions analysed · Tap to view',
-        timestamp: '3 hr ago',
-        isRead: true,
-        route: '/analysis/evolution'
-      },
-      {
-        id: '5',
-        kind: 'session-saved',
-        title: '✓ SESSION SAVED',
-        subText: 'session-20260423-0904 · 18 laps · in DuckDB',
-        timestamp: '5 hr ago',
-        isRead: true,
-        route: '/garage'
-      }
-    ] as AppNotification[]
+    items: [] as AppNotification[]
   }),
   getters: {
     unreadCount: (state) => state.items.filter(i => !i.isRead).length

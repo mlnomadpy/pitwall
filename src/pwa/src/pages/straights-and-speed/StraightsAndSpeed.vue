@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import { useSaveStore } from '@/entities/save/model/saveStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
-const save = useSaveStore()
 
 // Mock data
 const straights = [
@@ -38,7 +37,7 @@ const getEmotion = () => {
   return 'idle'
 }
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowDown') {
     cursorIndex.value = Math.min(cursorIndex.value + 1, straights.length - 1)
     
@@ -62,32 +61,14 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.push('/garage/analysis')
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
-      <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title text-silver font-bold">STRAIGHTS & SPEED</h1>
-        <span class="text-body text-silver">session 2026-04-29-1503</span>
-      </div>
-
-      <div class="grid grid-cols-[3fr_2fr] gap-2 flex-grow min-h-0 pb-16">
-        
-        <CyberPanel class="flex flex-col text-body p-2 gap-2">
+  <PageShell title="STRAIGHTS & SPEED" subtitle="session 2026-04-29-1503" :hints="['A · OPEN REPLAY (SOON)', '▲ ▼ MOVE', 'B · BACK']" bg="cool">
+    <CyberSplitView split="60-40" gap="sm" class="flex-grow min-h-0">
+      <template #left>
+        <CyberPanel class="h-full flex flex-col text-body p-2 gap-2">
           <div 
             v-for="(s, i) in straights" 
             :key="s.id"
@@ -126,9 +107,11 @@ onUnmounted(() => {
             </div>
           </div>
         </CyberPanel>
-        
+      </template>
+      
+      <template #right>
         <!-- Mock Track Highlight -->
-        <CyberPanel class="relative flex items-center justify-center bg-[#1A252C] overflow-hidden p-2">
+        <CyberPanel class="h-full relative flex items-center justify-center bg-[#1A252C] overflow-hidden p-2">
           <!-- Sonoma-ish SVG shape -->
           <svg viewBox="0 0 100 100" class="w-full h-full opacity-50 drop-shadow-[2px_2px_0_#000]">
             <!-- Track outline -->
@@ -143,25 +126,15 @@ onUnmounted(() => {
             TRACK MAP
           </div>
         </CyberPanel>
-
-      </div>
-      
-      <div class="absolute bottom-6 left-2 right-2">
-        <DialogueBox 
-          :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
-          :emotion="getEmotion()"
-          :text="getCoachLine()"
-          class="scale-[0.85] origin-bottom-left w-[117%]"
-          :key="cur.id"
-        />
-      </div>
-      
-    </div>
+      </template>
+    </CyberSplitView>
     
-    <HintBar :hints="['A · OPEN REPLAY (SOON)', '▲ ▼ MOVE', 'B · BACK']" />
-  </div>
+    <template #floating>
+      <CoachFloat
+        :emotion="getEmotion()"
+        :text="getCoachLine()"
+        :key="cur.id"
+      />
+    </template>
+  </PageShell>
 </template>
-
-<style scoped>
-/* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
-</style>

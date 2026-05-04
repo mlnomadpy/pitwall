@@ -15,7 +15,7 @@ withDefaults(defineProps<Props>(), {
 <template>
   <div 
     class="cyber-panel"
-    :class="[variant, `border-${border}`, { interactive }]"
+    :class="[variant, `border-${border}`, { interactive, 'arcade-hover': interactive }]"
   >
     <div class="panel-content">
       <slot></slot>
@@ -53,13 +53,6 @@ withDefaults(defineProps<Props>(), {
 /* Base variants */
 .cyber-panel.solid {
   background: rgba(11, 12, 16, 0.95);
-}
-
-.cyber-panel.glass {
-  background: linear-gradient(135deg, rgba(31, 40, 51, 0.8) 0%, rgba(11, 12, 16, 0.9) 100%);
-  backdrop-filter: blur(12px) brightness(1.2) saturate(1.5);
-  -webkit-backdrop-filter: blur(12px) brightness(1.2) saturate(1.5);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
 .cyber-panel.ghost {

@@ -12,4 +12,8 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 
+app.config.errorHandler = (err, _instance, info) => {
+  console.error(`[Pitwall] Unhandled error in ${info}:`, err)
+}
+
 app.mount('#app')

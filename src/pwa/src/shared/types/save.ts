@@ -8,6 +8,7 @@ export interface SaveSlot {
   lastPlayedAt: string
 
   driverName: string
+  driverAvatar?: string
   skillLevel: 'beginner' | 'intermediate' | 'pro'
   car: string
   avatarSlot: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8

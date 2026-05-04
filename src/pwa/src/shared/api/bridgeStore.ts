@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { bridge } from '@/shared/api/bridge'
 
 export interface HealthResponse {
   status: string
@@ -13,6 +14,7 @@ export const useBridgeStore = defineStore('bridge', {
     healthError: null as string | null,
     consecutiveFailures: 0,
     isPolling: false,
+    _pollIntervalId: null as number | null,
     mockOffline: false // for dev testing
   }),
   actions: {
@@ -24,9 +26,7 @@ export const useBridgeStore = defineStore('bridge', {
       }
       
       try {
-        const r = await fetch('http://127.0.0.1:8765/health')
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        this.health = await r.json()
+        this.health = await bridge.get<HealthResponse>('/health')
         this.healthFetchedAt = Date.now()
         this.healthError = null
         this.consecutiveFailures = 0
@@ -43,10 +43,18 @@ export const useBridgeStore = defineStore('bridge', {
       // Initial poll
       this.pollHealth()
       
-      // Set interval
-      setInterval(() => {
+      // Set interval — store ID so it can be stopped
+      this._pollIntervalId = window.setInterval(() => {
         this.pollHealth()
       }, 5000)
+    },
+    
+    stopPolling() {
+      if (this._pollIntervalId !== null) {
+        clearInterval(this._pollIntervalId)
+        this._pollIntervalId = null
+      }
+      this.isPolling = false
     },
     
     toggleMockOffline() {

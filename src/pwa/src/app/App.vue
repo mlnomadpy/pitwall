@@ -4,11 +4,12 @@ import { RouterView, useRoute } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useBridgeStore } from '@/shared/api/bridgeStore'
-import { usePauseStore } from '@/shared/api/pauseStore'
+import { usePauseStore } from '@/shared/lib/pauseStore'
 import BridgeOfflineBanner from '@/widgets/bridge-offline/BridgeOfflineBanner.vue'
 import PauseMenu from '@/widgets/pause-menu/PauseMenu.vue'
 import VirtualGamepad from '@/widgets/gamepad/VirtualGamepad.vue'
 import ParticleBackground from '@/shared/ui/ParticleBackground.vue'
+import UpdateToast from '@/widgets/update-toast/UpdateToast.vue'
 
 const saveStore = useSaveStore()
 const audioStore = useAudioStore()
@@ -25,33 +26,46 @@ const handleGlobalKey = (e: KeyboardEvent) => {
 }
 
 // Initialize subsystems
+let touchStartX = 0
 let touchStartY = 0
+let touchLastX = 0
 let touchLastY = 0
 
 const onGlobalTouchStart = (e: TouchEvent) => {
   if (e.touches.length > 0) {
+    touchStartX = e.touches[0].clientX
     touchStartY = e.touches[0].clientY
+    touchLastX = touchStartX
     touchLastY = touchStartY
   }
 }
 
 const onGlobalTouchMove = (e: TouchEvent) => {
   if (e.touches.length > 0) {
+    const currentX = e.touches[0].clientX
     const currentY = e.touches[0].clientY
+    const deltaX = currentX - touchLastX
     const deltaY = currentY - touchLastY
     
-    // If they swiped vertically by more than 30px
-    if (Math.abs(deltaY) > 30) {
-      const key = deltaY > 0 ? 'ArrowUp' : 'ArrowDown'
+    const threshold = 40
+    
+    // Dispatch the dominant axis if it exceeds the threshold
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > threshold) {
+      const key = deltaX > 0 ? 'ArrowRight' : 'ArrowLeft'
       window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
-      touchLastY = currentY // reset threshold
+      touchLastX = currentX
+      touchLastY = currentY
+    } else if (Math.abs(deltaY) > threshold) {
+      const key = deltaY > 0 ? 'ArrowDown' : 'ArrowUp'
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+      touchLastX = currentX
+      touchLastY = currentY
     }
   }
 }
 
 onMounted(async () => {
-  await saveStore.loadSave()
-  audioStore.init()
+  await saveStore.hydrate()
   bridgeStore.startPolling()
   
   window.addEventListener('keydown', handleGlobalKey)
@@ -83,6 +97,7 @@ onUnmounted(() => {
       <ParticleBackground />
       <BridgeOfflineBanner />
       <PauseMenu />
+      <UpdateToast />
     </div>
 
     <!-- Portrait Mode Warning -->

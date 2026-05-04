@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import Sprite from '@/entities/coach/Sprite.vue'
 import CyberButton from '@/shared/ui/core/CyberButton.vue'
 
@@ -11,9 +12,12 @@ const audio = useAudioStore()
 const pressed = ref(false)
 const showWanderer = ref(false)
 const wandererX = ref(-100)
-let wandererInterval: number | null = null
 
-const handleStart = (e?: KeyboardEvent | MouseEvent) => {
+// Track all timeouts to prevent leaks on unmount
+const timeouts: number[] = []
+const track = (id: number) => { timeouts.push(id); return id }
+
+const handleStart = (e?: Event) => {
   if (e && e instanceof KeyboardEvent && !['Enter', ' ', 'a', 'A'].includes(e.key)) {
     return
   }
@@ -24,38 +28,39 @@ const handleStart = (e?: KeyboardEvent | MouseEvent) => {
   audio.playSfx('cursor_select')
   
   // Wipe to save select
-  setTimeout(() => {
+  track(window.setTimeout(() => {
     router.push('/save')
-  }, 400)
+  }, 400))
 }
 
 const animateWanderer = () => {
   showWanderer.value = true
   wandererX.value = -100
   
-  setTimeout(() => {
+  track(window.setTimeout(() => {
     wandererX.value = window.innerWidth + 100
-  }, 100)
+  }, 100))
   
-  wandererInterval = window.setTimeout(() => {
+  track(window.setTimeout(() => {
     animateWanderer()
-  }, 30000)
+  }, 30000))
 }
+
+useKeyboard((e: KeyboardEvent) => {
+  handleStart(e)
+})
 
 onMounted(() => {
   audio.playSfx('boot_chime')
   audio.playMusic('title_loop')
   
-  window.addEventListener('keydown', handleStart)
-  
-  wandererInterval = window.setTimeout(() => {
+  track(window.setTimeout(() => {
     animateWanderer()
-  }, 5000)
+  }, 5000))
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleStart)
-  if (wandererInterval) clearTimeout(wandererInterval)
+  timeouts.forEach(clearTimeout)
 })
 </script>
 
@@ -117,7 +122,7 @@ onUnmounted(() => {
     </div>
     
     <!-- Wanderer Sprite -->
-    <div class="absolute z-20 transition-transform duration-[8000ms] ease-linear" 
+    <div class="absolute z-20 transition-transform duration-[8000ms] linear" 
          :style="{ transform: `translateX(${wandererX}px)`, bottom: 'calc(18vh + 2px)' }">
       <Sprite v-if="showWanderer" sheet="trod" animation="idle" class="scale-150" />
     </div>
@@ -160,7 +165,7 @@ onUnmounted(() => {
     radial-gradient(1px 1px at 60% 28%, rgba(255,255,255,0.5), transparent),
     radial-gradient(1px 1px at 92% 25%, rgba(255,255,255,0.4), transparent),
     radial-gradient(1px 1px at 35% 35%, rgba(255,255,255,0.3), transparent);
-  animation: twinkle 4s ease-in-out infinite alternate;
+  animation: twinkle 4s steps(4) infinite alternate;
 }
 
 .stars-2 {
@@ -172,7 +177,7 @@ onUnmounted(() => {
     radial-gradient(1px 1px at 90% 8%, rgba(255,255,255,0.5), transparent),
     radial-gradient(1px 1px at 30% 5%, rgba(255,255,255,0.7), transparent),
     radial-gradient(1px 1px at 65% 15%, rgba(255,255,255,0.4), transparent);
-  animation: twinkle 5s ease-in-out infinite alternate-reverse;
+  animation: twinkle 5s steps(4) infinite alternate-reverse;
 }
 
 @keyframes twinkle {
@@ -257,7 +262,7 @@ onUnmounted(() => {
 
 /* ── Press Start ── */
 .press-start-text {
-  animation: press-start-glow 1.5s ease-in-out infinite;
+  animation: press-start-glow 1.5s steps(2) infinite;
 }
 
 @keyframes press-start-glow {
@@ -273,7 +278,7 @@ onUnmounted(() => {
 
 /* ── Flash ── */
 .animate-flash {
-  animation: flash 0.4s ease-out forwards;
+  animation: flash 0.4s steps(2) forwards;
 }
 
 @keyframes flash {

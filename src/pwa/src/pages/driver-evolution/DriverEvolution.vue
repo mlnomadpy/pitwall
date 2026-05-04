@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSaveStore } from '@/entities/save/model/saveStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -44,7 +44,7 @@ const cornerPBs = [
 const cursorIndex = ref(sessions.length - 1)
 const cur = computed(() => sessions[cursorIndex.value])
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
     cursorIndex.value = Math.min(cursorIndex.value + 1, sessions.length - 1)
     audio.playSfx('cursor_move')
@@ -58,15 +58,10 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.push('/garage/analysis')
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-  audio.playSfx('score_total')
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
+onMounted(() => {
+  audio.playSfx('score_total')
 })
 
 // Chart coordinates
@@ -99,15 +94,13 @@ const formatLap = (seconds: number) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
+  <PageShell :hints="['A · OPEN SESSION (SOON)', '◀ ▶ SCRUB', 'B · BACK']" bg="cool">
+    <template #heading>
       <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title font-title text-silver tracking-[0.2em]">DRIVER EVOLUTION · {{ save.activeProfile?.name ?? 'DRIVER' }} AT SONOMA</h1>
+        <h1 class="text-title font-title text-silver tracking-[0.2em]">DRIVER EVOLUTION · {{ save.activeSlot?.driverName ?? 'DRIVER' }} AT SONOMA</h1>
+        <div class="heading-rule"></div>
       </div>
+    </template>
 
       <template v-if="hasEnoughSessions">
         <CyberPanel class="p-2 relative">
@@ -190,21 +183,11 @@ const formatLap = (seconds: number) => {
         <!-- Placeholder for less than 5 sessions -->
       </template>
       
-      <div class="absolute bottom-6 left-2 right-2">
-        <DialogueBox 
-          :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
+      <template #floating>
+        <CoachFloat
           emotion="victory"
           text="T11's where you found half a second overall. Don't lose it."
-          class="scale-[0.85] origin-bottom-left w-[117%]"
         />
-      </div>
-      
-    </div>
-    
-    <HintBar :hints="['A · OPEN SESSION (SOON)', '◀ ▶ SCRUB', 'B · BACK']" />
-  </div>
+      </template>
+  </PageShell>
 </template>
-
-<style scoped>
-/* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
-</style>

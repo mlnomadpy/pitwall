@@ -24,8 +24,22 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,png,woff2,mp3,json}'],
+        // Only precache the app shell — JS, CSS, HTML, fonts
+        // Large assets (sprites, audio) use runtime caching instead
+        globPatterns: ['**/*.{js,css,html,woff2,json}'],
         runtimeCaching: [
+          {
+            // Sprite sheets — cache on first use, never re-fetch
+            urlPattern: /\/sprites\/.+\.png$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'sprite-sheets', expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 30 } },
+          },
+          {
+            // Audio files — cache on first use
+            urlPattern: /\/audio\/.+\.(mp3|ogg)$/,
+            handler: 'CacheFirst',
+            options: { cacheName: 'audio-assets', expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 } },
+          },
           {
             urlPattern: /\/audio\/coaches\/.+\.mp3$/,
             handler: 'CacheFirst',

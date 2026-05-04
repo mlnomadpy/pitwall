@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSaveStore } from '@/entities/save/model/saveStore'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
+import { useSequence } from '@/shared/lib/useSequence'
+import PageShell from '@/shared/ui/PageShell.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import CyberMetricRow from '@/shared/ui/core/CyberMetricRow.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
 const save = useSaveStore()
 
-const phase = ref(0)
 const displayedScore = ref(0)
 const finalScore = 8420
+
+const { phase, addStep, addCustomInterval, skip } = useSequence(99)
 
 // Mock data
 const metrics = [
@@ -31,114 +35,80 @@ const goals = [
 
 const medals = ['Sub-1:47', 'Trail Brake Apprentice']
 
-let sequenceTimeouts: number[] = []
-
-const advancePhase = (p: number, timeMs: number, sfx?: string) => {
-  const t = window.setTimeout(() => {
-    phase.value = p
-    if (sfx) audio.playSfx(sfx)
-  }, timeMs)
-  sequenceTimeouts.push(t)
-}
-
-const skipSequence = () => {
-  sequenceTimeouts.forEach(clearTimeout)
-  sequenceTimeouts = []
-  phase.value = 99
-  displayedScore.value = finalScore
-}
-
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'a' || e.key === 'Enter') {
     if (phase.value < 13) {
-      skipSequence()
+      skip(() => { displayedScore.value = finalScore })
     } else {
       audio.playSfx('cursor_select')
       router.push('/garage')
     }
   } else if (e.key === 'b' || e.key === 'Escape' || e.key === 'Backspace') {
     if (phase.value < 13) {
-      skipSequence()
+      skip(() => { displayedScore.value = finalScore })
     } else {
       audio.playSfx('cancel')
       router.push('/garage')
     }
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-  audio.playMusic('garage_loop') // Stub since score_fanfare isn't mapped
-
-  // t=200: banner
-  advancePhase(1, 200)
-  // t=600: score block appears
-  advancePhase(2, 600)
-  
-  // count score
-  const tCount = window.setTimeout(() => {
-    let current = 0
-    const duration = 1200
-    const steps = 24
-    const stepTime = duration / steps
-    const stepAmt = finalScore / steps
-    
-    let stepCount = 0
-    const interval = window.setInterval(() => {
-      current += stepAmt
-      displayedScore.value = Math.min(Math.round(current), finalScore)
-      audio.playSfx('cursor_move') 
-      stepCount++
-      if (stepCount >= steps) {
-        clearInterval(interval)
-        displayedScore.value = finalScore
-        audio.playSfx('level_up') 
-      }
-    }, stepTime)
-    sequenceTimeouts.push(interval)
-  }, 800)
-  sequenceTimeouts.push(tCount)
-
-  // t=2200: metric row 1
-  advancePhase(3, 2200)
-  // t=2300: metric row 2
-  advancePhase(4, 2300)
-  // t=2400: metric row 3
-  advancePhase(5, 2400)
-  // t=2500: metric row 4
-  advancePhase(6, 2500)
-  // t=2600: metric row 5
-  advancePhase(7, 2600)
-  
-  // t=2700: goals
-  advancePhase(8, 2700, 'goal_complete')
-  
-  // t=3200: medals
-  advancePhase(9, 3200, 'cursor_select')
-  
-  // t=4700: coach slide
-  advancePhase(10, 4700)
-  
-  // t=4900: coach talks
-  advancePhase(11, 4900)
-  
-  // t=7000: hint bar
-  advancePhase(13, 7000)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-  sequenceTimeouts.forEach(clearTimeout)
+onMounted(() => {
+  audio.playMusic('garage_loop') 
+
+  addStep({ phase: 1, timeMs: 200 })
+  addStep({ phase: 2, timeMs: 600 })
+  
+  // count score
+  addStep({
+    phase: 2, 
+    timeMs: 800,
+    callback: () => {
+      let current = 0
+      const steps = 24
+      const stepAmt = finalScore / steps
+      let stepCount = 0
+      
+      addCustomInterval(1200 / steps, () => {
+        current += stepAmt
+        displayedScore.value = Math.min(Math.round(current), finalScore)
+        audio.playSfx('cursor_move') 
+        stepCount++
+        if (stepCount >= steps) {
+          displayedScore.value = finalScore
+          audio.playSfx('level_up')
+          return true // clear interval
+        }
+        return false
+      })
+    }
+  })
+
+  addStep({ phase: 3, timeMs: 2200 })
+  addStep({ phase: 4, timeMs: 2300 })
+  addStep({ phase: 5, timeMs: 2400 })
+  addStep({ phase: 6, timeMs: 2500 })
+  addStep({ phase: 7, timeMs: 2600 })
+  
+  addStep({ phase: 8, timeMs: 2700, sfx: 'goal_complete' })
+  addStep({ phase: 9, timeMs: 3200, sfx: 'cursor_select' })
+  addStep({ phase: 10, timeMs: 4700 })
+  addStep({ phase: 11, timeMs: 4900 })
+  addStep({ phase: 13, timeMs: 7000 })
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui">
+  <PageShell 
+    :hints="phase >= 13 || phase === 99 ? ['A · CONTINUE', 'B · HOME', '◆ SHARE'] : []" 
+    bg="neutral" 
+    :show-heading="false"
+    :hide-status="true"
+  >
+    <!-- Background overrides -->
+    <div class="stage-bg absolute inset-0 z-0 pointer-events-none"></div>
     
-    <!-- Background -->
-    <div class="stage-bg absolute inset-0 z-0"></div>
-    
-    <div class="content pt-[2vh] pb-[2vh] px-[3vw] h-full flex flex-col relative z-10">
+    <div class="content h-full flex flex-col relative z-10 w-full">
       
       <!-- Banner -->
       <div 
@@ -153,7 +123,7 @@ onUnmounted(() => {
       <!-- Score -->
       <div v-if="phase >= 2 || phase === 99" class="text-center mt-[3vh] mb-[2vh]">
         <div class="text-small text-slate tracking-[0.2em] mb-[0.5vh]">TOTAL SCORE</div>
-        <div class="text-title-lg text-ui-warn tracking-widest  font-title">
+        <div class="text-title-lg text-ui-warn tracking-widest font-title">
           {{ displayedScore }}
         </div>
       </div>
@@ -161,11 +131,14 @@ onUnmounted(() => {
       <!-- Metrics -->
       <div class="metrics-block">
         <div v-for="(m, i) in metrics" :key="m.label" 
-             class="metric-row transition-opacity duration-200"
+             class="transition-opacity duration-200"
              :class="(phase >= 3 + i || phase === 99) ? 'opacity-100' : 'opacity-0'">
-          <span class="metric-label">{{ m.label }}</span>
-          <span class="metric-val">{{ m.val }}</span>
-          <span class="metric-sub" :class="m.subClass">{{ m.sub }}</span>
+          <CyberMetricRow 
+            :label="m.label" 
+            :value="m.val" 
+            :sub-text="m.sub" 
+            :sub-class="m.subClass" 
+          />
         </div>
       </div>
       
@@ -189,23 +162,23 @@ onUnmounted(() => {
         </div>
       </div>
       
+    </div>
+    
+    <template #floating>
       <!-- Coach -->
       <div 
-        class="absolute bottom-[6vh] left-[2vw] right-[2vw] transition-transform duration-200"
+        class="absolute bottom-[6vh] left-[2vw] right-[2vw] transition-transform duration-200 pointer-events-none"
         :class="(phase >= 10 || phase === 99) ? 'translate-y-0' : 'translate-y-32'"
       >
-        <DialogueBox 
+        <CoachFloat 
           v-if="phase >= 11 || phase === 99"
-          :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
+          :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
           emotion="victory"
           text="Now THAT was distance."
         />
       </div>
-
-    </div>
-    
-    <HintBar v-if="phase >= 13 || phase === 99" :hints="['A · CONTINUE', 'B · HOME', '◆ SHARE']" />
-  </div>
+    </template>
+  </PageShell>
 </template>
 
 <style scoped>
@@ -237,19 +210,6 @@ onUnmounted(() => {
   gap: clamp(2px, 0.6vh, 8px);
   padding: 0 clamp(8px, 4vw, 32px);
 }
-
-.metric-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-size: clamp(10px, 2.3vmin, 20px);
-  padding: clamp(1px, 0.3vh, 4px) 0;
-  border-bottom: 1px solid rgba(61, 68, 88, 0.2);
-}
-
-.metric-label { width: 35%; color: var(--color-silver); }
-.metric-val { width: 25%; text-align: center; font-weight: bold; color: white; }
-.metric-sub { width: 25%; text-align: right; }
 
 .goals-block {
   margin-top: clamp(6px, 1.5vh, 16px);

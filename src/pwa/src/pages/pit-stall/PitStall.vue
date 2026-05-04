@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
+import { useSequence } from '@/shared/lib/useSequence'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import CyberButton from '@/shared/ui/core/CyberButton.vue'
 import ConnRow from './ui/ConnRow.vue'
 import LiveCarState from './ui/LiveCarState.vue'
 
@@ -23,103 +26,164 @@ const liveState = ref({
   glat: '-.-', glong: '-.-', gcombo: '-.-'
 })
 
-let seqTimeout: number
+const { addStep, skip } = useSequence(5)
+
 let liveInterval: number | null = null
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
+const bootLogs = ref<{msg: string, type: string}[]>([])
+
+const addLog = (msg: string, type = 'info') => {
+  bootLogs.value.push({ msg, type })
+  const el = document.getElementById('boot-logs-container')
+  if (el) {
+    setTimeout(() => {
+      el.scrollTop = el.scrollHeight
+    }, 50)
+  }
+}
+
+const runSequence = () => {
+  // Reset
+  skip() // clears timeouts
+  if (liveInterval) {
+    clearInterval(liveInterval)
+    liveInterval = null
+  }
   
-  // Fake the connection sequence for UI demonstration
-  seqTimeout = window.setTimeout(() => {
+  bridgeState.value = 'checking'
+  usbCanState.value = 'pending'
+  dbcState.value = 'pending'
+  carState.value = 'pending'
+  bootLogs.value = []
+  
+  liveState.value = {
+    rpm: '---', gear: '-', speed: '---', 
+    oil: '--', coolant: '--', fuel: '--',
+    throttle: '--', brake: '-', steer: '--',
+    glat: '-.-', glong: '-.-', gcombo: '-.-'
+  }
+  
+  addLog('INITIATING BOOT SEQUENCE...', 'warn')
+  addLog('Connecting to bridge at 127.0.0.1:8765')
+
+  addStep({ phase: 1, timeMs: 1000, sfx: 'goal_complete', callback: () => {
     bridgeState.value = 'ok'
     usbCanState.value = 'checking'
-    audio.playSfx('goal_complete')
-    
-    seqTimeout = window.setTimeout(() => {
-      usbCanState.value = 'ok'
-      dbcState.value = 'checking'
-      audio.playSfx('goal_complete')
-      
-      seqTimeout = window.setTimeout(() => {
-        dbcState.value = 'ok'
-        carState.value = 'checking'
-        audio.playSfx('goal_complete')
-        
-        seqTimeout = window.setTimeout(() => {
-          carState.value = 'ok'
-          audio.playSfx('level_up')
-          
-          // Start fake live telemetry
-          liveInterval = window.setInterval(() => {
-            liveState.value = {
-              rpm: Math.floor(800 + Math.random() * 200).toString(),
-              gear: '1',
-              speed: '0',
-              oil: '94',
-              coolant: '88',
-              fuel: '62',
-              throttle: '0',
-              brake: '15',
-              steer: '0',
-              glat: '0.0',
-              glong: '0.0',
-              gcombo: '0.0'
-            }
-          }, 200)
-          
-        }, 1500)
-      }, 1000)
-    }, 1500)
-  }, 1000)
-})
+    addLog('BRIDGE CONNECTED (Engine: sonic_model, AI: LiteRT-LM)', 'good')
+    addLog('Querying /dev/ttyACM0 for slcan interface...')
+  }})
+
+  addStep({ phase: 2, timeMs: 2500, sfx: 'goal_complete', callback: () => {
+    usbCanState.value = 'ok'
+    dbcState.value = 'checking'
+    addLog('USB-CAN STREAM ESTABLISHED @ 500 kbps', 'good')
+    addLog('Loading network definitions (pitwall.dbc, bmw_e46_m3.dbc)...')
+  }})
+
+  addStep({ phase: 3, timeMs: 3500, sfx: 'goal_complete', callback: () => {
+    dbcState.value = 'ok'
+    carState.value = 'checking'
+    addLog('DBC LOADED. Signals: 93 mapped, 3 unknown', 'good')
+    addLog('Waiting for ignition pulse from ECU...')
+  }})
+
+  addStep({ phase: 4, timeMs: 5000, sfx: 'level_up', callback: () => {
+    carState.value = 'ok'
+    addLog('IGNITION DETECTED.', 'good')
+    addLog('LINK STABLE. STREAMING TELEMETRY.', 'good')
+    // Start fake live telemetry
+    liveInterval = window.setInterval(() => {
+      liveState.value = {
+        rpm: Math.floor(800 + Math.random() * 200).toString(),
+        gear: '1',
+        speed: '0',
+        oil: '94',
+        coolant: '88',
+        fuel: '62',
+        throttle: Math.floor(Math.random() * 10).toString(),
+        brake: '0',
+        steer: (Math.random() * 2 - 1).toFixed(1),
+        glat: '0.0',
+        glong: '0.0',
+        gcombo: '0.0'
+      }
+    }, 100)
+  }})
+}
+
+// Initial Run
+runSequence()
 
 onUnmounted(() => {
-  clearTimeout(seqTimeout)
+  skip()
   if (liveInterval) clearInterval(liveInterval)
-  window.removeEventListener('keydown', handleKey)
 })
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
     audio.playSfx('cancel')
     router.push('/garage')
   }
-}
+})
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden">
-    <StatusBar />
-    
-    <div class="pitstall-bg absolute inset-0 z-0"></div>
-    
-    <div class="content flex flex-col pt-[6vh] px-[3vw] relative z-10 h-full pb-[6vh]">
+  <PageShell title="PIT STALL" :hints="['A · BACK', 'B · BACK', '◆ HARDWARE INFO']" bg="neutral">
+    <template #heading>
       <div class="heading-block mb-[1.5vh] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.3em]">PIT STALL</h1>
         <div class="heading-rule"></div>
       </div>
-      
-      <CyberPanel class="mb-[1.5vh] p-[1.5vmin]">
-        <div class="text-body text-silver mb-[0.8vh] border-b border-slate pb-[0.5vh] tracking-[0.1em]">CONNECTION CHAIN</div>
-        <ConnRow title="BRIDGE" :state="bridgeState" status-text="ONLINE" :details="['127.0.0.1:8765', 'ENGINE sonic_model + LiteRT-LM', 'DUCKDB enabled · 47 sessions']" />
-        <ConnRow title="USB-CAN" :state="usbCanState" status-text="STREAM" :details="['/dev/ttyACM0 CANable Pro', 'INTERFACE slcan @ 500 kbps', 'FRAMES/s 422']" />
-        <ConnRow title="DBC" :state="dbcState" status-text="" :details="['pitwall.dbc + bmw_e46_m3.dbc', 'SIGNALS 29 + 64 = 93 known', 'UNKNOWN IDS 3 (logged, not decoded)']" />
-        <ConnRow title="CAR" :state="carState" status-text="READY" :details="['BMW M3 (E46)', 'IGNITION ON']" />
-      </CyberPanel>
-      
-      <CyberPanel class="p-[1.5vmin] flex-grow">
-        <div class="text-body text-silver mb-[0.8vh] border-b border-slate pb-[0.5vh] tracking-[0.1em]">LIVE CAR STATE</div>
-        <LiveCarState :state="liveState" />
-      </CyberPanel>
-    </div>
+    </template>
     
-    <HintBar :hints="['A · BACK', 'B · BACK', '◆ HARDWARE INFO']" />
-  </div>
+    <div class="content flex flex-col relative z-10 h-full pb-[6vh] w-full">
+      <CyberSplitView split="40-60" gap="md" class="h-full">
+        <!-- Left Pane: Connection Chain -->
+        <template #left>
+          <CyberPanel class="h-full flex flex-col min-h-0">
+            <div class="text-body text-silver mb-[1.5vh] border-b border-slate pb-[1vh] tracking-[0.1em] px-[1.5vmin] pt-[1.5vmin] flex justify-between items-center">
+              <span>CONNECTION CHAIN</span>
+              <div class="flex gap-2">
+                <CyberButton size="sm" variant="primary" @click="$router.push('/pit-stall/live')" v-if="carState === 'ok'" style="font-size: 10px; padding: 2px 6px;">LIVE WALL</CyberButton>
+                <CyberButton size="sm" variant="secondary" @click="runSequence" v-if="carState === 'ok'" style="font-size: 10px; padding: 2px 6px;">REBOOT LINK</CyberButton>
+              </div>
+            </div>
+            <div class="flex flex-col gap-2 px-[1.5vmin] pb-[1.5vmin] flex-grow no-scrollbar min-h-0">
+              <ConnRow title="BRIDGE" :state="bridgeState" status-text="ONLINE" :details="['127.0.0.1:8765', 'ENGINE sonic_model + LiteRT-LM', 'DUCKDB enabled · 47 sessions']" />
+              <ConnRow title="USB-CAN" :state="usbCanState" status-text="STREAM" :details="['/dev/ttyACM0 CANable Pro', 'INTERFACE slcan @ 500 kbps', 'FRAMES/s 422']" />
+              <ConnRow title="DBC" :state="dbcState" status-text="" :details="['pitwall.dbc + bmw_e46_m3.dbc', 'SIGNALS 29 + 64 = 93 known', 'UNKNOWN IDS 3 (logged, not decoded)']" />
+              <ConnRow title="CAR" :state="carState" status-text="READY" :details="['BMW M3 (E46)', 'IGNITION ON']" />
+              
+              <!-- Logs Console -->
+              <div class="mt-4 flex-grow border-2 border-slate bg-ink p-2 flex flex-col h-32 relative shadow-[inset_0_0_10px_rgba(0,0,0,0.8)]">
+                <div class="text-ui-info text-[clamp(8px,1.5vmin,12px)] mb-1 font-bold tracking-widest border-b border-slate pb-1">TERMINAL OUTPUT</div>
+                <div class="flex-grow overflow-y-auto no-scrollbar font-mono text-[clamp(8px,1.8vmin,14px)] leading-tight whitespace-pre-line break-words pr-1" id="boot-logs-container">
+                  <div v-for="(log, i) in bootLogs" :key="i" :class="log.type === 'good' ? 'text-ui-good' : log.type === 'bad' ? 'text-ui-bad' : log.type === 'warn' ? 'text-ui-warn' : 'text-silver'">
+                    > {{ log.msg }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CyberPanel>
+        </template>
+        
+        <!-- Right Pane: Live Car State -->
+        <template #right>
+          <CyberPanel class="h-full flex flex-col min-h-0">
+            <div class="text-body text-silver mb-[1.5vh] border-b border-slate pb-[1vh] tracking-[0.1em] px-[1.5vmin] pt-[1.5vmin]">
+              LIVE CAR STATE
+            </div>
+            <div class="flex-grow overflow-y-auto px-[1.5vmin] pb-[1.5vmin] no-scrollbar min-h-0 h-full">
+              <LiveCarState :state="liveState" />
+            </div>
+          </CyberPanel>
+        </template>
+      </CyberSplitView>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.pitstall-bg {
-  background-color: var(--color-asphalt-deep);
-}
+.heading-block { text-align: center; }
 </style>
 

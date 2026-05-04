@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import CyberBadge from '@/shared/ui/core/CyberBadge.vue'
 interface Props {
   title: string
   detail?: string
@@ -11,25 +12,38 @@ withDefaults(defineProps<Props>(), {
   statusState: 'none',
   subLines: () => []
 })
-
-const frames = ['▒▒░', '▒░░', '░░░', '░▒▒', '░▒▒', '▒▒▒']
 </script>
 
 <template>
   <div class="cyber-list-row" :class="{ 'row-pending': statusState === 'pending' }">
     <div class="icon-col">
-      <span v-if="statusState === 'checking'" class="text-ui-info animate-pulse">▒▒</span>
-      <span v-else-if="statusState === 'ok'" class="text-ui-good drop-shadow-[0_0_4px_rgba(78,205,196,0.6)]">✓</span>
-      <span v-else-if="statusState === 'error'" class="text-ui-bad drop-shadow-[0_0_4px_rgba(255,71,87,0.6)]">✗</span>
-      <span v-else class="text-slate">○</span>
+      <slot name="icon">
+        <span v-if="statusState === 'checking'" class="text-ui-info animate-pulse">▒▒</span>
+        <span v-else-if="statusState === 'ok'" class="text-ui-good drop-shadow-[0_0_4px_rgba(78,205,196,0.6)]">✓</span>
+        <span v-else-if="statusState === 'error'" class="text-ui-bad drop-shadow-[0_0_4px_rgba(255,71,87,0.6)]">✗</span>
+        <span v-else class="text-slate">○</span>
+      </slot>
     </div>
     
     <div class="main-col">
-      <div class="row-header">
+      <div class="row-header flex items-center">
         <span class="row-title">{{ title }}</span>
         <span v-if="detail" class="row-detail">{{ detail }}</span>
-        <span v-if="statusState === 'ok'" class="text-ui-good font-bold">{{ statusText || 'OK' }}</span>
-        <span v-else-if="statusState === 'error'" class="text-ui-bad font-bold">FAIL</span>
+        
+        <CyberBadge 
+          v-if="statusState === 'ok'" 
+          variant="good" 
+          :text="statusText || 'OK'" 
+          size="sm" 
+          solid
+        />
+        <CyberBadge 
+          v-else-if="statusState === 'error'" 
+          variant="bad" 
+          text="FAIL" 
+          size="sm" 
+          solid
+        />
       </div>
       
       <div v-for="(line, i) in subLines" :key="i" class="row-sub">

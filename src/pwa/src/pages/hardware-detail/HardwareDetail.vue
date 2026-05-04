@@ -1,46 +1,31 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import { useSaveStore } from '@/entities/save/model/saveStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
+import { bridge } from '@/shared/api/bridge'
+
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberBox from '@/shared/ui/core/CyberBox.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
-const save = useSaveStore()
 
-// Mock registry
-const generateMockSignals = () => {
-  const bases = [
-    { name: 'rpm', unit: 'rpm', hz: 10.0, group: 'motion', dbc: 'pitwall', baseValue: 3000, variance: 500, type: 'int' },
-    { name: 'speed_ms', unit: 'm/s', hz: 10.0, group: 'motion', dbc: 'pitwall', baseValue: 20, variance: 2, type: 'float' },
-    { name: 'g_lat', unit: 'g', hz: 10.0, group: 'motion', dbc: 'pitwall', baseValue: 0.05, variance: 0.1, type: 'float' },
-    { name: 'g_long', unit: 'g', hz: 10.0, group: 'motion', dbc: 'pitwall', baseValue: -0.1, variance: 0.2, type: 'float' },
-    { name: 'brake_bar', unit: 'bar', hz: 10.0, group: 'driver', dbc: 'pitwall', baseValue: 5.0, variance: 20, type: 'float' },
-    { name: 'throttle_pct', unit: '%', hz: 10.0, group: 'driver', dbc: 'pitwall', baseValue: 40, variance: 15, type: 'float' },
-    { name: 'steering_deg', unit: 'deg', hz: 10.0, group: 'driver', dbc: 'pitwall', baseValue: 12, variance: 5, type: 'float' },
-    { name: 'oil_temp_c', unit: 'C', hz: 2.0, group: 'power', dbc: 'bmw_e46', baseValue: 94.0, variance: 1, type: 'float' },
-    { name: 'coolant_temp_c', unit: 'C', hz: 2.0, group: 'power', dbc: 'bmw_e46', baseValue: 88.0, variance: 0.5, type: 'float' },
-    { name: 'clutch_pos_pct', unit: '%', hz: 50.0, group: 'drive', dbc: 'bmw_e46', baseValue: 0, variance: 0, type: 'float' },
-    { name: 'tpms_fl_kpa', unit: 'kPa', hz: 1.0, group: 'tires', dbc: 'bmw_e46', baseValue: 230, variance: 2, type: 'float' },
-    { name: 'tpms_fr_kpa', unit: 'kPa', hz: 1.0, group: 'tires', dbc: 'bmw_e46', baseValue: 231, variance: 2, type: 'float' },
-    { name: 'tpms_rl_kpa', unit: 'kPa', hz: 1.0, group: 'tires', dbc: 'bmw_e46', baseValue: 228, variance: 2, type: 'float' },
-    { name: 'tpms_rr_kpa', unit: 'kPa', hz: 1.0, group: 'tires', dbc: 'bmw_e46', baseValue: 229, variance: 2, type: 'float' },
-    { name: 'afr_lambda', unit: 'ratio', hz: 5.0, group: 'power', dbc: 'bmw_e46', baseValue: 0.98, variance: 0.05, type: 'float' },
-    { name: 'wheel_speed_fl', unit: 'm/s', hz: 10.0, group: 'motion', dbc: 'bmw_e46', baseValue: 20, variance: 2, type: 'float' },
-    { name: 'wheel_speed_fr', unit: 'm/s', hz: 10.0, group: 'motion', dbc: 'bmw_e46', baseValue: 20, variance: 2, type: 'float' },
-    { name: 'wheel_speed_rl', unit: 'm/s', hz: 10.0, group: 'motion', dbc: 'bmw_e46', baseValue: 20.2, variance: 2, type: 'float' },
-    { name: 'wheel_speed_rr', unit: 'm/s', hz: 10.0, group: 'motion', dbc: 'bmw_e46', baseValue: 20.1, variance: 2, type: 'float' },
-    { name: 'gear', unit: 'n', hz: 2.0, group: 'drive', dbc: 'bmw_e46', baseValue: 3, variance: 0, type: 'int' },
-    { name: 'battery_v', unit: 'V', hz: 1.0, group: 'power', dbc: 'bmw_e46', baseValue: 14.1, variance: 0.1, type: 'float' },
-  ]
-  return bases.map((b, i) => ({ ...b, id: i, last: b.baseValue }))
+
+interface SignalCapability {
+  id: number
+  name: string
+  unit: string
+  hz: number
+  group: string
+  dbc: string
+  last: number | string
+  baseValue: number
+  variance: number
 }
 
-const signals = ref(generateMockSignals())
+const signals = ref<SignalCapability[]>([])
 const unknownIds = ref([
   { id: '0x4F1', hz: 3 },
   { id: '0x523', hz: 1 },
@@ -63,21 +48,20 @@ const paginatedSignals = computed(() => {
 let liveTimer: number | null = null
 
 const updateLiveValues = () => {
+  // Only lightly fake the fluctuation of 'last' based on the baseline capabilities
+  // to avoid polling a heavy JSON endpoint 5 times a second
   signals.value = signals.value.map(s => {
-    // Only update sometimes based on hz to look more organic
-    if (Math.random() < s.hz / 20) {
+    if (Math.random() < s.hz / 20 && s.variance) {
       let v = s.baseValue + (Math.random() * s.variance * 2) - s.variance
-      if (v < 0 && s.name.includes('tpms')) v = s.baseValue
-      if (v < 0 && s.name.includes('rpm')) v = 0
-      
-      const newV = s.type === 'int' ? Math.round(v) : Number(v.toFixed(2))
-      return { ...s, last: newV }
+      if (v < 0) v = 0
+      return { ...s, last: Number(v.toFixed(2)) }
     }
     return s
   })
 }
 
-const handleKey = (e: KeyboardEvent) => {
+
+useKeyboard((e: KeyboardEvent) => {
   if (drilling.value) {
     if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
       audio.playSfx('cancel')
@@ -123,15 +107,30 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.back()
   }
-}
+})
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
+onMounted(async () => {
+  
+  // Try to load real data
+  try {
+    const data = await bridge.get<{ signals: Array<{ signal_id?: number; name: string; units?: string; expected_hz?: number; group?: string; discovery?: string }> }>('/signals/registry')
+    signals.value = data.signals.map((s, i) => ({
+      id: s.signal_id ?? i,
+      name: s.name,
+      unit: s.units ?? 'n/a',
+      hz: s.expected_hz ?? 10.0,
+      group: s.group ?? 'misc',
+      dbc: s.discovery ?? 'unknown',
+      last: 0,
+      baseValue: 0,
+      variance: 0
+    }))
+  } catch (_) { /* Bridge may be offline */ }
+  
   liveTimer = window.setInterval(updateLiveValues, 200) // 5Hz UI update
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
   if (liveTimer) window.clearInterval(liveTimer)
 })
 
@@ -161,67 +160,64 @@ watch(drilling, (n) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
+  <PageShell title="HARDWARE DETAIL" :hints="['A · DRILL IN', 'B · BACK', '◀ ▶ PAGE', '◆ ADD DBC']" bg="neutral">
+    <template #heading>
       <div class="heading-block mb-[1.5vh]">
         <h1 class="text-title font-title text-silver tracking-[0.2em]">HARDWARE DETAIL</h1>
         <span class="text-body text-slate">page {{ page + 1 }} of {{ totalPages }}</span>
+        <div class="heading-rule"></div>
       </div>
+    </template>
 
-      <div class="flex gap-2 flex-grow min-h-0 mx-2 pb-6">
+    <div class="flex gap-2 flex-grow min-h-0 mx-2 pb-6">
+      
+      <!-- Main Table -->
+      <CyberPanel class="flex flex-col text-body overflow-hidden p-2 flex-grow">
+        <div class="flex justify-between mb-2">
+          <div class="text-silver font-bold uppercase">Signals</div>
+        </div>
         
-        <!-- Main Table -->
-        <CyberPanel class="flex flex-col text-body overflow-hidden p-2 flex-grow">
-          <div class="flex justify-between mb-2">
-            <div class="text-silver font-bold uppercase">Signals</div>
-          </div>
-          
-          <table class="w-full text-left font-mono">
-            <thead>
-              <tr class="text-slate border-b border-charcoal">
-                <th class="pb-1 w-4"></th>
-                <th class="pb-1">NAME</th>
-                <th class="pb-1 text-right">UNIT</th>
-                <th class="pb-1 text-right">Hz</th>
-                <th class="pb-1 text-right">LAST</th>
-                <th class="pb-1 pl-4">GROUP</th>
-                <th class="pb-1">DBC</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(s, i) in paginatedSignals" :key="s.id"
-                  :class="cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver'">
-                <td class="text-ui-good">{{ cursorIndex === i ? '▶' : '' }}</td>
-                <td class="font-bold truncate max-w-[clamp(60px,15vw,120px)]">{{ s.name }}</td>
-                <td class="text-right text-slate">{{ s.unit }}</td>
-                <td class="text-right">{{ s.hz.toFixed(1) }}</td>
-                <td class="text-right font-bold w-[40px]">{{ s.last }}</td>
-                <td class="pl-4 text-slate truncate max-w-[clamp(48px,12vw,80px)]">{{ s.group }}</td>
-                <td class="truncate max-w-[clamp(48px,12vw,80px)]">{{ s.dbc }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </CyberPanel>
+        <table class="w-full text-left font-mono">
+          <thead>
+            <tr class="text-slate border-b border-charcoal">
+              <th class="pb-1 w-4"></th>
+              <th class="pb-1">NAME</th>
+              <th class="pb-1 text-right">UNIT</th>
+              <th class="pb-1 text-right">Hz</th>
+              <th class="pb-1 text-right">LAST</th>
+              <th class="pb-1 pl-4">GROUP</th>
+              <th class="pb-1">DBC</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(s, i) in paginatedSignals" :key="s.id"
+                :class="cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver'">
+              <td class="text-ui-good">{{ cursorIndex === i ? '▶' : '' }}</td>
+              <td class="font-bold truncate max-w-[clamp(60px,15vw,120px)]">{{ s.name }}</td>
+              <td class="text-right text-slate">{{ s.unit }}</td>
+              <td class="text-right">{{ s.hz.toFixed(1) }}</td>
+              <td class="text-right font-bold w-[40px]">{{ s.last }}</td>
+              <td class="pl-4 text-slate truncate max-w-[clamp(48px,12vw,80px)]">{{ s.group }}</td>
+              <td class="truncate max-w-[clamp(48px,12vw,80px)]">{{ s.dbc }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </CyberPanel>
 
-        <!-- Unknown CAN IDs -->
-        <CyberPanel class="flex flex-col text-body p-2 w-[clamp(80px,20vw,160px)] shrink-0 overflow-hidden">
-          <div class="text-silver font-bold uppercase mb-2 border-b border-charcoal pb-1">Unknown CAN IDs</div>
-          <div class="flex flex-col gap-1 font-mono">
-            <div v-for="u in unknownIds" :key="u.id" class="flex flex-col text-slate">
-              <div class="flex justify-between text-white">
-                <span>{{ u.id }}</span>
-                <span>{{ u.hz }} Hz</span>
-              </div>
-              <span class="text-small">(no DBC entry)</span>
+      <!-- Unknown CAN IDs -->
+      <CyberPanel class="flex flex-col text-body p-2 w-[clamp(80px,20vw,160px)] shrink-0 overflow-hidden">
+        <div class="text-silver font-bold uppercase mb-2 border-b border-charcoal pb-1">Unknown CAN IDs</div>
+        <div class="flex flex-col gap-1 font-mono">
+          <div v-for="u in unknownIds" :key="u.id" class="flex flex-col text-slate">
+            <div class="flex justify-between text-white">
+              <span>{{ u.id }}</span>
+              <span>{{ u.hz }} Hz</span>
             </div>
+            <span class="text-small">(no DBC entry)</span>
           </div>
-        </CyberPanel>
+        </div>
+      </CyberPanel>
 
-      </div>
     </div>
     
     <!-- Drill-In Modal -->
@@ -255,9 +251,7 @@ watch(drilling, (n) => {
         <div class="mt-4 text-small text-slate text-center pt-2 border-t border-charcoal">B · CLOSE</div>
       </CyberBox>
     </div>
-    
-    <HintBar :hints="['A · DRILL IN', 'B · BACK', '◀ ▶ PAGE', '◆ ADD DBC']" />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>

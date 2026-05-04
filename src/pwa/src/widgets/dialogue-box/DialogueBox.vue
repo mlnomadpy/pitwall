@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import Sprite from '@/entities/coach/Sprite.vue'
-import { useDialogueStore } from '@/features/coach-interaction/model/dialogueStore'
-import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { onMounted, ref } from 'vue'
+import CoachCard from '@/shared/ui/CoachCard.vue'
+import { useTypewriter } from '@/shared/lib/useTypewriter'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 
 const props = defineProps<{
   coachId: string
@@ -10,79 +10,75 @@ const props = defineProps<{
   text: string
 }>()
 
-const emit = defineEmits(['done'])
+const emit = defineEmits<{ (e: 'done'): void }>()
 
-const store = useDialogueStore()
-const audio = useAudioStore()
-const displayedText = ref('')
-const isTalking = ref(true)
-
-let typeInterval: number
-
-const startTyping = () => {
-  store.queue = [props.text]
-  store.next()
-  
-  let i = 0
-  displayedText.value = ''
-  isTalking.value = true
-  
-  typeInterval = window.setInterval(() => {
-    if (i < store.currentText.length) {
-      displayedText.value += store.currentText.charAt(i)
-      if (i % 2 === 0) audio.playSfx('dialogue_blip')
-      i++
-    } else {
-      clearInterval(typeInterval)
-      isTalking.value = false
-    }
-  }, 30) // Teletype speed
-}
+const { displayedText, isTyping, start, complete } = useTypewriter()
+const isListening = ref(false)
 
 onMounted(() => {
-  startTyping()
-  window.addEventListener('keydown', handleKey)
+  start(props.text)
 })
 
-onUnmounted(() => {
-  clearInterval(typeInterval)
-  window.removeEventListener('keydown', handleKey)
-})
-
-const handleKey = (e: KeyboardEvent) => {
-  // Prevent GarageHub tile enter logic if dialogue is active
-  e.stopPropagation()
-  
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'Enter') {
-    if (isTalking.value) {
-      // Skip typing to end
-      clearInterval(typeInterval)
-      displayedText.value = store.currentText
-      isTalking.value = false
+    // Only intercept Enter — let Escape and other keys propagate to PauseMenu etc.
+    e.stopPropagation()
+    
+    if (isTyping.value) {
+      complete()
     } else {
       emit('done')
     }
   }
+})
+
+const handleClick = () => {
+  if (isTyping.value) {
+    complete()
+  } else {
+    emit('done')
+  }
+}
+
+const toggleListen = (e: Event) => {
+  e.stopPropagation()
+  isListening.value = !isListening.value
 }
 </script>
 
 <template>
-  <div class="dialogue-box pixelated" @keydown.stop>
-    <div class="dialogue-inner">
+  <div class="dialogue-box pixelated" @keydown.stop @click="handleClick">
+    <div class="dialogue-inner flex items-center">
       <!-- Portrait frame -->
       <div class="portrait-frame">
-        <div class="portrait-glow"></div>
-        <Sprite :sheet="coachId" :animation="isTalking ? 'talk' : emotion" :scale="0.5" class="portrait-sprite" />
+        <CoachCard 
+          :id="coachId" 
+          :animation="emotion || 'idle'" 
+          :paused="!isTyping"
+          portrait-only
+        />
       </div>
       
       <!-- Text area -->
       <div class="text-area">
-        <div class="speaker-name ">{{ coachId.toUpperCase() }}</div>
+        <div class="speaker-name">{{ coachId.toUpperCase() }}</div>
         <div class="dialogue-text text-body">
           {{ displayedText }}
-          <span v-if="!isTalking" class="advance-indicator">▼</span>
+          <span v-if="!isTyping" class="advance-indicator">▼</span>
         </div>
       </div>
+      
+      <!-- Voice Input Bar / Microphone -->
+      <button 
+        class="mic-button flex-shrink-0 w-[clamp(36px,8vmin,48px)] h-[clamp(36px,8vmin,48px)] rounded-full flex items-center justify-center transition-all duration-300 ml-2"
+        :class="isListening ? 'bg-ui-bad/20 border-2 border-ui-bad shadow-[0_0_15px_rgba(255,71,87,0.4)]' : 'bg-slate/20 border border-slate hover:bg-slate/40'"
+        @click="toggleListen"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-1/2 h-1/2" :class="isListening ? 'text-ui-bad animate-pulse' : 'text-silver'" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+        </svg>
+      </button>
     </div>
   </div>
 </template>
@@ -99,56 +95,26 @@ const handleKey = (e: KeyboardEvent) => {
 
 .dialogue-inner {
   border: 2px solid var(--color-slate);
-  background: linear-gradient(
-    180deg,
-    rgba(26, 29, 46, 0.97) 0%,
-    rgba(13, 13, 18, 0.98) 100%
-  );
+  background-color: var(--color-ink);
   padding: clamp(6px, 1.5vmin, 16px);
   display: flex;
   gap: clamp(8px, 2vmin, 20px);
   min-height: clamp(56px, 10vh, 100px);
-  box-shadow:
-    inset 0 0 0 1px rgba(61, 68, 88, 0.3),
-    0 -4px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
   position: relative;
   overflow: hidden;
 }
 
-/* Subtle top-edge highlight */
-.dialogue-inner::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 10%;
-  width: 80%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(42, 161, 152, 0.3), transparent);
-}
+/* Subtle top-edge highlight (Removed for strict retro) */
 
 .portrait-frame {
   flex-shrink: 0;
   width: clamp(40px, 8vmin, 72px);
   height: clamp(40px, 8vmin, 72px);
-  background: var(--color-charcoal);
-  border: 1px solid var(--color-slate);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
   position: relative;
-}
-
-.portrait-glow {
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(circle at center, rgba(42, 161, 152, 0.05) 0%, transparent 70%);
-  pointer-events: none;
-}
-
-.portrait-sprite {
-  position: absolute;
-  top: -10px;
 }
 
 .text-area {
@@ -173,11 +139,11 @@ const handleKey = (e: KeyboardEvent) => {
 .advance-indicator {
   color: var(--color-ui-info);
   margin-left: clamp(4px, 1vmin, 8px);
-  animation: advance-blink 1s ease-in-out infinite;
+  animation: advance-blink 1s steps(2) infinite;
 }
 
 @keyframes advance-blink {
-  0%, 100% { opacity: 0.4; }
+  0%, 100% { opacity: 0; }
   50% { opacity: 1; }
 }
 </style>

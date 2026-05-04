@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useSaveStore } from '@/entities/save/model/saveStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberTabs from '@/shared/ui/core/CyberTabs.vue'
-import CyberBox from '@/shared/ui/core/CyberBox.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import Sprite from '@/entities/coach/Sprite.vue'
 
 const props = defineProps<{
   active: boolean
@@ -14,7 +16,7 @@ const emit = defineEmits<{
   (e: 'play', phrase: any): void
 }>()
 
-const save = useSaveStore()
+
 const audio = useAudioStore()
 
 const coaches = [
@@ -39,7 +41,7 @@ const phrases = Array.from({ length: 50 }).map((_, i) => ({
 
 const cursorIndex = ref(0)
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (!props.active) return
 
   if (e.key === 'ArrowRight') {
@@ -78,55 +80,67 @@ const handleKey = (e: KeyboardEvent) => {
       audio.playSfx('cancel')
     }
   }
-}
+})
 
-defineExpose({ handleKey })
 </script>
 
 <template>
-  <div class="flex-grow flex flex-col pt-2 h-[clamp(120px,30vh,240px)]" v-if="active">
-    <!-- Coach Tabs -->
-    <CyberTabs :tabs="coaches.map(c => c.tab)" v-model="activeCoachIndex" class="mb-2" />
+  <CyberSplitView split="40-60" gap="sm" class="h-full" v-if="active">
     
-    <div class="text-body text-silver mb-2 flex justify-between px-1 font-bold">
-      <span>{{ activeCoach.name }} · 47 / 50 PHRASES HEARD</span>
-      <span>94 %</span>
-    </div>
-
-    <!-- Phrase List -->
-    <CyberPanel class="p-2 flex-grow flex flex-col overflow-hidden relative border-slate">
-      <div class="overflow-y-auto flex-grow flex flex-col gap-1 pr-2" id="phrase-list" style="max-height: clamp(80px, 20vh, 160px);">
-        <div 
-          v-for="(p, i) in phrases" 
-          :key="p.id"
-          class="flex items-center text-body py-[2px] transition-colors"
-          :class="[
-            cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver',
-            !p.unlocked ? 'opacity-50 text-slate' : ''
-          ]"
-          :id="`phrase-${i}`"
-        >
-          <span class="w-4 flex-shrink-0 text-ui-good" v-if="cursorIndex === i">▶</span>
-          <span class="w-4 flex-shrink-0" v-else></span>
+    <!-- Left Column: Coach Portrait and Stats -->
+    <template #left>
+      <div class="flex flex-col h-full gap-4">
+        <CyberTabs :tabs="coaches.map(c => c.tab)" v-model="activeCoachIndex" class="flex-shrink-0" />
+        
+        <CyberPanel variant="solid" border="secondary" class="flex-1 flex flex-col justify-center items-center overflow-hidden relative p-0 bg-ink">
+          <!-- Big Sprite Portrait -->
+          <div class="flex-1 flex items-center justify-center w-full relative">
+            <Sprite :sheet="activeCoach.id" animation="idle" class="scale-[2] origin-bottom drop-shadow-[4px_4px_0_#000]" />
+          </div>
           
-          <span class="w-4 flex-shrink-0 text-ui-good" v-if="p.unlocked">✓</span>
-          <span class="w-4 flex-shrink-0 text-charcoal-light" v-else>▒</span>
-
-          <span class="w-4 flex-shrink-0 text-ui-info mr-1" v-if="p.unlocked">{{ p.emotion }}</span>
-          <span class="w-4 flex-shrink-0 text-slate mr-1" v-else>??</span>
-
-          <span class="w-[clamp(60px,15vw,120px)] flex-shrink-0 font-mono">{{ p.unlocked ? p.key : '???' }}</span>
-          <span class="truncate ml-2 italic">"{{ p.unlocked ? p.text : '──────' }}"</span>
-        </div>
+          <div class="w-full bg-charcoal border-t border-slate p-3 text-center z-10">
+            <h2 class="text-[clamp(16px,4vmin,24px)] text-silver tracking-[0.2em] font-bold">{{ activeCoach.name }}</h2>
+            <div class="text-small text-ui-good mt-1 font-bold">47 / 50 PHRASES UNLOCKED (94%)</div>
+          </div>
+        </CyberPanel>
       </div>
-    </CyberPanel>
+    </template>
+
+    <!-- Right Column: Phrase List -->
+    <template #right>
+      <CyberPanel variant="glass" border="secondary" class="flex flex-col h-full overflow-hidden p-3 min-h-0">
+        <div class="flex justify-between items-end mb-3 border-b border-slate pb-2 flex-shrink-0">
+          <h2 class="text-title text-silver tracking-[0.1em] text-[clamp(12px,3vmin,20px)] m-0">AUDIO LOGS</h2>
+        </div>
+        
+        <div class="overflow-y-auto flex-grow flex flex-col gap-1 pr-2 min-h-0 h-full" id="phrase-list">
+          <div 
+            v-for="(p, i) in phrases" 
+            :key="p.id"
+            class="flex items-center text-body py-[6px] px-2 border border-transparent"
+            :class="[
+              cursorIndex === i ? 'bg-charcoal border-slate text-white' : 'text-silver',
+              !p.unlocked ? 'opacity-50 text-slate' : ''
+            ]"
+            :id="`phrase-${i}`"
+          >
+            <span class="w-4 flex-shrink-0 text-ui-good" v-if="cursorIndex === i">▶</span>
+            <span class="w-4 flex-shrink-0" v-else></span>
+            
+            <span class="w-4 flex-shrink-0 text-ui-good" v-if="p.unlocked">✓</span>
+            <span class="w-4 flex-shrink-0 text-charcoal-light" v-else>▒</span>
+
+            <span class="w-4 flex-shrink-0 text-ui-info mr-1" v-if="p.unlocked">{{ p.emotion }}</span>
+            <span class="w-4 flex-shrink-0 text-slate mr-1" v-else>??</span>
+
+            <span class="w-[clamp(80px,20vw,160px)] flex-shrink-0 font-mono text-[clamp(10px,2vmin,14px)]">{{ p.unlocked ? p.key : '???' }}</span>
+            <span class="truncate ml-2 italic text-[clamp(10px,2vmin,14px)]">"{{ p.unlocked ? p.text : '──────' }}"</span>
+          </div>
+        </div>
+      </CyberPanel>
+    </template>
     
-    <!-- Coach Avatar inline -->
-    <CyberBox variant="charcoal" border="slate" class="absolute right-4 bottom-10 w-[clamp(48px,10vmin,80px)] h-[clamp(48px,10vmin,80px)] overflow-hidden pointer-events-none z-10 shadow-lg" v-if="active">
-      <!-- Fallback image logic for coach, we use trod if image doesn't exist -->
-      <img src="/sprites/coaches/trod.png" class="w-full h-auto object-cover opacity-80 mix-blend-screen scale-[1.5] origin-top-left" style="image-rendering: pixelated; filter: grayscale(1) sepia(1) hue-rotate(180deg) saturate(3);" />
-    </CyberBox>
-  </div>
+  </CyberSplitView>
 </template>
 
 <style scoped>

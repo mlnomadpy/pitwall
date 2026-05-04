@@ -66,6 +66,7 @@ class CueBus:
 # Module-level bus instances — imported by bp_core for /analyze fan-out.
 cue_bus = CueBus()
 notif_bus = CueBus()
+telemetry_bus = CueBus()
 
 
 # ── SSE: /cues/stream ─────────────────────────────────────────────────────────
@@ -104,6 +105,46 @@ def cues_stream():
                 yield f"data: {json.dumps(event)}\n\n"
         finally:
             cue_bus.unsubscribe(sid, q)
+
+    return Response(
+        stream_with_context(gen()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── SSE: /telemetry/stream ────────────────────────────────────────────────────
+
+@bp.route("/telemetry/stream", methods=["GET"])
+def telemetry_stream():
+    """Server-Sent Events stream of high-frequency telemetry for a session.
+    
+    Query params:
+        session_id   required — only events for this session are streamed
+    """
+    sid = request.args.get("session_id")
+    if not sid:
+        return jsonify({"error": "session_id query param required"}), 400
+
+    q = telemetry_bus.subscribe(sid, maxsize=128)
+
+    def gen():
+        try:
+            yield "event: hello\n"
+            yield f"data: {json.dumps({'session_id': sid})}\n\n"
+            while True:
+                try:
+                    event = q.get(timeout=15.0)
+                except _queue.Empty:
+                    yield ": keepalive\n\n"
+                    continue
+                yield "event: telemetry\n"
+                yield f"data: {json.dumps(event)}\n\n"
+        finally:
+            telemetry_bus.unsubscribe(sid, q)
 
     return Response(
         stream_with_context(gen()),

@@ -5,7 +5,7 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits<{ (e: 'update:modelValue', val: number): void; (e: 'change', val: number): void }>()
 
 const selectTab = (index: number) => {
   if (props.modelValue !== index) {
@@ -54,7 +54,7 @@ const selectTab = (index: number) => {
   -webkit-tap-highlight-color: transparent;
   font-family: var(--font-ui);
   text-transform: uppercase;
-  transition: all 0.2s ease;
+  transition: background-color 0.05s steps(2), color 0.05s steps(2);
   user-select: none;
 }
 

@@ -18,7 +18,7 @@ const props = withDefaults(defineProps<Props>(), {
   complex: false
 })
 
-const emit = defineEmits(['click'])
+const emit = defineEmits<{ (e: 'click', evt: Event): void }>()
 
 const onClick = (e: Event) => {
   if (!props.disabled) {
@@ -63,14 +63,14 @@ const onClick = (e: Event) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(31, 40, 51, 0.9) 0%, rgba(11, 12, 16, 0.95) 100%);
+  background: var(--color-ink);
   color: #fff;
   font-family: var(--font-title);
   cursor: pointer;
   outline: none;
-  border: none;
-  transition: all 0.2s ease-out;
-  backdrop-filter: blur(4px);
+  border: 2px solid var(--theme-color, #4ecdc4);
+  /* Snappy arcade transition */
+  transition: transform 0.05s steps(2), box-shadow 0.05s steps(2), background-color 0.05s steps(2);
   /* GPU-accelerated cut corners */
   clip-path: polygon(
     12px 0,
@@ -82,6 +82,8 @@ const onClick = (e: Event) => {
   );
   overflow: hidden;
   z-index: 1;
+  /* Hard pixel shadow */
+  box-shadow: 4px 4px 0 rgba(0,0,0,0.8);
 }
 
 .cyber-button.fluid {
@@ -126,7 +128,7 @@ const onClick = (e: Event) => {
 .main-text {
   text-transform: uppercase;
   letter-spacing: 2px;
-  text-shadow: 0 2px 4px rgba(0,0,0,0.8);
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
 }
 
 .sub-text {
@@ -160,21 +162,7 @@ const onClick = (e: Event) => {
 
 /* The Neon Border */
 .neon-border {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2;
-  border: 2px solid var(--theme-color, #4ecdc4);
-  clip-path: polygon(
-    12px 0,
-    100% 0,
-    100% calc(100% - 12px),
-    calc(100% - 12px) 100%,
-    0 100%,
-    0 12px
-  );
-  box-shadow: inset 0 0 12px rgba(0,0,0,0.5);
-  transition: all 0.2s ease;
+  display: none; /* Disabled for strict retro look */
 }
 
 .bg-scanline {
@@ -193,43 +181,34 @@ const onClick = (e: Event) => {
 /* Hover and Active States */
 .cyber-button:hover:not(.disabled),
 .cyber-button.active:not(.disabled) {
-  background: linear-gradient(135deg, rgba(42, 53, 68, 0.95) 0%, rgba(11, 12, 16, 1) 100%);
-  box-shadow: 0 0 20px var(--theme-glow, rgba(78, 205, 196, 0.6)), inset 0 0 10px var(--theme-glow, rgba(78, 205, 196, 0.3));
-  transform: translateY(-2px); /* Stable 2D transform */
-}
-
-.cyber-button:hover:not(.disabled) .neon-border,
-.cyber-button.active:not(.disabled) .neon-border {
-  background: var(--theme-bg-hover, rgba(78, 205, 196, 0.15));
-  box-shadow: inset 0 0 20px var(--theme-glow, rgba(78, 205, 196, 0.4));
+  background-color: var(--theme-bg-hover, rgba(78, 205, 196, 0.2));
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 rgba(0,0,0,0.8);
 }
 
 .cyber-button:active:not(.disabled) {
-  transform: translateY(1px);
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 rgba(0,0,0,0.8);
 }
 
 /* Variants using CSS vars for easy theming */
 .cyber-button.primary {
   --theme-color: #ff4757;
-  --theme-glow: rgba(255, 71, 87, 0.6);
-  --theme-bg-hover: rgba(255, 71, 87, 0.15);
+  --theme-bg-hover: rgba(255, 71, 87, 0.2);
 }
 
 .cyber-button.secondary {
   --theme-color: #4ecdc4;
-  --theme-glow: rgba(78, 205, 196, 0.6);
-  --theme-bg-hover: rgba(78, 205, 196, 0.15);
+  --theme-bg-hover: rgba(78, 205, 196, 0.2);
 }
 
 .cyber-button.info {
   --theme-color: #feca57;
-  --theme-glow: rgba(254, 202, 87, 0.6);
-  --theme-bg-hover: rgba(254, 202, 87, 0.15);
+  --theme-bg-hover: rgba(254, 202, 87, 0.2);
 }
 
 .cyber-button.dark {
   --theme-color: #2c3e50;
-  --theme-glow: rgba(44, 62, 80, 0.6);
-  --theme-bg-hover: rgba(44, 62, 80, 0.3);
+  --theme-bg-hover: rgba(44, 62, 80, 0.4);
 }
 </style>

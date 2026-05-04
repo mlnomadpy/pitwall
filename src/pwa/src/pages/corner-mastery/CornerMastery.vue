@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -43,7 +44,7 @@ const getGradeColor = (g: string) => {
   return 'text-silver'
 }
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
     cursorIndex.value = Math.min(cursorIndex.value + 1, corners.length - 1)
     
@@ -70,73 +71,56 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.push('/garage/analysis')
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
-      <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title text-silver font-bold">CORNER MASTERY</h1>
-        <span class="text-body text-silver">session 2026-04-29-1503</span>
+  <PageShell title="CORNER MASTERY" subtitle="session 2026-04-29-1503" :hints="['A · DRILL DOWN (SOON)', '◀ ▶ MOVE', 'B · BACK']" bg="cool">
+    <!-- Stylized Track Map -->
+    <CyberPanel class="flex items-center justify-center py-2 px-1 text-body overflow-hidden whitespace-nowrap bg-charcoal">
+      <div class="flex gap-[6px]">
+        <div 
+          v-for="(c, i) in corners" 
+          :key="c.id"
+          class="flex flex-col items-center justify-center transition-transform"
+          :class="cursorIndex === i ? 'scale-125 font-bold z-10' : 'opacity-70'"
+        >
+          <span v-if="cursorIndex === i" class="text-ui-good text-small absolute -top-2">▼</span>
+          <span class="text-body" :class="getClassColor(c.class)">
+            {{ c.class === 'low' ? '◓' : c.class === 'med' ? '◐' : '◑' }}
+          </span>
+          <span :class="cursorIndex === i ? 'text-white' : 'text-silver'">{{ c.id }}</span>
+        </div>
       </div>
-
-      <!-- Stylized Track Map -->
-      <CyberPanel class="flex items-center justify-center py-2 px-1 text-body overflow-hidden whitespace-nowrap bg-charcoal">
-        <div class="flex gap-[6px]">
-          <div 
-            v-for="(c, i) in corners" 
-            :key="c.id"
-            class="flex flex-col items-center justify-center transition-transform"
-            :class="cursorIndex === i ? 'scale-125 font-bold z-10' : 'opacity-70'"
-          >
-            <span v-if="cursorIndex === i" class="text-ui-good text-small absolute -top-2">▼</span>
-            <span class="text-body" :class="getClassColor(c.class)">
-              {{ c.class === 'low' ? '◓' : c.class === 'med' ? '◐' : '◑' }}
-            </span>
-            <span :class="cursorIndex === i ? 'text-white' : 'text-silver'">{{ c.id }}</span>
-          </div>
-        </div>
-      </CyberPanel>
+    </CyberPanel>
+    
+    <!-- Drill Panel -->
+    <CyberPanel class="p-2 min-h-[50px] relative transition-colors duration-200"
+           :class="cur.grade.startsWith('A') ? 'border-ui-good/50 bg-ui-good/10' : cur.grade === 'F' ? 'border-ui-warn/50 bg-ui-warn/10' : ''">
+      <div class="flex justify-between items-end mb-2 border-b border-slate pb-1">
+        <span class="font-bold text-body"><span class="text-ui-info mr-1">▶</span>{{ cur.id }}  {{ cur.name.toUpperCase() }}</span>
+        <span class="text-title-lg leading-none" :class="getGradeColor(cur.grade)">{{ cur.grade }}</span>
+      </div>
       
-      <!-- Drill Panel -->
-      <CyberPanel class="p-2 min-h-[50px] relative transition-colors duration-200"
-             :class="cur.grade.startsWith('A') ? 'border-ui-good/50 bg-ui-good/10' : cur.grade === 'F' ? 'border-ui-warn/50 bg-ui-warn/10' : ''">
-        <div class="flex justify-between items-end mb-2 border-b border-slate pb-1">
-          <span class="font-bold text-body"><span class="text-ui-info mr-1">▶</span>{{ cur.id }}  {{ cur.name.toUpperCase() }}</span>
-          <span class="text-title-lg leading-none" :class="getGradeColor(cur.grade)">{{ cur.grade }}</span>
-        </div>
+      <div class="grid grid-cols-3 gap-2 text-body">
+        <div>ENTRY <span class="font-bold text-white ml-1">{{ cur.entry }}</span> km/h</div>
+        <div>APEX <span class="font-bold text-white ml-1">{{ cur.apex }}</span> km/h</div>
+        <div>EXIT <span class="font-bold text-white ml-1">{{ cur.exit }}</span> km/h</div>
         
-        <div class="grid grid-cols-3 gap-2 text-body">
-          <div>ENTRY <span class="font-bold text-white ml-1">{{ cur.entry }}</span> km/h</div>
-          <div>APEX <span class="font-bold text-white ml-1">{{ cur.apex }}</span> km/h</div>
-          <div>EXIT <span class="font-bold text-white ml-1">{{ cur.exit }}</span> km/h</div>
-          
-          <div>PEAK BRAKE <span class="font-bold text-white ml-1">{{ cur.brake }}</span> bar</div>
-          <div>MAX gLat <span class="font-bold text-white ml-1">{{ cur.glat }}</span></div>
-          <div>TIME <span class="font-bold text-white ml-1">{{ cur.time }}</span>s</div>
-        </div>
-        
-        <div class="absolute bottom-2 right-2 text-body text-silver">
-          GOLD DELTA <span class="font-bold" :class="cur.delta.startsWith('-') ? 'text-ui-good' : 'text-ui-warn'">{{ cur.delta }}</span>s
-        </div>
-      </CyberPanel>
+        <div>PEAK BRAKE <span class="font-bold text-white ml-1">{{ cur.brake }}</span> bar</div>
+        <div>MAX gLat <span class="font-bold text-white ml-1">{{ cur.glat }}</span></div>
+        <div>TIME <span class="font-bold text-white ml-1">{{ cur.time }}</span>s</div>
+      </div>
       
-      <!-- Throttle/Brake Mock Charts -->
-      <div class="grid grid-cols-[1fr_1fr] gap-2 flex-grow min-h-0 pb-10">
-        <CyberPanel class="flex flex-col text-body overflow-hidden p-2">
+      <div class="absolute bottom-2 right-2 text-body text-silver">
+        GOLD DELTA <span class="font-bold" :class="cur.delta.startsWith('-') ? 'text-ui-good' : 'text-ui-warn'">{{ cur.delta }}</span>s
+      </div>
+    </CyberPanel>
+    
+    <!-- Throttle/Brake Mock Charts -->
+    <CyberSplitView split="50-50" gap="sm" class="flex-grow min-h-0">
+      <template #left>
+        <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
           <div class="text-silver mb-1">THROTTLE % BY CORNER</div>
           <div class="flex flex-col gap-1 overflow-hidden">
             <!-- Mock box plots -->
@@ -152,8 +136,10 @@ onUnmounted(() => {
             <div class="text-slate text-center mt-1">...</div>
           </div>
         </CyberPanel>
-        
-        <CyberPanel class="flex flex-col text-body overflow-hidden p-2">
+      </template>
+      
+      <template #right>
+        <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
           <div class="text-silver mb-1">BRAKE / ACCEL ZONES</div>
           <div class="flex flex-col gap-2 mt-2">
             <div class="flex gap-2 items-center">
@@ -172,14 +158,7 @@ onUnmounted(() => {
             </div>
           </div>
         </CyberPanel>
-      </div>
-      
-    </div>
-    
-    <HintBar :hints="['A · DRILL DOWN (SOON)', '◀ ▶ MOVE', 'B · BACK']" />
-  </div>
+      </template>
+    </CyberSplitView>
+  </PageShell>
 </template>
-
-<style scoped>
-/* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
-</style>

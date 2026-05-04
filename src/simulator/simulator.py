@@ -66,7 +66,7 @@ def run(vbo_path, backend_url, speed_mult, driver, track_name):
 
     # 1. Init session
     try:
-        r = requests.post(f"{backend_url}/api/session/start", json={
+        r = requests.post(f"{backend_url}/session/start", json={
             "driver": driver,
             "track": track_name,
             "note": "Live simulation via HTTP client"
@@ -95,7 +95,7 @@ def run(vbo_path, backend_url, speed_mult, driver, track_name):
             # Post frame
             payload = f.to_dict()
             try:
-                requests.post(f"{backend_url}/api/session/{session_id}/frame", json=payload, timeout=0.5)
+                requests.post(f"{backend_url}/session/{session_id}/frame", json=payload, timeout=0.5)
             except requests.RequestException:
                 sys.stdout.write(f"\r{RED}Warning: Dropped frame {i} due to connection error.{RESET}          ")
                 
@@ -126,7 +126,7 @@ def run(vbo_path, backend_url, speed_mult, driver, track_name):
         listener.stop()
         print(f"Ending session {session_id}...")
         try:
-            requests.post(f"{backend_url}/api/session/{session_id}/end", timeout=2)
+            requests.post(f"{backend_url}/session/{session_id}/end", timeout=2)
         except:
             pass
 

@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useNotificationsStore } from '@/shared/api/notificationStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import CyberBadge from '@/shared/ui/core/CyberBadge.vue'
 
 const saveStore = useSaveStore()
@@ -11,22 +12,19 @@ const notificationStore = useNotificationsStore()
 const audio = useAudioStore()
 const router = useRouter()
 
-const activeSlot = computed(() => {
-  if (saveStore.activeSlotId === null) return null
-  return saveStore.slots[saveStore.activeSlotId - 1]
-})
+const activeSlot = computed(() => saveStore.activeSlot)
 
 const time = ref('')
 
-const handleKey = (e: KeyboardEvent) => {
+const props = defineProps<{ extra?: string }>()
+
+useKeyboard((e: KeyboardEvent) => {
   // Global shortcut to open notifications from anywhere
   if ((e.key === 'n' || e.key === 'N') && document.activeElement?.tagName !== 'TEXTAREA') {
     audio.playSfx('cursor_select')
     router.push('/notifications')
   }
-}
-
-const props = defineProps<{ extra?: string }>()
+})
 
 let timer: number
 onMounted(() => {
@@ -36,12 +34,10 @@ onMounted(() => {
   }
   updateTime()
   timer = window.setInterval(updateTime, 1000)
-  window.addEventListener('keydown', handleKey)
 })
 
 onUnmounted(() => {
   clearInterval(timer)
-  window.removeEventListener('keydown', handleKey)
 })
 </script>
 

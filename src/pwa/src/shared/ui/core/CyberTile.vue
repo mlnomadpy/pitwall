@@ -17,7 +17,7 @@ withDefaults(defineProps<Props>(), {
   variant: 'ink'
 })
 
-const emit = defineEmits(['click', 'hover'])
+const emit = defineEmits<{ (e: 'click'): void; (e: 'hover'): void }>()
 </script>
 
 <template>
@@ -85,13 +85,13 @@ const emit = defineEmits(['click', 'hover'])
   left: clamp(6px, 1.5vmin, 14px);
   color: var(--color-ui-good);
   font-size: clamp(8px, 1.8vmin, 14px);
-  text-shadow: 0 0 4px rgba(42, 161, 152, 0.6);
-  animation: gentle-pulse 1.5s ease-in-out infinite;
+  text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.8);
+  animation: retro-blink 1s steps(2) infinite;
   z-index: 10;
 }
 
-@keyframes gentle-pulse {
-  0%, 100% { opacity: 0.5; }
+@keyframes retro-blink {
+  0%, 100% { opacity: 0; }
   50% { opacity: 1; }
 }
 

@@ -1,28 +1,54 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useDuckDBStore } from '@/shared/lib/duckdb/duckdbStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import Sprite from '@/entities/coach/Sprite.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import CyberTabs from '@/shared/ui/core/CyberTabs.vue'
+import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
+import MedalGrid from '@/widgets/medal-grid/MedalGrid.vue'
+import CyberRadarChart from '@/shared/ui/core/CyberRadarChart.vue'
+
+// Dummy medal data
+const allMedals = Array.from({ length: 40 }).map((_, i) => ({
+  id: `medal_${i}`,
+  tier: i < 5 ? 'BRONZE' : i < 20 ? 'SILVER' : i < 35 ? 'GOLD' : i < 39 ? 'PLATINUM' : 'RAINBOW',
+  name: `Medal ${i}`,
+  desc: `Acquisition criteria for medal ${i}.`,
+  unlocked: Math.random() > 0.6
+}))
+
+// Radar stats
+const driverStats = ref([
+  { label: 'BRAKING', value: 85 },
+  { label: 'CONSISTENCY', value: 72 },
+  { label: 'APEX', value: 90 },
+  { label: 'SPEED', value: 88 },
+  { label: 'VISION', value: 65 }
+])
+
+const tabs = ['SKILLS', 'MEDALS']
+const activeTab = ref(0)
+
+const switchTab = (val: number) => {
+  activeTab.value = val
+}
 
 const router = useRouter()
 const saveStore = useSaveStore()
 const duckDB = useDuckDBStore()
 
-const save = saveStore.slots[saveStore.activeSlotId! - 1]
-const hints = ['▲ ▼ ◀ ▶ NAVIGATE', 'A · MEDALS', '◆ EVOLUTION', 'B · GARAGE']
+const save = saveStore.activeSlot
+const hints = ['◀ ▶ TABS', 'B · GARAGE']
 
 const totalSessions = ref(save?.sessions.length ?? 0)
 const bestLapS = ref<number | null>(null)
-const view = ref<'idle' | 'medals' | 'evolution'>('idle')
 const loading = ref(true)
 
 onMounted(async () => {
-  window.addEventListener('keydown', handleKey)
-  
   if (!duckDB.db) {
     try {
       await duckDB.init()
@@ -38,21 +64,13 @@ onMounted(async () => {
   loading.value = false
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-})
-
-const handleKey = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' || e.key === 'Backspace') {
-    if (view.value !== 'idle') {
-      view.value = 'idle'
-    } else {
-      router.push('/garage')
-    }
-  } else if (e.key === 'Enter') {
-    view.value = 'medals'
+useKeyboard((e: KeyboardEvent) => {
+  if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
+    router.push('/garage')
+  } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    activeTab.value = activeTab.value === 0 ? 1 : 0
   }
-}
+})
 
 const formatLap = (s: number | null) => {
   if (s === null) return '--:--.-'
@@ -63,83 +81,89 @@ const formatLap = (s: number | null) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden">
-    <StatusBar />
-    
-    <div class="trainer-bg absolute inset-0 z-0"></div>
-    
-    <div class="content flex flex-col h-full pt-[6vh] pb-[6vh] px-[3vw] relative z-10" v-if="save">
-      <!-- Heading -->
+  <PageShell title="TRAINER CARD" :hints="hints" bg="neutral">
+    <template #heading>
       <div class="heading-block mb-[2vh] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.3em]">TRAINER CARD</h1>
         <div class="heading-rule"></div>
       </div>
-      
-      <!-- Card -->
-      <CyberPanel class="w-full flex gap-[3vw]">
-        <div class="avatar-box">
-          <Sprite sheet="avatars" animation="idle" />
-        </div>
-        
-        <div class="card-meta text-body flex flex-col justify-center gap-[0.4vh]">
-          <div class="text-ui-good text-title  font-bold">{{ save.driverName }}</div>
-          <div class="text-silver">LV. {{ save.level }} · {{ save.skillLevel.toUpperCase() }}</div>
-          <div class="text-silver">{{ totalSessions }} TRACK SESSIONS</div>
-          <div class="text-ui-warn  mt-[0.5vh]">★ BEST {{ formatLap(bestLapS) }}</div>
-        </div>
-      </CyberPanel>
-      
-      <!-- Subview -->
-      <div class="sub-view">
-        <div v-if="loading" class="text-body animate-pulse text-slate">LOADING ANALYTICS...</div>
-        <div v-else-if="view === 'idle'" class="text-body text-slate text-center">
-          SKILL RADAR PLACEHOLDER
-        </div>
-        <div v-else-if="view === 'medals'" class="text-body text-slate text-center">
-          MEDAL GRID PLACEHOLDER
-        </div>
-      </div>
-      
-      <!-- Coach sprite -->
-      <Sprite :sheet="save.preferredCoach" animation="idle" class="absolute bottom-[8vh] right-[4vw]" />
-    </div>
+    </template>
     
-    <HintBar :hints="hints" />
-  </div>
+    <div class="content flex flex-col h-full relative z-10 w-full pb-[6vh]" v-if="save">
+      
+      <CyberSplitView split="40-60" gap="md" class="h-full min-h-0">
+        <!-- Left Pane: Profile -->
+        <template #left>
+          <CyberPanel class="h-full flex flex-col min-h-0 p-3">
+            <div class="text-body text-silver mb-[1.5vh] border-b border-slate pb-[1vh] tracking-[0.1em]">
+              DRIVER PROFILE
+            </div>
+            
+            <div class="flex flex-col items-center flex-grow justify-center gap-[2vmin]">
+              <CyberAvatar :sheet="save.driverAvatar || 'avatar_a'" size="lg" variant="glow" />
+              
+              <div class="text-center w-full px-2">
+                <div class="text-ui-good text-[clamp(14px,3.5vmin,24px)] font-bold mb-1 font-title">{{ save.driverName }}</div>
+                <div class="text-silver text-body mb-[2vmin]">LV. {{ save.level }} · {{ save.skillLevel.toUpperCase() }}</div>
+                
+                <div class="grid grid-cols-2 gap-y-2 gap-x-4 text-small border-t border-slate pt-[2vmin] mt-[1vmin] w-full text-left">
+                  <div class="text-slate">SESSIONS:</div>
+                  <div class="text-silver text-right">{{ totalSessions }}</div>
+                  <div class="text-slate">COACH:</div>
+                  <div class="text-silver text-right uppercase">{{ save.preferredCoach }}</div>
+                  <div class="text-slate">BEST LAP:</div>
+                  <div class="text-ui-warn text-right font-bold">{{ formatLap(bestLapS) }}</div>
+                </div>
+              </div>
+            </div>
+          </CyberPanel>
+        </template>
+        
+        <!-- Right Pane: Tabs (Skills / Medals) -->
+        <template #right>
+          <div class="h-full flex flex-col min-h-0 w-full">
+            <CyberTabs :tabs="tabs" v-model="activeTab" @change="switchTab" class="mb-[1.5vh]" />
+            
+            <CyberPanel variant="glass" border="secondary" class="flex-1 flex flex-col overflow-hidden min-h-0 p-3">
+              <div v-if="loading" class="text-body animate-pulse text-slate w-full h-full flex items-center justify-center">
+                LOADING ANALYTICS...
+              </div>
+              
+              <template v-else>
+                <!-- SKILLS TAB -->
+                <div v-if="activeTab === 0" class="w-full h-full flex flex-col min-h-0">
+                  <div class="text-small text-silver mb-2 border-b border-slate pb-1 flex justify-between flex-shrink-0">
+                    <span>DRIVING STYLE ANALYSIS</span>
+                    <span class="text-ui-info font-bold">BALANCED</span>
+                  </div>
+                  <div class="flex-grow flex items-center justify-center p-2 min-h-0">
+                    <CyberRadarChart :stats="driverStats" />
+                  </div>
+                </div>
+                
+                <!-- MEDALS TAB -->
+                <div v-if="activeTab === 1" class="w-full h-full flex flex-col min-h-0">
+                  <div class="text-small text-silver mb-2 border-b border-slate pb-1 flex justify-between flex-shrink-0">
+                    <span>MEDAL DATABASE</span>
+                    <span class="text-ui-good font-bold">{{ allMedals.filter(m => m.unlocked).length }} / 40</span>
+                  </div>
+                  <MedalGrid 
+                    :medals="allMedals" 
+                    :cursorIndex="-1" 
+                    @select="() => {}" 
+                    class="flex-grow"
+                  />
+                </div>
+              </template>
+            </CyberPanel>
+          </div>
+        </template>
+      </CyberSplitView>
+      
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>
-.trainer-bg {
-  background-color: var(--color-asphalt-deep);
-}
-
 .heading-block { text-align: center; }
-.heading-rule {
-  width: clamp(40px, 12vw, 120px);
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--color-slate), transparent);
-  margin: clamp(4px, 1vmin, 10px) auto 0;
-}
-
-.avatar-box {
-  width: clamp(48px, 12vmin, 80px);
-  height: clamp(48px, 12vmin, 80px);
-  border: 1px solid var(--color-slate);
-  background: var(--color-ink);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.sub-view {
-  margin-top: clamp(8px, 2vh, 20px);
-  flex: 1;
-  border: 1px solid var(--color-slate);
-  background: linear-gradient(180deg, rgba(42, 47, 66, 0.5) 0%, rgba(31, 34, 48, 0.7) 100%);
-  padding: clamp(6px, 1.5vmin, 16px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
 </style>

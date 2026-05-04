@@ -1,19 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
 
 const router = useRouter()
 const save = useSaveStore()
 const audio = useAudioStore()
 
 const phase = ref(0)
-const maxPhase = 8
+let aborted = false
+let navTimeout: number | null = null
 
-// Mock data
 const tally = [
   { label: 'SESSIONS', value: '3' },
   { label: 'TOTAL LAPS', value: '23' },
@@ -24,16 +26,16 @@ const tally = [
 
 const progressSequence = async () => {
   for (let i = 1; i <= 5; i++) {
-    if (phase.value > i) continue
+    if (phase.value > i || aborted) continue
     await new Promise(r => setTimeout(r, 400))
-    if (phase.value > i) continue // check if skipped
+    if (phase.value > i || aborted) continue
     phase.value = i
     audio.playSfx('score_tick')
   }
   
-  if (phase.value <= 5) {
+  if (phase.value <= 5 && !aborted) {
     await new Promise(r => setTimeout(r, 800))
-    if (phase.value <= 5) {
+    if (phase.value <= 5 && !aborted) {
       phase.value = 6
     }
   }
@@ -41,36 +43,31 @@ const progressSequence = async () => {
 
 onMounted(() => {
   progressSequence()
-  window.addEventListener('keydown', handleKey)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
+  aborted = true
+  if (navTimeout) clearTimeout(navTimeout)
 })
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
-    // Cancel
     audio.playSfx('cancel')
     router.push('/garage')
   } else if (e.key === 'Enter' || e.key === 'a') {
-    // Skip
     if (phase.value < 5) {
       phase.value = 5
       audio.playSfx('cursor_select')
     } else if (phase.value === 6) {
-      // Skipping dialogue
       onDialogueDone()
     }
   }
-}
+})
 
 const onDialogueDone = () => {
   if (phase.value < 7) {
     phase.value = 7
-    // Mock play night_chime sound
-    setTimeout(() => {
-      // End day
+    navTimeout = window.setTimeout(() => {
       save.activeSlotId = null
       router.push('/')
     }, 2000)
@@ -79,7 +76,8 @@ const onDialogueDone = () => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui flex flex-col items-center justify-center p-4">
+  <PageShell :show-heading="false" bg="neutral" :hints="['ENTER · NEXT', 'B · BACK']">
+    <div class="relative w-full h-full flex flex-col items-center justify-center p-4 z-10">
     <!-- Starry background mock -->
     <div class="absolute inset-0 z-0 bg-asphalt">
        <div class="absolute w-[2px] h-[2px] bg-white rounded-full left-[20%] top-[30%] opacity-50"></div>
@@ -115,7 +113,7 @@ const onDialogueDone = () => {
         </div>
         
         <DialogueBox 
-          :coach-id="save.slots[save.activeSlotId?-1:0]?.preferredCoach ?? 'trod'"
+          :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
           emotion="idle"
           text="Same time tomorrow, kid."
           @done="onDialogueDone"
@@ -128,7 +126,8 @@ const onDialogueDone = () => {
       class="absolute inset-0 bg-ink pointer-events-none z-50 transition-opacity duration-[1500ms]"
       :class="phase >= 7 ? 'opacity-100' : 'opacity-0'"
     ></div>
-  </div>
+    </div>
+  </PageShell>
 </template>
 
 <style scoped>

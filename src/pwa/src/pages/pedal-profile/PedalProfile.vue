@@ -1,16 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import { useSaveStore } from '@/entities/save/model/saveStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
-const save = useSaveStore()
 
 // Thresholds
 const thrTh = ref(5) // throttle %
@@ -75,7 +74,7 @@ const getEmotion = () => {
 
 let timeoutId: number | null = null
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     activeSlider.value = activeSlider.value === 'throttle' ? 'brake' : 'throttle'
     audio.playSfx('cursor_move')
@@ -111,62 +110,47 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.push('/garage/analysis')
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
   if (timeoutId) window.clearTimeout(timeoutId)
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
-      <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title text-silver font-bold">PEDAL PROFILE</h1>
-        <span class="text-body text-silver">session 2026-04-29-1503</span>
-      </div>
-
-      <!-- Session Distribution -->
-      <CyberPanel class="p-2 relative">
-        <div class="text-body text-silver mb-2 font-bold uppercase">Session Distribution</div>
-        
-        <!-- Stacked Bar -->
-        <div class="w-full h-4 flex mt-2 border border-slate">
-          <div class="h-full bg-ui-good transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.throttle}%` }">
-            <span v-if="distribution.throttle > 10" class="text-small text-ink font-bold ml-1">THROTTLE</span>
-          </div>
-          <div class="h-full bg-ui-warn transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.brake}%` }">
-            <span v-if="distribution.brake > 10" class="text-small text-ink font-bold ml-1">BRAKE</span>
-          </div>
-          <div class="h-full bg-[#F59E0B] transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.trail}%` }">
-            <span v-if="distribution.trail > 10" class="text-small text-ink font-bold ml-1">TRAIL</span>
-          </div>
-          <div class="h-full bg-charcoal transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.coast}%` }">
-            <span v-if="distribution.coast > 10" class="text-small text-white font-bold ml-1">COAST</span>
-          </div>
-        </div>
-        
-        <div class="flex justify-between text-body mt-2 font-bold">
-          <span class="text-ui-good">THROTTLE {{ distribution.throttle.toFixed(1) }}%</span>
-          <span class="text-ui-warn">BRAKE {{ distribution.brake.toFixed(1) }}%</span>
-          <span class="text-[#F59E0B]">TRAIL {{ distribution.trail.toFixed(1) }}%</span>
-          <span class="text-silver">COAST {{ distribution.coast.toFixed(1) }}%</span>
-        </div>
-      </CyberPanel>
+  <PageShell title="PEDAL PROFILE" subtitle="session 2026-04-29-1503" :hints="['▲ ▼ SELECT', '◀ ▶ ADJUST', 'B · BACK']" bg="cool">
+    <!-- Session Distribution -->
+    <CyberPanel class="p-2 relative">
+      <div class="text-body text-silver mb-2 font-bold uppercase">Session Distribution</div>
       
-      <div class="grid grid-cols-[3fr_2fr] gap-2 flex-grow min-h-0 pb-16">
-        
+      <!-- Stacked Bar -->
+      <div class="w-full h-4 flex mt-2 border border-slate">
+        <div class="h-full bg-ui-good transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.throttle}%` }">
+          <span v-if="distribution.throttle > 10" class="text-small text-ink font-bold ml-1">THROTTLE</span>
+        </div>
+        <div class="h-full bg-ui-warn transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.brake}%` }">
+          <span v-if="distribution.brake > 10" class="text-small text-ink font-bold ml-1">BRAKE</span>
+        </div>
+        <div class="h-full bg-[#F59E0B] transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.trail}%` }">
+          <span v-if="distribution.trail > 10" class="text-small text-ink font-bold ml-1">TRAIL</span>
+        </div>
+        <div class="h-full bg-charcoal transition-all duration-300 flex items-center overflow-hidden" :style="{ width: `${distribution.coast}%` }">
+          <span v-if="distribution.coast > 10" class="text-small text-white font-bold ml-1">COAST</span>
+        </div>
+      </div>
+      
+      <div class="flex justify-between text-body mt-2 font-bold">
+        <span class="text-ui-good">THROTTLE {{ distribution.throttle.toFixed(1) }}%</span>
+        <span class="text-ui-warn">BRAKE {{ distribution.brake.toFixed(1) }}%</span>
+        <span class="text-[#F59E0B]">TRAIL {{ distribution.trail.toFixed(1) }}%</span>
+        <span class="text-silver">COAST {{ distribution.coast.toFixed(1) }}%</span>
+      </div>
+    </CyberPanel>
+    
+    <CyberSplitView split="60-40" gap="sm" class="flex-grow min-h-0 mt-2">
+      <template #left>
         <!-- Per Corner Grid -->
-        <CyberPanel class="flex flex-col text-body overflow-hidden p-2">
+        <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
           <div class="flex justify-between mb-2">
             <div class="text-silver font-bold uppercase">Per-Corner Pedal State</div>
           </div>
@@ -194,9 +178,11 @@ onUnmounted(() => {
             <span class="flex items-center gap-1"><span class="w-2 h-2 bg-ui-warn inline-block"></span> brake</span>
           </div>
         </CyberPanel>
+      </template>
 
+      <template #right>
         <!-- Thresholds -->
-        <CyberPanel class="flex flex-col text-body p-2 overflow-hidden relative">
+        <CyberPanel class="h-full flex flex-col text-body p-2 overflow-hidden relative">
           <div class="text-silver mb-2 font-bold uppercase">Thresholds</div>
           
           <div class="flex flex-col gap-4">
@@ -231,25 +217,15 @@ onUnmounted(() => {
             Use ◀ ▶ to adjust.<br>Affects Coast classification.
           </div>
         </CyberPanel>
-
-      </div>
-      
-      <div class="absolute bottom-6 left-2 right-2">
-        <DialogueBox 
-          :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
-          :emotion="getEmotion()"
-          :text="getCoachLine()"
-          class="scale-[0.85] origin-bottom-left w-[117%]"
-          :key="getCoachLine()"
-        />
-      </div>
-      
-    </div>
+      </template>
+    </CyberSplitView>
     
-    <HintBar :hints="['▲ ▼ SELECT', '◀ ▶ ADJUST', 'B · BACK']" />
-  </div>
+    <template #floating>
+      <CoachFloat
+        :emotion="getEmotion()"
+        :text="getCoachLine()"
+        :key="getCoachLine()"
+      />
+    </template>
+  </PageShell>
 </template>
-
-<style scoped>
-/* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
-</style>

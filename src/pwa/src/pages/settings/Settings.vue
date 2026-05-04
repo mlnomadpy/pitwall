@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
+
 import CyberTabs from '@/shared/ui/core/CyberTabs.vue'
 import CyberBox from '@/shared/ui/core/CyberBox.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import CyberCheckbox from '@/shared/ui/core/CyberCheckbox.vue'
+import CyberValuePicker from '@/shared/ui/core/CyberValuePicker.vue'
+import CyberProgressBar from '@/shared/ui/core/CyberProgressBar.vue'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -23,34 +26,72 @@ const cursorIndex = ref(0)
 const editMode = ref(false)
 const confirmingDestructive = ref(false)
 
-// Mock settings data
+// Initialize settings from save store (or sensible defaults)
+const slot = save.activeSlot
+const savedSettings = slot?.settings
+
 const settings = ref({
   audio: {
-    master: 80,
-    music: 50,
-    sfx: 100,
-    coach: 100,
+    master: savedSettings?.audio.masterVolume ?? 80,
+    music: savedSettings?.audio.musicVolume ?? 50,
+    sfx: savedSettings?.audio.sfxVolume ?? 100,
+    coach: savedSettings?.audio.voiceVolume ?? 100,
     muteAll: false,
-    muteCoach: false
+    muteCoach: savedSettings?.audio.coachMute ?? false
   },
   display: {
-    nightMode: false,
-    reducedMotion: false,
-    fpsCounter: false,
+    nightMode: savedSettings?.display.nightMode ?? false,
+    reducedMotion: savedSettings?.display.reducedMotion ?? false,
+    fpsCounter: savedSettings?.display.showFps ?? false,
     scale: 'Auto'
   },
   controls: {
-    layout: 'Arrows',
-    swapAB: false
+    layout: (savedSettings?.controls.keyboardLayout === 'wasd' ? 'WASD'
+           : savedSettings?.controls.keyboardLayout === 'igdk' ? 'IJKL' 
+           : 'Arrows'),
+    swapAB: savedSettings?.controls.swapAB ?? false
   },
   car: {
-    current: 'BMW M3 (E46)'
+    current: slot?.car ?? 'BMW M3 (E46)'
   },
   driver: {
-    name: save.slots[save.activeSlotId ? save.activeSlotId - 1 : 0]?.driverName ?? 'TAHA',
-    level: 'PRO'
+    name: slot?.driverName ?? 'DRIVER',
+    level: (slot?.skillLevel?.toUpperCase() ?? 'PRO')
   }
 })
+
+// Sync settings changes back to save store with debounce
+let syncTimeout: number | null = null
+watch(settings, () => {
+  if (!save.activeSlotId) return
+  const s = save.slots[save.activeSlotId - 1]
+  if (!s) return
+  
+  const layoutMap: Record<string, 'arrows' | 'wasd' | 'igdk'> = { 'Arrows': 'arrows', 'WASD': 'wasd', 'IJKL': 'igdk' }
+  
+  s.settings = {
+    audio: {
+      masterVolume: settings.value.audio.master,
+      musicVolume: settings.value.audio.music,
+      sfxVolume: settings.value.audio.sfx,
+      voiceVolume: settings.value.audio.coach,
+      coachMute: settings.value.audio.muteCoach,
+    },
+    display: {
+      nightMode: settings.value.display.nightMode,
+      reducedMotion: settings.value.display.reducedMotion,
+      showFps: settings.value.display.fpsCounter,
+    },
+    controls: {
+      keyboardLayout: layoutMap[settings.value.controls.layout] ?? 'arrows',
+      swapAB: settings.value.controls.swapAB,
+    }
+  }
+  
+  // Debounce the IDB write (don't spam disk on slider drags)
+  if (syncTimeout) clearTimeout(syncTimeout)
+  syncTimeout = window.setTimeout(() => save.save(), 500)
+}, { deep: true })
 
 const tabCounts: Record<Tab, number> = {
   'AUDIO': 6,
@@ -74,7 +115,7 @@ watch(activeTab, () => {
   confirmingDestructive.value = false
 })
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (confirmingDestructive.value) {
     if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') {
       audio.playSfx('cancel') // heavy
@@ -117,7 +158,7 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.back()
   }
-}
+})
 
 const handleSelect = () => {
   audio.playSfx('cursor_select')
@@ -174,186 +215,144 @@ const adjustValue = (dir: number) => {
   }
 }
 
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-})
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-})
 
-const renderBar = (val: number) => {
-  const filled = Math.round(val / 5)
-  return '█'.repeat(filled) + '░'.repeat(20 - filled)
-}
+
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui flex flex-col">
-    <StatusBar />
-    
-    <div class="settings-bg absolute inset-0 z-0"></div>
-    
-    <div class="content pt-[6vh] px-[2vw] flex-grow flex flex-col z-10 relative pb-[6vh]">
+  <PageShell title="SETTINGS" :hints="editMode ? ['◀ ▶ ADJUST', 'A · CONFIRM'] : ['A · SELECT/ADJUST', '◀ ▶ TAB', 'B · GARAGE']" bg="neutral">
+    <template #heading>
       <div class="heading-block mb-[1.5vh] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.3em]">SETTINGS</h1>
         <div class="heading-rule"></div>
       </div>
+    </template>
 
-      <!-- Tab Strip -->
-      <CyberTabs :tabs="[...tabs]" :modelValue="tabIndex" @update:modelValue="(i) => activeTab = tabs[i]" class="mb-4" />
+    <!-- Tab Strip -->
+    <CyberTabs :tabs="[...tabs]" :modelValue="tabIndex" @update:modelValue="(i) => activeTab = tabs[i]" class="mb-4 mx-2" />
 
-      <!-- Content -->
-      <div class="px-[2vw] text-body flex flex-col gap-[1vh] flex-grow">
-        
-        <!-- AUDIO -->
-        <template v-if="activeTab === 'AUDIO'">
-          <div class="flex flex-col gap-1">
-            <div v-for="(k, i) in ['MASTER', 'MUSIC', 'SFX', 'COACH VOICE']" :key="k" class="flex items-center">
-              <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === i ? 'text-white' : 'text-silver'">
-                <span v-if="cursorIndex === i" class="text-ui-good">▶ </span>{{ k }}
-              </span>
-              <span class="font-mono text-ui-good" :class="editMode && cursorIndex === i ? 'animate-pulse' : ''">
-                {{ renderBar(settings.audio[Object.keys(settings.audio)[i] as keyof typeof settings.audio]) }}
-              </span>
-              <span class="w-[clamp(30px,8vw,60px)] text-right font-mono">{{ settings.audio[Object.keys(settings.audio)[i] as keyof typeof settings.audio] }}%</span>
-            </div>
-          </div>
-          <div class="mt-2 flex flex-col gap-1">
-            <div class="flex items-center">
-              <span class="w-4" :class="cursorIndex === 4 ? 'text-ui-good' : ''">{{ cursorIndex === 4 ? '▶' : '' }}</span>
-              <span class="text-ui-info mr-2">{{ settings.audio.muteAll ? '☑' : '☐' }}</span>
-              <span :class="cursorIndex === 4 ? 'text-white' : 'text-silver'">MUTE ALL</span>
-            </div>
-            <div class="flex items-center">
-              <span class="w-4" :class="cursorIndex === 5 ? 'text-ui-good' : ''">{{ cursorIndex === 5 ? '▶' : '' }}</span>
-              <span class="text-ui-info mr-2">{{ settings.audio.muteCoach ? '☑' : '☐' }}</span>
-              <span :class="cursorIndex === 5 ? 'text-white' : 'text-silver'">MUTE COACH VOICE (silence mode)</span>
-            </div>
-          </div>
-        </template>
-
-        <!-- DISPLAY -->
-        <template v-else-if="activeTab === 'DISPLAY'">
-          <div class="flex items-center">
-            <span class="w-4" :class="cursorIndex === 0 ? 'text-ui-good' : ''">{{ cursorIndex === 0 ? '▶' : '' }}</span>
-            <span class="text-ui-info mr-2">{{ settings.display.nightMode ? '☑' : '☐' }}</span>
-            <span :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">NIGHT MODE</span>
-          </div>
-          <div class="flex items-center">
-            <span class="w-4" :class="cursorIndex === 1 ? 'text-ui-good' : ''">{{ cursorIndex === 1 ? '▶' : '' }}</span>
-            <span class="text-ui-info mr-2">{{ settings.display.reducedMotion ? '☑' : '☐' }}</span>
-            <span :class="cursorIndex === 1 ? 'text-white' : 'text-silver'">REDUCED MOTION</span>
-          </div>
-          <div class="flex items-center">
-            <span class="w-4" :class="cursorIndex === 2 ? 'text-ui-good' : ''">{{ cursorIndex === 2 ? '▶' : '' }}</span>
-            <span class="text-ui-info mr-2">{{ settings.display.fpsCounter ? '☑' : '☐' }}</span>
-            <span :class="cursorIndex === 2 ? 'text-white' : 'text-silver'">SHOW FPS COUNTER</span>
-          </div>
-          <div class="flex items-center mt-2">
-            <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 3 ? 'text-white' : 'text-silver'">
-              <span v-if="cursorIndex === 3" class="text-ui-good">▶ </span>SCALE
-            </span>
-            <span class="font-bold text-ui-good" :class="editMode && cursorIndex === 3 ? 'animate-pulse' : ''">
-              ◀ {{ settings.display.scale }} ▶
-            </span>
-          </div>
-        </template>
-
-        <!-- CONTROLS -->
-        <template v-else-if="activeTab === 'CONTROLS'">
-          <div class="flex items-center mb-2">
-            <span class="w-[clamp(70px,18vw,140px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
-              <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>KEYBOARD
-            </span>
-            <span class="font-bold text-ui-good" :class="editMode && cursorIndex === 0 ? 'animate-pulse' : ''">
-              ◀ {{ settings.controls.layout }} ▶
-            </span>
-          </div>
-          <div class="flex items-center">
-            <span class="w-4" :class="cursorIndex === 1 ? 'text-ui-good' : ''">{{ cursorIndex === 1 ? '▶' : '' }}</span>
-            <span class="text-ui-info mr-2">{{ settings.controls.swapAB ? '☑' : '☐' }}</span>
-            <span :class="cursorIndex === 1 ? 'text-white' : 'text-silver'">SWAP A/B (LEFT-HANDED)</span>
-          </div>
-          <CyberBox :selected="cursorIndex === 2" class="mt-4 p-2 w-max">
-            <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>TEST INPUT
-          </CyberBox>
-        </template>
-
-        <!-- CAR -->
-        <template v-else-if="activeTab === 'CAR'">
-          <div class="flex items-center mb-2">
-            <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
-              <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>CURRENT CAR
-            </span>
-            <span class="font-bold text-white">
-              {{ settings.car.current }}
-            </span>
-          </div>
-          <CyberBox :selected="cursorIndex === 1" class="mt-2 p-2 mb-1 w-max">
-            <span v-if="cursorIndex === 1" class="text-ui-good mr-1">▶</span>RUN HARDWARE TEST
-          </CyberBox>
-          <br>
-          <CyberBox :selected="cursorIndex === 2" class="p-2 w-max">
-            <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>HOW IS MY SCORE CALCULATED?
-          </CyberBox>
-        </template>
-
-        <!-- DRIVER -->
-        <template v-else-if="activeTab === 'DRIVER'">
-          <div class="flex items-center mb-2">
-            <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
-              <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>NAME
-            </span>
-            <span class="font-bold text-white">{{ settings.driver.name }}</span>
-          </div>
-          <div class="flex items-center mb-4">
-            <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 1 ? 'text-white' : 'text-silver'">
-              <span v-if="cursorIndex === 1" class="text-ui-good">▶ </span>SKILL TIER
-            </span>
-            <span class="font-bold text-ui-good" :class="editMode && cursorIndex === 1 ? 'animate-pulse' : ''">
-              ◀ {{ settings.driver.level }} ▶
-            </span>
-          </div>
-          
-          <CyberBox variant="charcoal" :border="cursorIndex === 2 ? 'none' : 'warn'" :selected="false" class="p-2 w-max" :class="cursorIndex === 2 ? 'bg-ui-warn text-ink font-bold' : 'text-ui-warn'">
-            <span v-if="cursorIndex === 2" class="mr-1">▶</span>DELETE SAVE DATA
-          </CyberBox>
-        </template>
-
-      </div>
+    <!-- Content -->
+    <div class="px-[2vw] text-body flex flex-col gap-[1vh] flex-grow">
       
-      <!-- Coach -->
-      <DialogueBox 
-        v-if="confirmingDestructive"
-        :coach-id="save.slots[save.activeSlotId?-1:0]?.preferredCoach ?? 'trod'"
-        emotion="concerned"
-        text="Whoa, wait. You want to wipe everything? (Y/N)"
-        class="absolute bottom-[6vh] left-0 right-0 z-20"
-      />
-      <DialogueBox 
-        v-else
-        :coach-id="save.slots[save.activeSlotId?-1:0]?.preferredCoach ?? 'trod'"
-        emotion="idle"
-        :text="coachQuips[activeTab]"
-        class="absolute bottom-[6vh] left-0 right-0 z-10"
-      />
+      <!-- AUDIO -->
+      <template v-if="activeTab === 'AUDIO'">
+        <div class="flex flex-col gap-1">
+          <CyberProgressBar 
+            v-for="(k, i) in ['MASTER', 'MUSIC', 'SFX', 'COACH VOICE']" :key="k"
+            :label="k"
+            :value="settings.audio[Object.keys(settings.audio)[i] as keyof typeof settings.audio] as number"
+            :focused="cursorIndex === i"
+            :editing="editMode"
+          />
+        </div>
+        <div class="mt-2 flex flex-col gap-1">
+          <CyberCheckbox 
+            label="MUTE ALL" 
+            :checked="settings.audio.muteAll" 
+            :focused="cursorIndex === 4" 
+          />
+          <CyberCheckbox 
+            label="MUTE COACH VOICE" 
+            sub-label="(silence mode)"
+            :checked="settings.audio.muteCoach" 
+            :focused="cursorIndex === 5" 
+          />
+        </div>
+      </template>
+
+      <!-- DISPLAY -->
+      <template v-else-if="activeTab === 'DISPLAY'">
+        <CyberCheckbox label="NIGHT MODE" :checked="settings.display.nightMode" :focused="cursorIndex === 0" />
+        <CyberCheckbox label="REDUCED MOTION" :checked="settings.display.reducedMotion" :focused="cursorIndex === 1" />
+        <CyberCheckbox label="SHOW FPS COUNTER" :checked="settings.display.fpsCounter" :focused="cursorIndex === 2" />
+        <div class="mt-2">
+          <CyberValuePicker 
+            label="SCALE" 
+            :value="settings.display.scale" 
+            :focused="cursorIndex === 3" 
+            :editing="editMode" 
+          />
+        </div>
+      </template>
+
+      <!-- CONTROLS -->
+      <template v-else-if="activeTab === 'CONTROLS'">
+        <CyberValuePicker 
+          label="KEYBOARD" 
+          :value="settings.controls.layout" 
+          :focused="cursorIndex === 0" 
+          :editing="editMode"
+          label-width="clamp(70px,18vw,140px)"
+        />
+        <CyberCheckbox 
+          label="SWAP A/B (LEFT-HANDED)" 
+          :checked="settings.controls.swapAB" 
+          :focused="cursorIndex === 1" 
+        />
+        <CyberBox :selected="cursorIndex === 2" class="mt-4 p-2 w-max">
+          <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>TEST INPUT
+        </CyberBox>
+      </template>
+
+      <!-- CAR -->
+      <template v-else-if="activeTab === 'CAR'">
+        <div class="flex items-center mb-2">
+          <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
+            <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>CURRENT CAR
+          </span>
+          <span class="font-bold text-white">
+            {{ settings.car.current }}
+          </span>
+        </div>
+        <CyberBox :selected="cursorIndex === 1" class="mt-2 p-2 mb-1 w-max">
+          <span v-if="cursorIndex === 1" class="text-ui-good mr-1">▶</span>RUN HARDWARE TEST
+        </CyberBox>
+        <br>
+        <CyberBox :selected="cursorIndex === 2" class="p-2 w-max">
+          <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>HOW IS MY SCORE CALCULATED?
+        </CyberBox>
+      </template>
+
+      <!-- DRIVER -->
+      <template v-else-if="activeTab === 'DRIVER'">
+        <div class="flex items-center mb-2">
+          <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
+            <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>NAME
+          </span>
+          <span class="font-bold text-white">{{ settings.driver.name }}</span>
+        </div>
+        <div class="mb-4">
+          <CyberValuePicker 
+            label="SKILL TIER" 
+            :value="settings.driver.level" 
+            :focused="cursorIndex === 1" 
+            :editing="editMode" 
+          />
+        </div>
+        
+        <CyberBox variant="charcoal" :border="cursorIndex === 2 ? 'none' : 'warn'" :selected="false" class="p-2 w-max" :class="cursorIndex === 2 ? 'bg-ui-warn text-ink font-bold' : 'text-ui-warn'">
+          <span v-if="cursorIndex === 2" class="mr-1">▶</span>DELETE SAVE DATA
+        </CyberBox>
+      </template>
+
     </div>
     
-    <HintBar :hints="editMode ? ['◀ ▶ ADJUST', 'A · CONFIRM'] : ['A · SELECT/ADJUST', '◀ ▶ TAB', 'B · GARAGE']" />
-  </div>
+    <template #floating>
+      <CoachFloat
+        v-if="confirmingDestructive"
+        emotion="concerned"
+        text="Whoa, wait. You want to wipe everything? (Y/N)"
+      />
+      <CoachFloat
+        v-else
+        emotion="idle"
+        :text="coachQuips[activeTab]"
+      />
+    </template>
+  </PageShell>
 </template>
 
 <style scoped>
-.settings-bg {
-  background-color: var(--color-asphalt-deep);
-}
 .heading-block { text-align: center; }
-.heading-rule {
-  width: clamp(40px, 12vw, 120px);
-  height: 1px;
-  /* now uses global .heading-rule with kerb stripe */
-  margin: clamp(4px, 1vmin, 10px) auto 0;
-}
-
 </style>

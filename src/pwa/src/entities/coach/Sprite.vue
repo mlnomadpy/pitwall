@@ -23,7 +23,7 @@ const style = computed(() => {
   })
 })
 
-const emit = defineEmits(['animationend'])
+const emit = defineEmits<{ (e: 'animationend'): void }>()
 
 const onAnimEnd = () => {
   emit('animationend')

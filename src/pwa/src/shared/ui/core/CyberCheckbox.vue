@@ -1,44 +1,19 @@
 <script setup lang="ts">
-interface Props {
+defineProps<{
+  label: string
   checked: boolean
-  label?: string
-  interactive?: boolean
-}
-
-withDefaults(defineProps<Props>(), {
-  interactive: false
-})
-
-const emit = defineEmits(['update:checked', 'toggle'])
-
-const toggle = () => {
-  if (interactive) {
-    emit('update:checked', !checked)
-    emit('toggle', !checked)
-  }
-}
+  focused: boolean
+  subLabel?: string
+}>()
 </script>
 
 <template>
-  <div 
-    class="cyber-checkbox-wrapper flex items-center gap-2"
-    :class="{ 'cursor-pointer': interactive }"
-    @click="toggle"
-  >
-    <div 
-      class="cyber-checkbox w-4 h-4 border flex items-center justify-center text-body transition-colors"
-      :class="checked ? 'bg-ui-good border-ui-good text-ink font-bold shadow-[0_0_8px_rgba(78,205,196,0.5)]' : 'bg-charcoal border-slate text-transparent'"
-    >
-      <span v-if="checked">✓</span>
+  <div class="flex flex-col mt-1 mb-1">
+    <div class="flex items-center">
+      <span class="w-4" :class="focused ? 'text-ui-good' : ''">{{ focused ? '▶' : '' }}</span>
+      <span class="text-ui-info mr-2">{{ checked ? '☑' : '☐' }}</span>
+      <span :class="focused ? 'text-white' : 'text-silver'">{{ label }}</span>
     </div>
-    <span v-if="label" class="text-silver text-body" :class="{ 'text-white font-bold': checked }">
-      {{ label }}
-    </span>
+    <div v-if="subLabel" class="ml-10 text-xs text-slate">{{ subLabel }}</div>
   </div>
 </template>
-
-<style scoped>
-.cyber-checkbox-wrapper:hover .cyber-checkbox {
-  filter: brightness(1.2);
-}
-</style>

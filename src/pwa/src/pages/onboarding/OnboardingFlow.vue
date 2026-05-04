@@ -3,11 +3,11 @@ import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
 
 import WelcomeStep from './steps/WelcomeStep.vue'
 import NameEntry from './steps/NameEntry.vue'
+import AvatarSelect from './steps/AvatarSelect.vue'
 import SkillSelect from './steps/SkillSelect.vue'
 
 const router = useRouter()
@@ -16,10 +16,11 @@ const save = useSaveStore()
 const audio = useAudioStore()
 
 const currentStep = computed(() => parseInt(route.params.step as string) || 1)
-const totalSteps = 3 
+const totalSteps = 4 
 
 const pendingSave = ref({
   name: '',
+  avatar: 'avatar_a',
   skill: 'beginner'
 })
 
@@ -50,7 +51,8 @@ const commitSave = async () => {
     createdAt: new Date().toISOString(),
     lastPlayedAt: new Date().toISOString(),
     driverName: pendingSave.value.name,
-    skillLevel: pendingSave.value.skill as any,
+    driverAvatar: pendingSave.value.avatar,
+    skillLevel: pendingSave.value.skill as 'beginner' | 'intermediate' | 'pro',
     car: 'BMW M3 (E46)',
     avatarSlot: 1,
     preferredCoach: 'trod',
@@ -71,23 +73,23 @@ const commitSave = async () => {
     }
   }
   
+  await save.save()
   audio.playSfx('level_up')
 }
 
 const hints = computed(() => {
   if (currentStep.value === 1) return ['A · ADVANCE', '', '']
   if (currentStep.value === 2) return ['A · INSERT', 'B · BACK', 'END · CONFIRM']
-  if (currentStep.value === 3) return ['A · SELECT', 'B · BACK', '▲ ▼ MOVE']
+  if (currentStep.value === 3) return ['◀ ▶ SELECT', 'B · BACK', 'A · CONFIRM']
+  if (currentStep.value === 4) return ['A · SELECT', 'B · BACK', '▲ ▼ MOVE']
   return []
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui">
-    <StatusBar />
-    
-    <!-- Background -->
-    <div class="onboard-bg absolute inset-0 z-0"></div>
+  <PageShell title="SETUP" :hints="hints" bg="neutral" :show-heading="false">
+    <!-- Background overrides -->
+    <div class="onboard-bg absolute inset-0 z-0 pointer-events-none"></div>
     
     <!-- Step indicator navbar -->
     <div class="step-bar">
@@ -106,11 +108,10 @@ const hints = computed(() => {
     <div class="content relative z-10">
       <WelcomeStep v-if="currentStep === 1" @next="goNext" />
       <NameEntry v-else-if="currentStep === 2" :initial-name="pendingSave.name" @update:name="pendingSave.name = $event" @next="goNext" @back="goBack" />
-      <SkillSelect v-else-if="currentStep === 3" :initial-skill="pendingSave.skill" @update:skill="pendingSave.skill = $event" @next="goNext" @back="goBack" />
+      <AvatarSelect v-else-if="currentStep === 3" :initial-avatar="pendingSave.avatar" @update:avatar="pendingSave.avatar = $event" @next="goNext" @back="goBack" />
+      <SkillSelect v-else-if="currentStep === 4" :initial-skill="pendingSave.skill" @update:skill="pendingSave.skill = $event" @next="goNext" @back="goBack" />
     </div>
-    
-    <HintBar :hints="hints" />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
@@ -165,7 +166,7 @@ const hints = computed(() => {
 .step-progress-fill {
   height: 100%;
   background: var(--color-ui-good);
-  transition: width 0.3s ease;
+  transition: width 0.3s steps(4);
   box-shadow: 0 0 6px rgba(42, 161, 152, 0.4);
 }
 

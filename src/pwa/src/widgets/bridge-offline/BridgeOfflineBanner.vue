@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch } from 'vue'
 import { useBridgeStore } from '@/shared/api/bridgeStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSaveStore } from '@/entities/save/model/saveStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import { API_BASE } from '@/shared/config/api'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberBox from '@/shared/ui/core/CyberBox.vue'
 import CyberTag from '@/shared/ui/core/CyberTag.vue'
@@ -30,7 +32,7 @@ watch(() => bridge.consecutiveFailures, (n, old) => {
   }
 })
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'O' && e.shiftKey) {
     // Dev mock toggle
     bridge.toggleMockOffline()
@@ -48,24 +50,16 @@ const handleKey = (e: KeyboardEvent) => {
       audio.playSfx('cancel')
       state.value = 'banner'
     } else if (e.key === 'c' || e.key === 'C') {
-      // copy diag mock
+      // copy diag
       navigator.clipboard.writeText(JSON.stringify({ 
-        url: 'http://127.0.0.1:8765', 
+        url: API_BASE, 
         error: bridge.healthError,
         retries: bridge.consecutiveFailures
       }, null, 2))
       audio.playSfx('cursor_select')
     }
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey, { capture: true })
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey, { capture: true })
-})
+}, { capture: true })
 </script>
 
 <template>
@@ -89,7 +83,7 @@ onUnmounted(() => {
 
     <!-- Expanded State Modal -->
     <div v-if="state === 'expanded'" class="fixed inset-0 bg-black/80 z-[100] flex items-center justify-center font-ui text-silver">
-      <CyberBox variant="ink" class="w-[480px] h-[320px] shadow-xl flex flex-col pt-4 pixelated">
+      <CyberBox variant="ink" class="w-[min(480px,90vw)] max-h-[80vh] shadow-xl flex flex-col pt-4 pixelated overflow-y-auto">
         
         <h1 class="text-title text-silver font-bold px-4 mb-2">BRIDGE DIAGNOSTIC</h1>
         <div class="h-[1px] bg-slate mx-4 mb-4"></div>
@@ -97,14 +91,14 @@ onUnmounted(() => {
         <div class="px-4 flex gap-4">
           <!-- Coach Block -->
           <CyberPanel class="p-2 w-1/3 text-body bg-charcoal">
-            <div class="font-bold text-ui-info mb-1">{{ save.slots[save.activeSlotId?-1:0]?.preferredCoach?.toUpperCase() ?? 'T-ROD' }}</div>
+            <div class="font-bold text-ui-info mb-1">{{ save.activeSlot?.preferredCoach?.toUpperCase() ?? 'T-ROD' }}</div>
             <div class="text-silver italic">"Lost the bridge. Let's get you back online."</div>
           </CyberPanel>
           
           <!-- Data Block -->
           <CyberPanel class="p-2 flex-grow text-body border-ui-bad border">
             <table class="w-full text-left">
-              <tr><td class="text-slate font-bold w-1/3 pb-1">URL</td><td class="text-white pb-1">http://127.0.0.1:8765</td></tr>
+              <tr><td class="text-slate font-bold w-1/3 pb-1">URL</td><td class="text-white pb-1">{{ API_BASE }}</td></tr>
               <tr><td class="text-slate font-bold pb-1">LAST OK</td><td class="text-white pb-1">Just now</td></tr>
               <tr><td class="text-slate font-bold align-top pb-1">ERROR</td><td class="text-ui-warn break-all pb-1">{{ bridge.healthError || 'Unknown' }}</td></tr>
               <tr><td class="text-slate font-bold">RETRIES</td><td class="text-white">{{ bridge.consecutiveFailures }} (every 5 s)</td></tr>

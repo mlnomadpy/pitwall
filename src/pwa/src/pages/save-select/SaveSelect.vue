@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
 import SlotCard from './ui/SlotCard.vue'
 
 const router = useRouter()
@@ -18,14 +18,9 @@ const hints = ['▲ ▼ MOVE', 'A · LOAD / NEW', 'B · BACK']
 onMounted(async () => {
   await save.hydrate()
   loading.value = false
-  window.addEventListener('keydown', handleKey)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-})
-
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowDown') {
     cursor.value = (cursor.value + 1) % 3
     audio.playSfx('cursor_move')
@@ -38,7 +33,7 @@ const handleKey = (e: KeyboardEvent) => {
   } else if (e.key === 'Escape') {
     audio.playSfx('cancel')
   }
-}
+})
 
 const handleSelect = (slotId: 1 | 2 | 3) => {
   save.activeSlotId = slotId
@@ -53,19 +48,19 @@ const handleSelect = (slotId: 1 | 2 | 3) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden">
-    <StatusBar />
-    
-    <!-- Background -->
-    <div class="save-bg absolute inset-0 z-0"></div>
-    <div class="crt-overlay"></div>
-    
-    <div class="content flex flex-col items-center justify-center h-full pt-[6vh] pb-[6vh] relative z-10">
-      <!-- Heading -->
+  <PageShell title="SELECT SAVE SLOT" :hints="hints" bg="neutral">
+    <template #heading>
       <div class="heading-block mb-[3vh] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.2em]">SELECT SAVE SLOT</h1>
         <div class="heading-rule"></div>
       </div>
+    </template>
+    
+    <!-- Background overrides -->
+    <div class="save-bg absolute inset-0 z-0 pointer-events-none"></div>
+    <div class="crt-overlay pointer-events-none"></div>
+    
+    <div class="content flex flex-col items-center justify-center relative z-10 w-full flex-grow">
       
       <div v-if="loading" class="text-body text-slate animate-pulse">LOADING...</div>
       
@@ -81,9 +76,7 @@ const handleSelect = (slotId: 1 | 2 | 3) => {
         />
       </div>
     </div>
-    
-    <HintBar :hints="hints" />
-  </div>
+  </PageShell>
 </template>
 
 <style scoped>
@@ -94,12 +87,5 @@ const handleSelect = (slotId: 1 | 2 | 3) => {
     var(--color-asphalt-deep) 50%,
     var(--color-ink) 100%
   );
-}
-
-.heading-rule {
-  width: clamp(60px, 20vw, 200px);
-  height: 1px;
-  /* now uses global .heading-rule with kerb stripe */
-  margin: clamp(6px, 1.5vmin, 14px) auto 0;
 }
 </style>

@@ -25,8 +25,8 @@ if SIM_DIR not in sys.path:
 # Project root for resolving data/ paths
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-# DuckDB lives in tools/ for backward compat with the existing data file
-DB_PATH = os.path.join(PROJECT_ROOT, "tools", "pitwall_sessions.duckdb")
+# DuckDB lives in data/
+DB_PATH = os.path.join(PROJECT_ROOT, "data", "pitwall_sessions.duckdb")
 
 
 class BridgeState:

@@ -1,24 +1,24 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import CyberBox from '@/shared/ui/core/CyberBox.vue'
 
-const emit = defineEmits(['next'])
+const emit = defineEmits<{ (e: 'next'): void }>()
 const audio = useAudioStore()
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'Enter') {
     audio.playSfx('cursor_select')
     emit('next')
   }
-}
+})
 
 onMounted(() => {
-  window.addEventListener('keydown', handleKey)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
 })
 </script>
 
@@ -26,9 +26,9 @@ onUnmounted(() => {
   <div class="welcome-step" @click="emit('next')">
     <!-- Center character label -->
     <div class="character-area">
-      <div class="character-frame">
+      <CyberBox variant="ghost" border="slate" class="w-[clamp(80px,20vmin,160px)] h-[clamp(80px,20vmin,160px)] flex items-center justify-center">
         <span class="text-title text-slate font-title">T-ROD</span>
-      </div>
+      </CyberBox>
     </div>
     
     <DialogueBox 
@@ -59,12 +59,5 @@ onUnmounted(() => {
   opacity: 0.3;
 }
 
-.character-frame {
-  width: clamp(80px, 20vmin, 160px);
-  height: clamp(80px, 20vmin, 160px);
-  border: 1px solid var(--color-slate);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+
 </style>

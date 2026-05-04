@@ -14,7 +14,10 @@ defineProps<{
   focused: boolean
 }>()
 
-const emit = defineEmits(['select', 'hover'])
+const emit = defineEmits<{
+  (e: 'select'): void
+  (e: 'hover'): void
+}>()
 </script>
 
 <template>

@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
-import { Howl, Howler } from 'howler'
+import { markRaw } from 'vue'
+import { Howl } from 'howler'
 
 export const useAudioStore = defineStore('audio', {
   state: () => ({
-    sfx: new Map<string, Howl>(),
-    music: new Map<string, Howl>(),
-    voice: new Map<string, Howl>(),
+    sfx: markRaw(new Map<string, Howl>()),
+    music: markRaw(new Map<string, Howl>()),
+    voice: markRaw(new Map<string, Howl>()),
     ttsDucked: false,
     _duckUntil: 0
   }),

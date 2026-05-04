@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
 import { useSaveStore } from '@/entities/save/model/saveStore'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
+import PageShell from '@/shared/ui/PageShell.vue'
+import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -48,7 +49,7 @@ const scrollOffset = computed(() => {
 
 let pbPlayed = false
 
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowDown') {
     cursorIndex.value = Math.min(cursorIndex.value + 1, laps.length - 1)
     if (laps[cursorIndex.value].best && !pbPlayed) {
@@ -79,14 +80,6 @@ const handleKey = (e: KeyboardEvent) => {
     audio.playSfx('cancel')
     router.push('/garage/analysis')
   }
-}
-
-onMounted(() => {
-  window.addEventListener('keydown', handleKey)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
 })
 
 // Convert mm:ss.s string to seconds for the box plot scale
@@ -103,36 +96,27 @@ const distScale = (val: number) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden  font-ui">
-    <StatusBar />
-    
-    <div class="page-bg"></div>
-    
-    <div class="content pt-[6vh] px-2 flex flex-col h-full z-0 relative gap-2">
-      <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title text-silver font-bold">LAP TIMES HALL</h1>
-        <span class="text-body text-silver">session 2026-04-29-1503 ◀ ▶</span>
+  <PageShell title="LAP TIMES HALL" subtitle="session 2026-04-29-1503 ◀ ▶" :hints="['A · REPLAY (SOON)', 'C · COMPARE', '◀ ▶ SESSION', 'B · BACK']" bg="cool">
+    <!-- Headline -->
+    <CyberPanel class="flex justify-around items-center py-2 text-body">
+      <div class="flex flex-col items-center">
+        <span class="text-body text-silver">BEST LAP</span>
+        <span class="text-title font-bold text-ui-good">{{ bestLap }}</span>
       </div>
-
-      <!-- Headline -->
-      <CyberPanel class="flex justify-around items-center py-2 text-body">
-        <div class="flex flex-col items-center">
-          <span class="text-body text-silver">BEST LAP</span>
-          <span class="text-title font-bold text-ui-good">{{ bestLap }}</span>
-        </div>
-        <div class="flex flex-col items-center">
-          <span class="text-body text-silver">IDEAL LAP</span>
-          <span class="text-title font-bold">{{ idealLap }}</span>
-        </div>
-        <div class="flex flex-col items-center">
-          <span class="text-body text-silver">GAIN</span>
-          <span class="text-title font-bold text-ui-good">{{ gain }}</span>
-        </div>
-      </CyberPanel>
-      
-      <div class="grid grid-cols-[13fr_11fr] gap-2 flex-grow min-h-0 pb-20">
+      <div class="flex flex-col items-center">
+        <span class="text-body text-silver">IDEAL LAP</span>
+        <span class="text-title font-bold">{{ idealLap }}</span>
+      </div>
+      <div class="flex flex-col items-center">
+        <span class="text-body text-silver">GAIN</span>
+        <span class="text-title font-bold text-ui-good">{{ gain }}</span>
+      </div>
+    </CyberPanel>
+    
+    <CyberSplitView split="60-40" gap="sm" class="flex-grow min-h-0">
+      <template #left>
         <!-- Lap Table -->
-        <CyberPanel class="flex flex-col text-body overflow-hidden">
+        <CyberPanel class="h-full flex flex-col text-body overflow-hidden">
           <div class="flex text-silver border-b border-slate px-1 pb-1 mb-1 bg-charcoal">
             <span class="w-3 text-center">#</span>
             <span class="w-9 text-center">TOTAL</span>
@@ -169,9 +153,11 @@ const distScale = (val: number) => {
             </div>
           </div>
         </CyberPanel>
-        
+      </template>
+      
+      <template #right>
         <!-- Distribution Box-Plot & Coach -->
-        <div class="flex flex-col gap-2">
+        <div class="h-full flex flex-col gap-2">
           <CyberPanel class="flex flex-col text-body relative p-2 h-[clamp(60px,12vh,100px)]">
             <div class="text-silver mb-2">DISTRIBUTION</div>
             <div class="relative w-full h-[60px] mt-1">
@@ -211,34 +197,27 @@ const distScale = (val: number) => {
           
           <DialogueBox 
             v-if="laps[cursorIndex].outlier"
-            :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
+            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="talk"
             text="You hit traffic at T11 on this one."
             class="scale-[0.8] origin-top-left w-[125%]"
           />
           <DialogueBox 
             v-else-if="laps[cursorIndex].best"
-            :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
+            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="victory"
             text="Nailed the exit out of T2 on this lap."
             class="scale-[0.8] origin-top-left w-[125%]"
           />
           <DialogueBox 
             v-else
-            :coach-id="save.slots[save.activeSlotId!-1]?.preferredCoach ?? 'trod'"
+            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="idle"
             text="Solid consistency. Kept the variance low."
             class="scale-[0.8] origin-top-left w-[125%]"
           />
         </div>
-      </div>
-      
-    </div>
-    
-    <HintBar :hints="['A · REPLAY (SOON)', 'C · COMPARE', '◀ ▶ SESSION', 'B · BACK']" />
-  </div>
+      </template>
+    </CyberSplitView>
+  </PageShell>
 </template>
-
-<style scoped>
-/* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
-</style>

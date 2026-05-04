@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
-import StatusBar from '@/widgets/status-bar/StatusBar.vue'
-import HintBar from '@/widgets/hint-bar/HintBar.vue'
-import CoachCard from './ui/CoachCard.vue'
-import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import PageShell from '@/shared/ui/PageShell.vue'
+import Sprite from '@/entities/coach/Sprite.vue'
+import CoachFloat from '@/shared/ui/CoachFloat.vue'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -25,66 +25,72 @@ const previewQuote = ref<string | null>(null)
 const previewingId = ref<string | null>(null)
 const lockedMessage = ref<string | null>(null)
 
-const activeSlot = save.slots[save.activeSlotId! - 1]
+const activeSlot = computed(() => save.activeSlotId ? save.slots[save.activeSlotId - 1] : null)
+
+const isLocked = (index: number) => {
+  if (!activeSlot.value) return false
+  return activeSlot.value.level < coaches[index].levelReq
+}
 
 onMounted(() => {
-  if (activeSlot) {
-    const idx = coaches.findIndex(c => c.id === activeSlot.preferredCoach)
+  if (activeSlot.value) {
+    const idx = coaches.findIndex(c => c.id === activeSlot.value!.preferredCoach)
     if (idx !== -1) cursorIndex.value = idx
   }
-  window.addEventListener('keydown', handleKey)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('keydown', handleKey)
-})
-
-const handleKey = (e: KeyboardEvent) => {
+useKeyboard((e: KeyboardEvent) => {
   if (lockedMessage.value || previewQuote.value) {
-    // If dialogue is playing, let it consume the event (it has a stopPropagation)
+    // If dialogue is playing, let it consume the event
     return
   }
 
-  if (e.key === 'ArrowRight') {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     cursorIndex.value = (cursorIndex.value + 1) % coaches.length
     previewCoach(cursorIndex.value)
-  } else if (e.key === 'ArrowLeft') {
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
     cursorIndex.value = (cursorIndex.value - 1 + coaches.length) % coaches.length
     previewCoach(cursorIndex.value)
   } else if (e.key === 'Enter') {
     trySelect(coaches[cursorIndex.value])
-  } else if (e.key === 'Escape' || e.key === 'Backspace') {
+  } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
     audio.playSfx('cancel')
     router.push('/garage')
+  } else if (e.key === ' ') {
+    audio.playSfx('cursor_select')
+    router.push('/garage/coach/bios')
   }
-}
+})
 
 const previewCoach = (index: number) => {
   audio.playSfx('cursor_move')
+  cursorIndex.value = index
   const c = coaches[index]
-  if (activeSlot.level >= c.levelReq) {
+  if (activeSlot.value && activeSlot.value.level >= c.levelReq) {
     previewingId.value = c.id
     previewQuote.value = c.quote
   }
 }
 
 const trySelect = async (c: any) => {
-  if (activeSlot.level < c.levelReq) {
+  if (!activeSlot.value) return
+  
+  if (activeSlot.value.level < c.levelReq) {
     audio.playSfx('cancel')
     lockedMessage.value = `Reach LEVEL ${c.levelReq} to recruit ${c.name}.`
     return
   }
   
-  if (activeSlot.preferredCoach === c.id) {
+  if (activeSlot.value.preferredCoach === c.id) {
     audio.playSfx('cursor_select')
     router.push('/garage')
     return
   }
   
   audio.playSfx('cursor_select')
-  audio.playVoice(activeSlot.preferredCoach, 'farewell_swap')
+  audio.playVoice(activeSlot.value.preferredCoach, 'farewell_swap')
   
-  activeSlot.preferredCoach = c.id
+  activeSlot.value.preferredCoach = c.id
   
   setTimeout(() => {
     audio.playVoice(c.id, 'greet_morning')
@@ -94,63 +100,89 @@ const trySelect = async (c: any) => {
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden">
-    <StatusBar />
-    
-    <!-- Background -->
-    <div class="coach-bg absolute inset-0 z-0"></div>
-    
-    <div class="content flex flex-col pt-[6vh] pb-[6vh] items-center relative z-10 h-full justify-center">
-      <!-- Heading -->
-      <div class="heading-block mb-[2vmin]">
+  <PageShell title="COACHES" :hints="['A · SELECT', 'B · GARAGE', 'SPACE · EDIT BIOS', '◀ ▶ MOVE']" bg="neutral">
+    <template #heading>
+      <div class="heading-block mb-[2vmin] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.3em]">COACHES</h1>
         <div class="heading-rule"></div>
       </div>
+    </template>
+    
+    <!-- Background overrides -->
+    <div class="coach-bg absolute inset-0 z-0 pointer-events-none"></div>
+    
+    <div class="content flex flex-col items-center relative z-10 w-full flex-grow justify-center gap-[4vh]">
       
-      <div class="grid grid-cols-3 gap-[1.5vmin] mb-[1.5vmin]">
-        <CoachCard 
-          v-for="(c, i) in coaches.slice(0, 3)" 
-          :key="c.id"
-          :id="c.id"
-          :name="c.name"
-          :level-req="c.levelReq"
-          :focused="cursorIndex === i"
-          :selected="activeSlot?.preferredCoach === c.id"
-          :locked="activeSlot?.level < c.levelReq"
+      <!-- Coach Preview Area -->
+      <div class="coach-preview-container relative w-[clamp(180px,40vw,280px)] h-[clamp(180px,40vw,280px)] flex flex-col items-center justify-center">
+        <!-- Backdrop Glow -->
+        <div class="sprite-backdrop absolute inset-0 rounded-full transition-all duration-300"
+             :class="isLocked(cursorIndex) ? 'locked-backdrop' : (activeSlot?.preferredCoach === coaches[cursorIndex].id ? 'active-backdrop' : 'unlocked-backdrop')">
+        </div>
+        
+        <!-- Sprite -->
+        <Sprite 
+          :sheet="coaches[cursorIndex].id" 
+          :animation="isLocked(cursorIndex) ? 'idle' : 'talk'" 
+          class="coach-sprite relative z-10 w-full h-full" 
+          :class="{ 'is-locked-sprite': isLocked(cursorIndex) }"
         />
+        
+        <!-- Status Overlay -->
+        <div class="absolute bottom-[-10px] z-20 flex flex-col items-center w-full">
+          <div v-if="isLocked(cursorIndex)" class="bg-ink text-ui-bad font-bold text-body px-4 py-2 border border-slate shadow-lg rounded">
+            🔒 LV {{ coaches[cursorIndex].levelReq }}
+          </div>
+          <div v-else-if="activeSlot?.preferredCoach === coaches[cursorIndex].id" class="flex flex-col items-center gap-2">
+            <div class="bg-ui-good/20 border border-ui-good text-ui-good text-body font-bold px-6 py-2 shadow-[0_0_15px_rgba(42,161,152,0.4)] backdrop-blur-sm rounded">
+              ACTIVE COACH
+            </div>
+            <div class="text-small text-silver bg-ink/80 px-2 py-1 rounded border border-slate" @click="router.push('/garage/coach/bios')">
+              SPACE TO EDIT BIOS
+            </div>
+          </div>
+        </div>
       </div>
       
-      <div class="grid grid-cols-2 gap-[1.5vmin]">
-        <CoachCard 
-          v-for="(c, i) in coaches.slice(3, 5)" 
+      <!-- Selection Controls -->
+      <div class="coach-controls flex flex-wrap justify-center gap-[clamp(8px,1.5vw,16px)] max-w-[90vw] mt-[2vh]">
+        <div 
+          v-for="(c, i) in coaches" 
           :key="c.id"
-          :id="c.id"
-          :name="c.name"
-          :level-req="c.levelReq"
-          :focused="cursorIndex === (i + 3)"
-          :selected="activeSlot?.preferredCoach === c.id"
-          :locked="activeSlot?.level < c.levelReq"
-        />
+          class="coach-option px-[clamp(10px,2vw,20px)] py-[clamp(8px,1.5vh,16px)] border-2 cursor-pointer transition-all duration-150 uppercase flex items-center justify-center"
+          :class="[
+            cursorIndex === i 
+              ? 'border-ui-good bg-ui-good/20 text-white font-bold transform -translate-y-1 shadow-[0_0_12px_rgba(42,161,152,0.4)]' 
+              : 'border-slate bg-ink/80 text-silver hover:bg-slate/20',
+            isLocked(i) ? 'opacity-60 grayscale' : ''
+          ]"
+          @click="cursorIndex = i; trySelect(c)"
+          @mouseenter="cursorIndex !== i && previewCoach(i)"
+        >
+          <span v-if="isLocked(i)" class="mr-2 text-[1.2em]">🔒</span>
+          <span class="text-body font-bold tracking-wider">{{ c.name }}</span>
+        </div>
       </div>
+      
     </div>
     
-    <DialogueBox 
-      v-if="lockedMessage"
-      :coach-id="'trod'"
-      emotion="idle"
-      :text="lockedMessage"
-      @done="lockedMessage = null"
-    />
-    <DialogueBox 
-      v-else-if="previewQuote && previewingId"
-      :coach-id="previewingId"
-      emotion="talk"
-      :text="previewQuote"
-      @done="previewQuote = null"
-    />
-    
-    <HintBar :hints="['A · SELECT', 'B · GARAGE', '◀ ▶ MOVE']" />
-  </div>
+    <template #floating>
+      <CoachFloat 
+        v-if="lockedMessage"
+        :coach-id="'trod'"
+        emotion="idle"
+        :text="lockedMessage"
+        @done="lockedMessage = null"
+      />
+      <CoachFloat 
+        v-else-if="previewQuote && previewingId"
+        :coach-id="previewingId"
+        emotion="talk"
+        :text="previewQuote"
+        @done="previewQuote = null"
+      />
+    </template>
+  </PageShell>
 </template>
 
 <style scoped>
@@ -163,5 +195,43 @@ const trySelect = async (c: any) => {
   );
 }
 
+.coach-sprite {
+  transform: scale(1.3);
+  transform-origin: center bottom;
+  filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.6));
+  transition: all 0.3s steps(4);
+}
 
+.is-locked-sprite {
+  filter: brightness(0) contrast(0) opacity(0.6) drop-shadow(0 0 0 transparent);
+  transform: scale(1.3);
+}
+
+.sprite-backdrop {
+  animation: pulse-glow 3s steps(4) infinite alternate;
+}
+
+.unlocked-backdrop {
+  background: radial-gradient(circle at center, rgba(42, 161, 152, 0.3) 0%, transparent 70%);
+}
+
+.active-backdrop {
+  background: radial-gradient(circle at center, rgba(42, 161, 152, 0.5) 0%, transparent 80%);
+  animation: pulse-glow-active 2s steps(4) infinite alternate;
+}
+
+.locked-backdrop {
+  background: radial-gradient(circle at center, rgba(220, 50, 47, 0.15) 0%, transparent 70%);
+  animation: none;
+}
+
+@keyframes pulse-glow {
+  0% { opacity: 0.6; transform: scale(0.9); }
+  100% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes pulse-glow-active {
+  0% { opacity: 0.8; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1.15); }
+}
 </style>
