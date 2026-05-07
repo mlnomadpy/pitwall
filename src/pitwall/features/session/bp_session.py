@@ -17,6 +17,7 @@ from pitwall.db import get_db, compute_capabilities, ensure_session_row
 from pitwall.helpers import (
     new_session_id, frames_to_rows, rows_to_frames, load_session_frames,
 )
+from pitwall.features.realtime.bp_realtime import telemetry_bus
 
 bp = Blueprint("session", __name__)
 
@@ -81,6 +82,10 @@ def session_frames(sid: str):
             rows,
         )
         conn.close()
+        
+    for f in raw_frames:
+        telemetry_bus.publish(sid, f)
+        
     return jsonify({"saved": True, "session_id": sid, "n_appended": len(raw_frames)})
 
 
@@ -565,6 +570,8 @@ def session_frame(sid: str):
             conn.close()
             return jsonify({"error": f"invalid frame: {e}"}), 400
         conn.close()
+        
+    telemetry_bus.publish(sid, f)
     return jsonify({"saved": True, "session_id": sid, "frame_idx": next_idx})
 
 

@@ -1,0 +1,496 @@
+@import "tailwindcss";
+
+@theme {
+  /* Core Palette: Deep Space / Synthwave */
+  --color-ink: #0b0c10;
+  --color-charcoal: #1f2833;
+  --color-slate: #45a29e;
+  --color-silver: #c5c6c7;
+  
+  /* Cyber-Retro Neons */
+  --color-red-deep: #a5394a;
+  --color-red-mid: #ff4757;
+  --color-red-light: #ff6b6b;
+  
+  --color-skin-shadow: #b07658;
+  --color-skin-mid: #d89878;
+  --color-skin-light: #ecb898;
+  
+  /* UI Context Colors */
+  --color-ui-good: #4ecdc4; /* Cyber Cyan */
+  --color-ui-warn: #feca57; /* Arcade Yellow */
+  --color-ui-bad: #ff4757;  /* Neon Red */
+  --color-ui-info: #45b7d1; /* Electric Blue */
+  --color-ui-quest: #c44569; /* Arcade Magenta */
+  --color-ui-coach: #ff4757;
+
+  /* Extended Semantic Colors (formalized from page usage) */
+  --color-bios-green: #4ade80;     /* BIOS/terminal green (CoachBios) */
+  --color-neon-green: #5EED71;     /* Chart positive / sparkline green */
+  --color-delta-red: #ef4444;      /* Chart negative / delta red */
+  --color-amber: #F59E0B;          /* Trail-brake / amber accent */
+  --color-gold-dark: #eab308;      /* Gold rank / earned state */
+  --color-purple-glow: #c084fc;    /* Purple sector / best-ever */
+  --color-charcoal-light: #4A5568; /* Muted chart elements */
+  --color-charcoal-mid: #3A4550;   /* Mid-tone panel */
+  --color-panel-bg-alt: #1A252C;   /* Alt dark panel background */
+  --color-curb-red: #c93838;       /* Kerb stripe red */
+  --color-curb-white: #f5f5e8;     /* Kerb stripe white */
+  --color-rank-gold: #fbbf24;      /* Leaderboard gold */
+  --color-rank-silver: #94a3b8;    /* Leaderboard silver */
+  --color-rank-bronze: #b45309;    /* Leaderboard bronze */
+  
+  --color-asphalt-deep: #0b0c10;
+  --color-asphalt-mid: #1f2833;
+  --color-asphalt-light: #2c3e50;
+
+  --font-title: 'Orbitron', sans-serif;
+  --font-ui: 'Rajdhani', sans-serif;
+  --font-nums: 'Share Tech Mono', monospace;
+
+  /* ── Z-Index Scale ── */
+  --z-base: 0;
+  --z-content: 1;
+  --z-sticky: 10;
+  --z-overlay: 20;
+  --z-modal: 30;
+  --z-toast: 40;
+  --z-crt: 50;
+
+  /* ── Transition Tokens ── */
+  --duration-instant: 50ms;
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 500ms;
+  --ease-snap: steps(2);
+  --ease-smooth: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-bounce: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+
+  /* ── Shadow Tokens ── */
+  --shadow-hard: 4px 4px 0 rgba(0, 0, 0, 0.8);
+  --shadow-hard-hover: 6px 6px 0 rgba(0, 0, 0, 0.8);
+  --shadow-hard-active: 2px 2px 0 rgba(0, 0, 0, 0.8);
+  --shadow-glow-teal: 0 0 15px rgba(78, 205, 196, 0.6);
+  --shadow-glow-red: 0 0 15px rgba(255, 71, 87, 0.6);
+  --shadow-glow-warn: 0 0 15px rgba(254, 202, 87, 0.6);
+
+  /* ── Spacing Scale ── */
+  --space-xs: clamp(2px, 0.5vmin, 4px);
+  --space-sm: clamp(4px, 1vmin, 8px);
+  --space-md: clamp(8px, 2vmin, 16px);
+  --space-lg: clamp(16px, 3vmin, 24px);
+  --space-xl: clamp(24px, 4vmin, 32px);
+}
+
+@layer utilities {
+  .text-title-lg {
+    font-size: clamp(18px, 4.5vmin, 40px);
+    line-height: clamp(22px, 5.5vmin, 48px);
+    letter-spacing: 0.05em;
+  }
+  .text-title {
+    font-size: clamp(14px, 3.5vmin, 30px);
+    line-height: clamp(18px, 4.5vmin, 36px);
+    letter-spacing: 0.05em;
+  }
+  .text-body {
+    font-size: clamp(11px, 2.5vmin, 22px);
+    line-height: clamp(14px, 3.2vmin, 28px);
+  }
+  .text-small {
+    font-size: clamp(9px, 2vmin, 18px);
+    line-height: clamp(12px, 2.5vmin, 22px);
+  }
+  .text-num-lg {
+    font-size: clamp(16px, 4vmin, 36px);
+    line-height: clamp(20px, 5vmin, 42px);
+  }
+  .text-num {
+    font-size: clamp(12px, 3vmin, 26px);
+    line-height: clamp(16px, 3.5vmin, 30px);
+  }
+  
+  /* ── Glow effects ── */
+  .text-shadow-glow {
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.6), 0 0 2px rgba(255, 255, 255, 0.8);
+  }
+  .text-glow-teal {
+    text-shadow: 0 0 6px rgba(78, 205, 196, 0.8), 0 0 20px rgba(78, 205, 196, 0.3);
+  }
+  .text-glow-warn {
+    text-shadow: 0 0 6px rgba(254, 202, 87, 0.8), 0 0 20px rgba(254, 202, 87, 0.3);
+  }
+  .text-glow-red {
+    text-shadow: 0 0 6px rgba(255, 71, 87, 0.8), 0 0 20px rgba(255, 71, 87, 0.3);
+  }
+  .text-glow-info {
+    text-shadow: 0 0 6px rgba(69, 183, 209, 0.8), 0 0 20px rgba(69, 183, 209, 0.3);
+  }
+
+  .pixelated {
+    image-rendering: pixelated;
+  }
+  
+  /* ── Chromatic Aberration Text ── */
+  .text-chromatic {
+    text-shadow: 
+      2px 2px 0 rgba(255, 71, 87, 0.8), 
+      -2px -2px 0 rgba(78, 205, 196, 0.8),
+      0 0 10px rgba(255, 255, 255, 0.5);
+  }
+  /* ── Arcade Glass (Hard Edges, No Blur) ── */
+  .glass {
+    background: rgba(11, 12, 16, 0.85) !important;
+    border: 2px solid var(--color-slate);
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
+  }
+
+  /* ── Hard Pixel Shadows ── */
+  .hard-shadow {
+    box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
+  }
+
+  /* ── Snappy Arcade Hover ── */
+  .arcade-hover {
+    transition: transform 0.05s steps(2), box-shadow 0.05s steps(2), border-color 0.05s steps(2);
+  }
+  .arcade-hover:hover {
+    transform: translate(-2px, -2px);
+    box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.8);
+    border-color: var(--color-ui-good);
+  }
+  .arcade-hover:active {
+    transform: translate(2px, 2px);
+    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.8);
+  }
+
+  /* ── CRT scanline & flicker overlay ── */
+  .crt-overlay {
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    z-index: 100;
+    background:
+      repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.15) 2px,
+        rgba(0, 0, 0, 0.15) 4px
+      );
+    box-shadow: inset 0 0 120px rgba(0,0,0,0.8);
+    animation: crt-flicker 0.15s infinite;
+    mix-blend-mode: overlay;
+  }
+
+
+
+  /* ── Focus ring glow (used on focused tiles/cards) ── */
+  .ring-glow-teal {
+    box-shadow:
+      0 0 0 2px var(--color-ui-good),
+      0 0 15px rgba(78, 205, 196, 0.6),
+      inset 0 0 20px rgba(78, 205, 196, 0.2);
+  }
+  .ring-glow-warn {
+    box-shadow:
+      0 0 0 2px var(--color-ui-warn),
+      0 0 15px rgba(254, 202, 87, 0.6),
+      inset 0 0 20px rgba(254, 202, 87, 0.2);
+  }
+  .ring-glow-bad {
+    box-shadow:
+      0 0 0 2px var(--color-ui-bad),
+      0 0 15px rgba(255, 71, 87, 0.6),
+      inset 0 0 20px rgba(255, 71, 87, 0.2);
+  }
+
+  /* ── Animated pulse border ── */
+  .border-pulse-teal {
+    animation: border-pulse-teal 2s ease-in-out infinite;
+  }
+}
+
+@keyframes crt-flicker {
+  0% { opacity: 0.95; }
+  50% { opacity: 1; }
+  100% { opacity: 0.98; }
+}
+
+
+@keyframes border-pulse-teal {
+  0%, 100% { box-shadow: 0 0 0 1px var(--color-ui-good), 0 0 4px rgba(42,161,152,0.2); }
+  50% { box-shadow: 0 0 0 1px var(--color-ui-good), 0 0 16px rgba(42,161,152,0.5); }
+}
+
+
+body {
+  @apply bg-ink text-silver font-ui antialiased;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 
+ * Fullscreen viewport enforcement — all page components fill available space.
+ * The app is permanently fullscreen. Using descendant specificity instead of !important.
+ */
+html body .viewport {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+}
+
+/* ══════════════════════════════════════════════════
+ * RACING RPG — SHARED PAGE-LEVEL PATTERNS
+ * GBA-era pixel-art racing aesthetic.
+ * Solid fills. No gradients. Curb stripes. Checkered flags.
+ * ══════════════════════════════════════════════════ */
+
+/* ── Checkered flag pattern (4px tiles) ── */
+.checkered {
+  background-image:
+    repeating-conic-gradient(
+      var(--color-slate) 0% 25%,
+      var(--color-ink) 0% 50%
+    );
+  background-size: clamp(6px, 1.5vmin, 10px) clamp(6px, 1.5vmin, 10px);
+}
+
+/* ── Kerb stripe (red/white alternating, like track curbing) ── */
+.kerb-stripe {
+  height: clamp(3px, 0.6vmin, 5px);
+  background: repeating-linear-gradient(
+    90deg,
+    #c93838 0,
+    #c93838 clamp(6px, 1.5vmin, 10px),
+    #f5f5e8 clamp(6px, 1.5vmin, 10px),
+    #f5f5e8 clamp(12px, 3vmin, 20px)
+  );
+}
+
+/* ── Kerb stripe (vertical variant) ── */
+.kerb-stripe-v {
+  width: clamp(3px, 0.6vmin, 5px);
+  background: repeating-linear-gradient(
+    180deg,
+    var(--color-curb-red) 0,
+    var(--color-curb-red) clamp(6px, 1.5vmin, 10px),
+    var(--color-curb-white) clamp(6px, 1.5vmin, 10px),
+    var(--color-curb-white) clamp(12px, 3vmin, 20px)
+  );
+}
+
+/* ── Asphalt texture (dithered pixel pattern) ── */
+.asphalt-texture {
+  background-color: var(--color-asphalt-deep);
+  background-image:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent clamp(2px, 0.5vmin, 4px),
+      rgba(42, 47, 66, 0.15) clamp(2px, 0.5vmin, 4px),
+      rgba(42, 47, 66, 0.15) clamp(4px, 1vmin, 8px)
+    );
+}
+
+/* ── Global touch active feedback ── */
+.touch-target:active,
+button:active,
+[role="button"]:active,
+[role="option"]:active,
+[role="tab"]:active {
+  transform: scale(0.97);
+  transition: transform 0.05s ease;
+}
+
+
+
+/* ── Staggered entry animation ── */
+@keyframes stagger-in {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.stagger-1 { animation: stagger-in 0.35s cubic-bezier(0.25, 1, 0.5, 1) 0ms both; }
+.stagger-2 { animation: stagger-in 0.35s cubic-bezier(0.25, 1, 0.5, 1) 80ms both; }
+.stagger-3 { animation: stagger-in 0.35s cubic-bezier(0.25, 1, 0.5, 1) 160ms both; }
+.stagger-4 { animation: stagger-in 0.35s cubic-bezier(0.25, 1, 0.5, 1) 240ms both; }
+.stagger-5 { animation: stagger-in 0.35s cubic-bezier(0.25, 1, 0.5, 1) 320ms both; }
+
+/* ── Heading block with checkered accent ── */
+.heading-block {
+  text-align: center;
+}
+
+.heading-rule {
+  width: clamp(60px, 18vw, 160px);
+  height: clamp(4px, 0.8vmin, 8px);
+  margin: clamp(4px, 1vmin, 10px) auto 0;
+  background: repeating-linear-gradient(
+    90deg,
+    #c93838 0,
+    #c93838 clamp(4px, 1vmin, 8px),
+    #f5f5e8 clamp(4px, 1vmin, 8px),
+    #f5f5e8 clamp(8px, 2vmin, 16px)
+  );
+}
+
+/* Left-aligned variant */
+.heading-block.text-left .heading-rule {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* ── Section labels ── */
+.section-label {
+  font-size: clamp(10px, 2.2vmin, 18px);
+  color: var(--color-silver);
+  border-bottom: 2px solid var(--color-slate);
+  padding-bottom: clamp(2px, 0.4vh, 5px);
+  margin-bottom: clamp(4px, 0.8vh, 8px);
+  font-weight: bold;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ── Page content container ── */
+.page-content {
+  position: relative;
+  z-index: 10;
+  padding: clamp(26px, 6vh, 52px) clamp(8px, 2vw, 24px) clamp(24px, 6vh, 48px);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Tab strip (checkered bg, chunky border) ── */
+.tab-strip {
+  display: flex;
+  gap: clamp(6px, 2vw, 20px);
+  padding: clamp(4px, 1vh, 10px) clamp(8px, 2vw, 20px);
+  margin-bottom: clamp(6px, 1.5vh, 14px);
+  border: 2px solid var(--color-slate);
+  background-color: var(--color-charcoal);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-item {
+  cursor: pointer;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+  font-size: clamp(10px, 2.3vmin, 20px);
+}
+
+.tab-active {
+  color: #f5f5e8;
+  font-weight: bold;
+  background-color: var(--color-asphalt-deep);
+  padding: clamp(1px, 0.3vh, 4px) clamp(4px, 1vw, 8px);
+}
+
+.tab-inactive {
+  color: var(--color-slate);
+  padding: clamp(1px, 0.3vh, 4px) clamp(4px, 1vw, 8px);
+}
+
+/* ── Cursor bounce animation (pixel-snapped) ── */
+@keyframes cursor-bounce {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
+}
+
+.cursor-bounce {
+  animation: cursor-bounce 0.25s steps(2) infinite;
+}
+
+/* ── Hide scrollbars ── */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; }
+
+/* ── Touch-friendly interactive base ── */
+.touch-target {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── Tyre-tread border (horizontal, for detail panels) ── */
+.tread-border-top {
+  border-top: 2px solid var(--color-slate);
+  position: relative;
+}
+.tread-border-top::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-slate) 0,
+    var(--color-slate) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+/* ── Racing accent colors (from the track palette) ── */
+.text-curb-red { color: #c93838; }
+.text-curb-white { color: #f5f5e8; }
+.bg-curb-red { background-color: #c93838; }
+.bg-curb-white { background-color: #f5f5e8; }
+
+/* ── Pixel-art drop shadow (1px offset, no blur) ── */
+.pixel-shadow {
+  text-shadow: 1px 1px 0 #0d0d12;
+}
+.pixel-shadow-2 {
+  text-shadow: 2px 2px 0 #0d0d12;
+}
+
+/* ── Speed lines (animated diagonal stripes, use sparingly) ── */
+@keyframes speed-lines {
+  0% { background-position: 0 0; }
+  100% { background-position: clamp(20px, 5vmin, 40px) clamp(20px, 5vmin, 40px); }
+}
+
+.speed-lines {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 6px,
+    rgba(200, 120, 106, 0.06) 6px,
+    rgba(200, 120, 106, 0.06) 12px
+  );
+  animation: speed-lines 0.8s linear infinite;
+}
+
+/* ── Accessibility: Reduced Motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .crt-overlay {
+    display: none !important;
+  }
+}
+
+.reduced-motion *, .reduced-motion *::before, .reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+.reduced-motion .crt-overlay {
+  display: none !important;
+}
+
