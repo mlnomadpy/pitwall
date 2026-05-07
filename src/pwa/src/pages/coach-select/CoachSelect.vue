@@ -7,6 +7,8 @@ import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import PageShell from '@/shared/ui/PageShell.vue'
 import Sprite from '@/entities/coach/Sprite.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import CyberButton from '@/shared/ui/core/CyberButton.vue'
+import CyberProgress from '@/shared/ui/core/CyberProgress.vue'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -62,8 +64,13 @@ useKeyboard((e: KeyboardEvent) => {
   }
 })
 
+const slideDir = ref('slide-right')
+
 const previewCoach = (index: number) => {
   audio.playSfx('cursor_move')
+  if (index > cursorIndex.value) slideDir.value = 'slide-left'
+  else if (index < cursorIndex.value) slideDir.value = 'slide-right'
+  
   cursorIndex.value = index
   const c = coaches[index]
   if (activeSlot.value && activeSlot.value.level >= c.levelReq) {
@@ -91,6 +98,7 @@ const trySelect = async (c: any) => {
   audio.playVoice(activeSlot.value.preferredCoach, 'farewell_swap')
   
   activeSlot.value.preferredCoach = c.id
+  save.save()
   
   setTimeout(() => {
     audio.playVoice(c.id, 'greet_morning')
@@ -121,12 +129,17 @@ const trySelect = async (c: any) => {
         </div>
         
         <!-- Sprite -->
-        <Sprite 
-          :sheet="coaches[cursorIndex].id" 
-          :animation="isLocked(cursorIndex) ? 'idle' : 'talk'" 
-          class="coach-sprite relative z-10 w-full h-full" 
-          :class="{ 'is-locked-sprite': isLocked(cursorIndex) }"
-        />
+        <div class="relative w-full h-full overflow-hidden">
+          <Transition :name="slideDir">
+            <Sprite 
+              :key="coaches[cursorIndex].id"
+              :sheet="coaches[cursorIndex].id" 
+              :animation="isLocked(cursorIndex) ? 'idle' : 'talk'" 
+              class="coach-sprite absolute bottom-0 z-10 w-full h-full" 
+              :class="{ 'is-locked-sprite': isLocked(cursorIndex) }"
+            />
+          </Transition>
+        </div>
         
         <!-- Status Overlay -->
         <div class="absolute bottom-[-10px] z-20 flex flex-col items-center w-full">
@@ -146,22 +159,19 @@ const trySelect = async (c: any) => {
       
       <!-- Selection Controls -->
       <div class="coach-controls flex flex-wrap justify-center gap-[clamp(8px,1.5vw,16px)] max-w-[90vw] mt-[2vh]">
-        <div 
+        <CyberButton 
           v-for="(c, i) in coaches" 
           :key="c.id"
-          class="coach-option px-[clamp(10px,2vw,20px)] py-[clamp(8px,1.5vh,16px)] border-2 cursor-pointer uppercase flex items-center justify-center"
-          :class="[
-            cursorIndex === i 
-              ? 'border-ui-good bg-ui-good/20 text-white font-bold transform -translate-y-1 shadow-[0_0_12px_rgba(42,161,152,0.4)]' 
-              : 'border-slate bg-ink/80 text-silver hover:bg-slate/20',
-            isLocked(i) ? 'opacity-60 grayscale' : ''
-          ]"
+          :active="cursorIndex === i"
+          :variant="cursorIndex === i ? 'primary' : 'dark'"
+          class="uppercase"
+          :class="isLocked(i) ? 'opacity-60 grayscale' : ''"
           @click="cursorIndex = i; trySelect(c)"
           @mouseenter="cursorIndex !== i && previewCoach(i)"
         >
           <span v-if="isLocked(i)" class="mr-2 text-[1.2em]">🔒</span>
-          <span class="text-body font-bold tracking-wider">{{ c.name }}</span>
-        </div>
+          {{ c.name }}
+        </CyberButton>
       </div>
       
     </div>
@@ -234,4 +244,15 @@ const trySelect = async (c: any) => {
   0% { opacity: 0.8; transform: scale(0.95); }
   100% { opacity: 1; transform: scale(1.15); }
 }
+
+.slide-left-enter-active, .slide-left-leave-active,
+.slide-right-enter-active, .slide-right-leave-active {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s;
+}
+
+.slide-left-enter-from { transform: translateX(100%); opacity: 0; }
+.slide-left-leave-to { transform: translateX(-100%); opacity: 0; }
+
+.slide-right-enter-from { transform: translateX(-100%); opacity: 0; }
+.slide-right-leave-to { transform: translateX(100%); opacity: 0; }
 </style>

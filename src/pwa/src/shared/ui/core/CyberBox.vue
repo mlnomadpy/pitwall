@@ -1,16 +1,25 @@
 <script setup lang="ts">
 interface Props {
+  /** Background style */
   variant?: 'ink' | 'charcoal' | 'ghost' | 'glass'
-  border?: 'slate' | 'silver' | 'primary' | 'good' | 'warn' | 'none'
+  /** Border color */
+  border?: 'slate' | 'silver' | 'primary' | 'good' | 'warn' | 'bad' | 'none'
+  /** Enable hover/active states */
   interactive?: boolean
+  /** Visual selected state */
   selected?: boolean
+  /** Pass-through HTML role */
+  role?: string
+  /** Make focusable via keyboard */
+  focusable?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   variant: 'charcoal',
   border: 'slate',
   interactive: false,
-  selected: false
+  selected: false,
+  focusable: false,
 })
 </script>
 
@@ -18,10 +27,12 @@ withDefaults(defineProps<Props>(), {
   <div 
     class="cyber-box"
     :class="[
-      variant === 'glass' ? 'glass' : `bg-${variant}`, 
+      variant === 'glass' ? 'bg-glass' : `bg-${variant}`, 
       `border-${border}`, 
       { interactive, selected, 'arcade-hover': interactive }
     ]"
+    :role="role"
+    :tabindex="focusable ? 0 : undefined"
   >
     <slot></slot>
   </div>
@@ -32,7 +43,7 @@ withDefaults(defineProps<Props>(), {
   position: relative;
   display: flex;
   box-sizing: border-box;
-  transition: all 0.2s ease;
+  transition: all var(--duration-fast, 150ms) ease;
   border-width: 1px;
   border-style: solid;
 }
@@ -41,13 +52,15 @@ withDefaults(defineProps<Props>(), {
 .bg-ink { background: linear-gradient(135deg, rgba(20, 22, 36, 0.9) 0%, rgba(13, 14, 26, 0.95) 100%); }
 .bg-charcoal { background: linear-gradient(135deg, rgba(38, 44, 62, 0.9) 0%, rgba(26, 29, 40, 0.95) 100%); }
 .bg-ghost { background-color: transparent; }
+.bg-glass { background: color-mix(in srgb, var(--color-ink) 85%, transparent); backdrop-filter: blur(4px); }
 
 /* Borders */
-.border-slate { border-color: var(--color-slate, #2c3e50); }
-.border-silver { border-color: var(--color-silver, #bdc3c7); }
-.border-primary { border-color: var(--color-ui-info, #45b7d1); }
-.border-good { border-color: var(--color-ui-good, #4ecdc4); }
-.border-warn { border-color: var(--color-ui-warn, #feca57); }
+.border-slate { border-color: var(--color-slate); }
+.border-silver { border-color: var(--color-silver); }
+.border-primary { border-color: var(--color-ui-info); }
+.border-good { border-color: var(--color-ui-good); }
+.border-warn { border-color: var(--color-ui-warn); }
+.border-bad { border-color: var(--color-ui-bad); }
 .border-none { border-color: transparent; border-width: 0; }
 
 /* Interactive States */
@@ -55,10 +68,15 @@ withDefaults(defineProps<Props>(), {
   cursor: pointer;
 }
 
-/* Selected State overrides */
+.cyber-box:focus-visible {
+  outline: 2px solid var(--color-ui-good);
+  outline-offset: 2px;
+}
+
+/* Selected State */
 .cyber-box.selected {
-  border-color: var(--color-ui-good, #4ecdc4);
+  border-color: var(--color-ui-good);
   background: linear-gradient(135deg, rgba(42, 161, 152, 0.15) 0%, rgba(26, 29, 40, 0.95) 100%);
-  box-shadow: inset 0 0 12px rgba(78, 205, 196, 0.2), 0 0 16px rgba(78, 205, 196, 0.3);
+  box-shadow: inset 0 0 12px rgba(78, 205, 196, 0.2), var(--shadow-glow-teal, 0 0 16px rgba(78, 205, 196, 0.3));
 }
 </style>

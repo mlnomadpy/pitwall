@@ -71,15 +71,14 @@ const onDialogueDone = () => {
     navTimeout = window.setTimeout(() => {
       save.activeSlotId = null
       router.push('/')
-    }, 2000)
+    }, 3000)
   }
 }
 </script>
 
 <template>
-  <PageShell :show-heading="false" bg="neutral" :hints="['ENTER · NEXT', 'B · BACK']">
-    <div class="relative w-full h-full flex flex-col items-center justify-center p-4 z-10">
-    <CyberBackground variant="stars" />
+  <PageShell :show-heading="false" bg="neutral" bgVariant="stars" :hints="['ENTER · NEXT', 'B · BACK']">
+    <div class="relative w-full h-full flex flex-col items-center justify-center p-4 z-10" @click="phase < 5 ? (phase = 5, audio.playSfx('cursor_select')) : phase === 6 ? onDialogueDone() : null">
     
     <div class="relative z-10 w-full h-full flex flex-col items-center">
       <h1 class="text-title-lg text-white font-bold mb-4 mt-8 tracking-widest drop-shadow-[2px_2px_0_#000]">END OF DAY</h1>
@@ -94,15 +93,20 @@ const onDialogueDone = () => {
             class="flex justify-between transition-opacity duration-300"
             :class="phase > i ? 'opacity-100' : 'opacity-0'"
           >
-            <span class="text-charcoal-light">{{ item.label }}</span>
+            <span class="text-slate">{{ item.label }}</span>
             <span class="font-bold text-white">{{ item.value }}</span>
           </div>
         </div>
       </CyberPanel>
+
+      <!-- Tappable continue when tally is done -->
+      <div v-if="phase >= 5 && phase < 6" class="mt-4 text-center cursor-pointer" @click.stop="phase = 6">
+        <span class="text-ui-good font-bold text-body animate-pulse tracking-widest">TAP TO CONTINUE ▶</span>
+      </div>
       
       <div v-if="phase >= 6" class="absolute bottom-[6vh] left-0 right-0 w-[clamp(300px,90vw,500px)] mx-auto">
         <!-- Floating Z -->
-        <div class="absolute right-[4vw] -top-[2vh] text-white text-title font-bold animate-bounce z-20 drop-shadow-[2px_2px_0_#000]">
+        <div class="absolute right-[4vw] -top-[2vh] text-white text-title font-bold floating-z z-20 drop-shadow-[2px_2px_0_#000]">
           Z
         </div>
         
@@ -126,4 +130,12 @@ const onDialogueDone = () => {
 
 <style scoped>
 /* No hardcoded viewport dimensions — fullscreen is enforced by global.css */
+@keyframes float-z {
+  0%, 100% { transform: translateY(0) scale(1) rotate(-5deg); opacity: 0.8; }
+  50% { transform: translateY(-10px) scale(1.1) rotate(5deg); opacity: 1; }
+}
+
+.floating-z {
+  animation: float-z 3s ease-in-out infinite;
+}
 </style>

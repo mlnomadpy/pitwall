@@ -12,6 +12,8 @@ import CoachFloat from '@/shared/ui/CoachFloat.vue'
 import CyberCheckbox from '@/shared/ui/core/CyberCheckbox.vue'
 import CyberValuePicker from '@/shared/ui/core/CyberValuePicker.vue'
 import CyberProgressBar from '@/shared/ui/core/CyberProgressBar.vue'
+import CyberConfirmDialog from '@/shared/ui/core/CyberConfirmDialog.vue'
+import { useSwipeGesture } from '@/shared/lib/useSwipeGesture'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -119,7 +121,9 @@ useKeyboard((e: KeyboardEvent) => {
   if (confirmingDestructive.value) {
     if (e.key === 'y' || e.key === 'Y' || e.key === 'Enter') {
       audio.playSfx('cancel') // heavy
-      save.activeSlotId = null
+      if (save.activeSlotId) {
+        save.deleteSlot(save.activeSlotId)
+      }
       router.push('/')
     } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'n' || e.key === 'N') {
       confirmingDestructive.value = false
@@ -215,6 +219,21 @@ const adjustValue = (dir: number) => {
   }
 }
 
+useSwipeGesture(null, {
+  onSwipeLeft: () => {
+    if (!editMode.value) {
+      activeTab.value = tabs[(tabIndex.value + 1) % tabs.length]
+      audio.playSfx('cursor_move')
+    }
+  },
+  onSwipeRight: () => {
+    if (!editMode.value) {
+      activeTab.value = tabs[(tabIndex.value - 1 + tabs.length) % tabs.length]
+      audio.playSfx('cursor_move')
+    }
+  }
+})
+
 
 
 
@@ -244,6 +263,7 @@ const adjustValue = (dir: number) => {
             :value="settings.audio[Object.keys(settings.audio)[i] as keyof typeof settings.audio] as number"
             :focused="cursorIndex === i"
             :editing="editMode"
+            @click="cursorIndex = i; editMode = true"
           />
         </div>
         <div class="mt-2 flex flex-col gap-1">
@@ -251,27 +271,30 @@ const adjustValue = (dir: number) => {
             label="MUTE ALL" 
             :checked="settings.audio.muteAll" 
             :focused="cursorIndex === 4" 
+            @change="(v: boolean) => { cursorIndex = 4; settings.audio.muteAll = v; audio.playSfx('cursor_select') }"
           />
           <CyberCheckbox 
             label="MUTE COACH VOICE" 
             sub-label="(silence mode)"
             :checked="settings.audio.muteCoach" 
             :focused="cursorIndex === 5" 
+            @change="(v: boolean) => { cursorIndex = 5; settings.audio.muteCoach = v; audio.playSfx('cursor_select') }"
           />
         </div>
       </template>
 
       <!-- DISPLAY -->
       <template v-else-if="activeTab === 'DISPLAY'">
-        <CyberCheckbox label="NIGHT MODE" :checked="settings.display.nightMode" :focused="cursorIndex === 0" />
-        <CyberCheckbox label="REDUCED MOTION" :checked="settings.display.reducedMotion" :focused="cursorIndex === 1" />
-        <CyberCheckbox label="SHOW FPS COUNTER" :checked="settings.display.fpsCounter" :focused="cursorIndex === 2" />
+        <CyberCheckbox label="NIGHT MODE" :checked="settings.display.nightMode" :focused="cursorIndex === 0" @change="(v: boolean) => { cursorIndex = 0; settings.display.nightMode = v; audio.playSfx('cursor_select') }" />
+        <CyberCheckbox label="REDUCED MOTION" :checked="settings.display.reducedMotion" :focused="cursorIndex === 1" @change="(v: boolean) => { cursorIndex = 1; settings.display.reducedMotion = v; audio.playSfx('cursor_select') }" />
+        <CyberCheckbox label="SHOW FPS COUNTER" :checked="settings.display.fpsCounter" :focused="cursorIndex === 2" @change="(v: boolean) => { cursorIndex = 2; settings.display.fpsCounter = v; audio.playSfx('cursor_select') }" />
         <div class="mt-2">
           <CyberValuePicker 
             label="SCALE" 
             :value="settings.display.scale" 
             :focused="cursorIndex === 3" 
             :editing="editMode" 
+            @click="cursorIndex = 3; editMode = true"
           />
         </div>
       </template>
@@ -284,20 +307,22 @@ const adjustValue = (dir: number) => {
           :focused="cursorIndex === 0" 
           :editing="editMode"
           label-width="clamp(70px,18vw,140px)"
+          @click="cursorIndex = 0; editMode = true"
         />
         <CyberCheckbox 
           label="SWAP A/B (LEFT-HANDED)" 
           :checked="settings.controls.swapAB" 
           :focused="cursorIndex === 1" 
+          @change="(v: boolean) => { cursorIndex = 1; settings.controls.swapAB = v; audio.playSfx('cursor_select') }"
         />
-        <CyberBox :selected="cursorIndex === 2" class="mt-4 p-2 w-max">
+        <CyberBox :selected="cursorIndex === 2" interactive class="mt-4 p-2 w-max" @click="cursorIndex = 2; handleSelect()">
           <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>TEST INPUT
         </CyberBox>
       </template>
 
       <!-- CAR -->
       <template v-else-if="activeTab === 'CAR'">
-        <div class="flex items-center mb-2">
+        <div class="flex items-center mb-2 cursor-pointer" @click="cursorIndex = 0; handleSelect()">
           <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
             <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>CURRENT CAR
           </span>
@@ -305,18 +330,18 @@ const adjustValue = (dir: number) => {
             {{ settings.car.current }}
           </span>
         </div>
-        <CyberBox :selected="cursorIndex === 1" class="mt-2 p-2 mb-1 w-max">
+        <CyberBox :selected="cursorIndex === 1" interactive class="mt-2 p-2 mb-1 w-max" @click="cursorIndex = 1; handleSelect()">
           <span v-if="cursorIndex === 1" class="text-ui-good mr-1">▶</span>RUN HARDWARE TEST
         </CyberBox>
         <br>
-        <CyberBox :selected="cursorIndex === 2" class="p-2 w-max">
+        <CyberBox :selected="cursorIndex === 2" interactive class="p-2 w-max" @click="cursorIndex = 2; handleSelect()">
           <span v-if="cursorIndex === 2" class="text-ui-good mr-1">▶</span>HOW IS MY SCORE CALCULATED?
         </CyberBox>
       </template>
 
       <!-- DRIVER -->
       <template v-else-if="activeTab === 'DRIVER'">
-        <div class="flex items-center mb-2">
+        <div class="flex items-center mb-2 cursor-pointer" @click="cursorIndex = 0; handleSelect()">
           <span class="w-[clamp(60px,15vw,120px)]" :class="cursorIndex === 0 ? 'text-white' : 'text-silver'">
             <span v-if="cursorIndex === 0" class="text-ui-good">▶ </span>NAME
           </span>
@@ -328,10 +353,11 @@ const adjustValue = (dir: number) => {
             :value="settings.driver.level" 
             :focused="cursorIndex === 1" 
             :editing="editMode" 
+            @click="cursorIndex = 1; editMode = true"
           />
         </div>
         
-        <CyberBox variant="charcoal" :border="cursorIndex === 2 ? 'none' : 'warn'" :selected="false" class="p-2 w-max" :class="cursorIndex === 2 ? 'bg-ui-warn text-ink font-bold' : 'text-ui-warn'">
+        <CyberBox variant="charcoal" :border="cursorIndex === 2 ? 'none' : 'warn'" :selected="false" interactive class="p-2 w-max" :class="cursorIndex === 2 ? 'bg-ui-warn text-ink font-bold' : 'text-ui-warn'" @click="cursorIndex = 2; handleSelect()">
           <span v-if="cursorIndex === 2" class="mr-1">▶</span>DELETE SAVE DATA
         </CyberBox>
       </template>
@@ -351,6 +377,17 @@ const adjustValue = (dir: number) => {
       />
     </template>
   </PageShell>
+
+  <CyberConfirmDialog
+    :open="confirmingDestructive"
+    title="DELETE SAVE"
+    message="This will permanently erase all your progress. Are you sure?"
+    confirmLabel="DELETE"
+    cancelLabel="KEEP"
+    variant="danger"
+    @confirm="audio.playSfx('cancel'); save.activeSlotId && save.deleteSlot(save.activeSlotId); router.push('/')"
+    @cancel="confirmingDestructive = false; audio.playSfx('cursor_move')"
+  />
 </template>
 
 <style scoped>

@@ -31,7 +31,7 @@ withDefaults(defineProps<Props>(), {
   font-size: clamp(10px, 2.2vmin, 18px);
   text-transform: uppercase;
   letter-spacing: 1px;
-  clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+  clip-path: polygon(4px 0, 100% 0, calc(100% - 4px) 100%, 0 100%);
   border: 1px solid transparent;
   transition: all 0.2s ease;
 }

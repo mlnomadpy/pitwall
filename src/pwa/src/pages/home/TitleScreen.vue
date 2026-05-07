@@ -108,7 +108,7 @@ onUnmounted(() => {
     
     <!-- Wanderer Sprite -->
     <div class="absolute z-20 transition-transform duration-[8000ms] linear" 
-         :style="{ transform: `translateX(${wandererX}px)`, bottom: 'calc(18vh + 2px)' }">
+         :style="{ transform: `translateX(${wandererX}px)`, bottom: 'calc(22vh + 2px)' }">
       <Sprite v-if="showWanderer" sheet="trod" animation="idle" class="scale-150" />
     </div>
 

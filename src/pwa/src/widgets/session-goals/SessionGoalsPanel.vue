@@ -1,58 +1,49 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import CyberStatusIcon from '@/shared/ui/core/CyberStatusIcon.vue'
+import ErrorBoundary from '@/shared/ui/ErrorBoundary.vue'
+import { useQuestStore } from '@/entities/quest/model/questStore'
 
-// In a real implementation, we would pass an array of goals
-// For now, we'll keep the dummy data from QuestLog but allow overriding
-interface Goal {
-  id: string
-  name: string
-  val: string
-  status: 'pending' | 'success' | 'failed'
-}
+const store = useQuestStore()
 
 interface Props {
   title?: string
-  goals?: Goal[]
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: 'ACTIVE GOALS (THIS SESSION)',
-  goals: () => [
-    { id: '1', name: 'APEX SPEED AT T7', val: '82 → 84 km/h (target +3)', status: 'pending' },
-    { id: '2', name: 'BREAK 1:48', val: '1:46.8 ✓', status: 'success' },
-    { id: '3', name: 'TRAIL EVERY ENTRY', val: '4 of 11', status: 'failed' }
-  ]
+  title: 'ACTIVE GOALS (THIS SESSION)'
 })
 
-const getStatusClass = (status: string) => {
-  if (status === 'success') return 'text-ui-good'
-  if (status === 'failed') return 'text-ui-bad'
-  return 'text-ui-info'
-}
+onMounted(() => {
+  store.fetchQuests()
+})
 
-const getStatusIcon = (status: string) => {
-  if (status === 'success') return '✓'
-  if (status === 'failed') return '✗'
-  return '◐'
-}
 </script>
 
 <template>
   <CyberPanel variant="glass" border="primary" class="goals-frame w-full h-full">
     <h2 class="section-label">{{ title }}</h2>
     
-    <div class="goals-list flex flex-col gap-2">
-      <div 
-        v-for="goal in goals" 
-        :key="goal.id"
-        class="goal-row" 
-        :class="getStatusClass(goal.status)"
-      >
-        <span class="goal-icon">{{ getStatusIcon(goal.status) }}</span>
-        <span class="goal-name">{{ goal.name }}</span>
-        <span class="goal-val">{{ goal.val }}</span>
+    <ErrorBoundary>
+      <div v-if="store.isLoading" class="flex-grow flex items-center justify-center">
+        <div class="text-ui-info text-small animate-pulse">SYNCING GOALS...</div>
       </div>
-    </div>
+      <div v-else class="goals-list flex flex-col gap-2">
+        <div 
+          v-for="quest in store.daily" 
+          :key="quest.id"
+          class="goal-row" 
+          :class="quest.completed ? 'goal-complete' : 'goal-pending'"
+        >
+          <!-- Status icon -->
+          <CyberStatusIcon :status="quest.completed ? 'success' : 'pending'" />
+
+          <span class="goal-name">{{ quest.title }}</span>
+          <span class="goal-val font-nums">{{ quest.progress }} / {{ quest.target }}</span>
+        </div>
+      </div>
+    </ErrorBoundary>
   </CyberPanel>
 </template>
 
@@ -86,11 +77,22 @@ const getStatusIcon = (status: string) => {
   background: rgba(0, 0, 0, 0.2);
   padding: clamp(4px, 1vmin, 8px) clamp(8px, 1.5vmin, 12px);
   border-radius: 4px;
+  border-left: 2px solid transparent;
+  transition: border-color 0.2s ease, opacity 0.2s ease;
 }
 
-.goal-icon { 
-  flex: 0 0 auto; 
-  font-size: clamp(12px, 2.5vmin, 22px); 
+.goal-complete {
+  border-left-color: var(--color-ui-good);
+  color: var(--color-ui-good);
+}
+
+.goal-complete .goal-name {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.goal-pending {
+  color: var(--color-silver);
 }
 
 .goal-name { 
@@ -102,6 +104,7 @@ const getStatusIcon = (status: string) => {
 .goal-val { 
   flex: 0 0 auto; 
   text-align: right; 
-  font-family: monospace;
+  font-family: var(--font-nums, monospace);
+  opacity: 0.8;
 }
 </style>

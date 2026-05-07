@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
@@ -13,19 +13,19 @@ const audio = useAudioStore()
 
 // Mock corner data
 const corners = ref([
-  { id: 'T1', progress: 8, svgTurnId: undefined as number | undefined, name: 'Turn 1', grade: 'B', entry: 140, apex: 120, exit: 145, brake: 20, glat: 1.1, time: 2.1, delta: '+0.1', class: 'med' },
-  { id: 'T2', progress: 14, svgTurnId: undefined as number | undefined, name: 'Turn 2', grade: 'A', entry: 120, apex: 85, exit: 110, brake: 60, glat: 1.3, time: 3.4, delta: '-0.2', class: 'low' },
-  { id: 'T3', progress: 18, svgTurnId: undefined as number | undefined, name: 'Turn 3', grade: 'C+', entry: 140, apex: 115, exit: 135, brake: 35, glat: 1.2, time: 2.8, delta: '+0.4', class: 'med' },
-  { id: 'T3a', progress: 21, svgTurnId: undefined as number | undefined, name: 'Turn 3a', grade: 'B-', entry: 135, apex: 125, exit: 140, brake: 15, glat: 1.0, time: 1.5, delta: '+0.2', class: 'high' },
-  { id: 'T4', progress: 24, svgTurnId: undefined as number | undefined, name: 'Turn 4', grade: 'A+', entry: 160, apex: 130, exit: 155, brake: 40, glat: 1.4, time: 2.5, delta: '-0.4', class: 'med' },
-  { id: 'T5', progress: 30, svgTurnId: undefined as number | undefined, name: 'Turn 5', grade: 'B', entry: 140, apex: 105, exit: 125, brake: 50, glat: 1.2, time: 3.0, delta: '+0.1', class: 'low' },
-  { id: 'T6', progress: 45, svgTurnId: undefined as number | undefined, name: 'Carousel', grade: 'B+', entry: 150, apex: 110, exit: 135, brake: 45, glat: 1.3, time: 4.5, delta: '-0.1', class: 'med' },
-  { id: 'T7', progress: 55, svgTurnId: undefined as number | undefined, name: 'Turn 7', grade: 'F', entry: 165, apex: 82, exit: 105, brake: 85, glat: 1.1, time: 4.8, delta: '+0.8', class: 'low' },
-  { id: 'T8', progress: 65, svgTurnId: undefined as number | undefined, name: 'Esses 1', grade: 'A', entry: 155, apex: 140, exit: 160, brake: 10, glat: 1.3, time: 1.8, delta: '-0.2', class: 'high' },
-  { id: 'T8a', progress: 68, svgTurnId: undefined as number | undefined, name: 'Esses 2', grade: 'A-', entry: 160, apex: 145, exit: 165, brake: 5, glat: 1.2, time: 1.7, delta: '-0.1', class: 'high' },
-  { id: 'T9', progress: 70, svgTurnId: undefined as number | undefined, name: 'Turn 9', grade: 'B', entry: 170, apex: 135, exit: 150, brake: 30, glat: 1.1, time: 2.4, delta: '+0.2', class: 'med' },
-  { id: 'T10', progress: 80, svgTurnId: undefined as number | undefined, name: 'Turn 10', grade: 'C', entry: 180, apex: 110, exit: 130, brake: 65, glat: 1.2, time: 3.2, delta: '+0.5', class: 'low' },
-  { id: 'T11', progress: 90, svgTurnId: undefined as number | undefined, name: 'Hairpin', grade: 'B+', entry: 175, apex: 64, exit: 95, brake: 90, glat: 1.4, time: 5.1, delta: '-0.1', class: 'low' },
+  { id: 'T1', progress: 8, svgTurnId: undefined as number | undefined, name: 'Turn 1', grade: 'B', entry: 140, apex: 120, exit: 145, brake: 20, glat: 1.1, time: 2.1, delta: '+0.1', class: 'med', throttle: { min: 10, q1: 30, med: 60, q3: 85, max: 100 } },
+  { id: 'T2', progress: 14, svgTurnId: undefined as number | undefined, name: 'Turn 2', grade: 'A', entry: 120, apex: 85, exit: 110, brake: 60, glat: 1.3, time: 3.4, delta: '-0.2', class: 'low', throttle: { min: 0, q1: 15, med: 45, q3: 70, max: 90 } },
+  { id: 'T3', progress: 18, svgTurnId: undefined as number | undefined, name: 'Turn 3', grade: 'C+', entry: 140, apex: 115, exit: 135, brake: 35, glat: 1.2, time: 2.8, delta: '+0.4', class: 'med', throttle: { min: 20, q1: 40, med: 55, q3: 80, max: 100 } },
+  { id: 'T3a', progress: 21, svgTurnId: undefined as number | undefined, name: 'Turn 3a', grade: 'B-', entry: 135, apex: 125, exit: 140, brake: 15, glat: 1.0, time: 1.5, delta: '+0.2', class: 'high', throttle: { min: 40, q1: 50, med: 70, q3: 90, max: 100 } },
+  { id: 'T4', progress: 24, svgTurnId: undefined as number | undefined, name: 'Turn 4', grade: 'A+', entry: 160, apex: 130, exit: 155, brake: 40, glat: 1.4, time: 2.5, delta: '-0.4', class: 'med', throttle: { min: 0, q1: 10, med: 30, q3: 60, max: 100 } },
+  { id: 'T5', progress: 30, svgTurnId: undefined as number | undefined, name: 'Turn 5', grade: 'B', entry: 140, apex: 105, exit: 125, brake: 50, glat: 1.2, time: 3.0, delta: '+0.1', class: 'low', throttle: { min: 0, q1: 20, med: 40, q3: 70, max: 95 } },
+  { id: 'T6', progress: 45, svgTurnId: undefined as number | undefined, name: 'Carousel', grade: 'B+', entry: 150, apex: 110, exit: 135, brake: 45, glat: 1.3, time: 4.5, delta: '-0.1', class: 'med', throttle: { min: 10, q1: 30, med: 50, q3: 80, max: 100 } },
+  { id: 'T7', progress: 55, svgTurnId: undefined as number | undefined, name: 'Turn 7', grade: 'F', entry: 165, apex: 82, exit: 105, brake: 85, glat: 1.1, time: 4.8, delta: '+0.8', class: 'low', throttle: { min: 0, q1: 5, med: 20, q3: 50, max: 80 } },
+  { id: 'T8', progress: 65, svgTurnId: undefined as number | undefined, name: 'Esses 1', grade: 'A', entry: 155, apex: 140, exit: 160, brake: 10, glat: 1.3, time: 1.8, delta: '-0.2', class: 'high', throttle: { min: 30, q1: 60, med: 80, q3: 95, max: 100 } },
+  { id: 'T8a', progress: 68, svgTurnId: undefined as number | undefined, name: 'Esses 2', grade: 'A-', entry: 160, apex: 145, exit: 165, brake: 5, glat: 1.2, time: 1.7, delta: '-0.1', class: 'high', throttle: { min: 40, q1: 70, med: 85, q3: 95, max: 100 } },
+  { id: 'T9', progress: 70, svgTurnId: undefined as number | undefined, name: 'Turn 9', grade: 'B', entry: 170, apex: 135, exit: 150, brake: 30, glat: 1.1, time: 2.4, delta: '+0.2', class: 'med', throttle: { min: 20, q1: 45, med: 65, q3: 85, max: 100 } },
+  { id: 'T10', progress: 80, svgTurnId: undefined as number | undefined, name: 'Turn 10', grade: 'C', entry: 180, apex: 110, exit: 130, brake: 65, glat: 1.2, time: 3.2, delta: '+0.5', class: 'low', throttle: { min: 0, q1: 15, med: 35, q3: 65, max: 95 } },
+  { id: 'T11', progress: 90, svgTurnId: undefined as number | undefined, name: 'Hairpin', grade: 'B+', entry: 175, apex: 64, exit: 95, brake: 90, glat: 1.4, time: 5.1, delta: '-0.1', class: 'low', throttle: { min: 0, q1: 0, med: 10, q3: 40, max: 100 } },
 ])
 
 const cursorIndex = ref(0)
@@ -33,7 +33,6 @@ const cur = computed(() => corners.value[cursorIndex.value])
 
 const trackMapRef = ref<any>(null)
 
-import { onMounted } from 'vue'
 onMounted(() => {
   setTimeout(() => {
     if (trackMapRef.value && trackMapRef.value.trackTurns) {
@@ -135,18 +134,26 @@ useKeyboard((e: KeyboardEvent) => {
       <template #left>
         <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
           <div class="text-silver mb-1">THROTTLE % BY CORNER</div>
-          <div class="flex flex-col gap-1 overflow-hidden">
-            <!-- Mock box plots -->
-            <div v-for="c in corners.slice(0, 5)" :key="c.id" class="flex items-center gap-2">
-              <span class="w-4 text-silver">{{ c.id }}</span>
-              <div class="flex-grow h-[6px] relative border-b border-slate">
+          <div class="flex flex-col gap-1 overflow-y-auto no-scrollbar pr-1">
+            <!-- Real box plots -->
+            <div v-for="c in corners" :key="c.id" 
+                 class="flex items-center gap-2 transition-colors px-1 rounded-sm"
+                 :class="cur.id === c.id ? 'bg-charcoal text-white' : ''"
+                 @click="() => { const idx = corners.findIndex(x => x.id === c.id); if (idx !== -1) { cursorIndex = idx; audio.playSfx('cursor_select'); } }"
+            >
+              <span class="w-6 text-[clamp(10px,2vmin,14px)] font-bold text-center" :class="cur.id === c.id ? 'text-white' : 'text-silver'">{{ c.id }}</span>
+              <div class="flex-grow h-[8px] relative border-b border-slate my-[2px]">
+                <!-- Whisker caps -->
+                <div class="absolute w-[1px] h-[6px] bg-silver top-[1px]" :style="{ left: c.throttle.min + '%' }"></div>
+                <div class="absolute w-[1px] h-[6px] bg-silver top-[1px]" :style="{ left: c.throttle.max + '%' }"></div>
+                <!-- Whisker line -->
+                <div class="absolute h-[1px] bg-silver top-[4px]" :style="{ left: c.throttle.min + '%', right: (100 - c.throttle.max) + '%' }"></div>
                 <!-- Box -->
-                <div class="absolute h-1 bg-charcoal border border-silver top-[2px]" :style="{ left: '20%', width: '40%' }"></div>
+                <div class="absolute h-[6px] bg-ink border border-silver top-[1px]" :style="{ left: c.throttle.q1 + '%', width: (c.throttle.q3 - c.throttle.q1) + '%' }"></div>
                 <!-- Median -->
-                <div class="absolute w-[1px] h-1 bg-ui-warn top-[2px]" :style="{ left: '40%' }"></div>
+                <div class="absolute w-[2px] h-[6px] top-[1px]" :class="cur.id === c.id ? 'bg-ui-good' : 'bg-ui-warn'" :style="{ left: c.throttle.med + '%' }"></div>
               </div>
             </div>
-            <div class="text-slate text-center mt-1">...</div>
           </div>
         </CyberPanel>
       </template>

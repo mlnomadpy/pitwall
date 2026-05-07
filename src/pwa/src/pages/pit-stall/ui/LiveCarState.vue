@@ -8,9 +8,7 @@ const props = defineProps<{
 }>()
 
 const engineItems = computed(() => [
-  { label: 'RPM', value: props.state.rpm },
   { label: 'GEAR', value: props.state.gear },
-  { label: 'SPEED', value: props.state.speed, unit: 'km/h' },
   { label: 'OIL', value: props.state.oil, unit: '°C' },
   { label: 'COOLANT', value: props.state.coolant, unit: '°C' },
   { label: 'FUEL', value: props.state.fuel, unit: '%' },
@@ -26,9 +24,21 @@ const dynamicsItems = computed(() => [
 
 <template>
   <div class="live-car-state text-body font-ui flex flex-col gap-4">
+    <!-- Hero Numbers -->
+    <div class="flex justify-between items-end mb-2 bg-charcoal p-[clamp(8px,2vmin,16px)] border border-slate shadow-inner">
+      <div class="flex flex-col">
+        <span class="text-silver tracking-widest text-small">RPM</span>
+        <span class="text-[clamp(24px,5vmin,36px)] font-bold font-mono leading-none text-white drop-shadow-[2px_2px_0_#000]">{{ state.rpm }}</span>
+      </div>
+      <div class="flex flex-col text-right">
+        <span class="text-silver tracking-widest text-small">SPEED</span>
+        <span class="text-[clamp(24px,5vmin,36px)] font-bold font-mono leading-none text-ui-good drop-shadow-[2px_2px_0_#000]">{{ state.speed }}<span class="text-small text-silver ml-1">km/h</span></span>
+      </div>
+    </div>
+
     <div>
       <div class="mb-1 text-silver tracking-wider font-bold text-small border-b border-slate pb-1">POWERTRAIN</div>
-      <CyberDataGrid :items="engineItems" :columns="3" />
+      <CyberDataGrid :items="engineItems" :columns="2" />
     </div>
 
     <div>

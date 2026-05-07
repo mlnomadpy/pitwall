@@ -18,6 +18,17 @@ const audio = useAudioStore()
 const currentStep = computed(() => parseInt(route.params.step as string) || 1)
 const totalSteps = 4 
 
+import { watch, onMounted } from 'vue'
+
+const validateStep = () => {
+  if (currentStep.value < 1 || currentStep.value > totalSteps) {
+    router.replace('/onboarding/1')
+  }
+}
+
+onMounted(validateStep)
+watch(currentStep, validateStep) 
+
 const pendingSave = ref({
   name: '',
   avatar: 'avatar_a',
@@ -96,7 +107,9 @@ const hints = computed(() => {
       <div class="step-bar-inner">
         <span class="step-label">SET UP YOUR DRIVER</span>
         <span class="step-separator">·</span>
-        <span class="step-count">STEP {{ currentStep }} / {{ totalSteps }}</span>
+        <span class="step-count">
+          <span v-for="i in totalSteps" :key="i" class="mr-[2px]" :class="i <= currentStep ? 'text-ui-info' : 'text-slate'">●</span>
+        </span>
       </div>
       <!-- Progress bar -->
       <div class="step-progress">

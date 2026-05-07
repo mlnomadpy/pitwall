@@ -73,7 +73,7 @@ const triggerEnter = () => {
   handleKey(new KeyboardEvent('keydown', { key: 'Enter' }))
 }
 
-useKeyboard(handleKey, { capture: true })
+useKeyboard(handleKey)
 </script>
 
 <template>
@@ -93,7 +93,10 @@ useKeyboard(handleKey, { capture: true })
               v-for="(item, i) in items" 
               :key="item"
               class="pause-item touch-target"
-              :class="cursorIndex === i ? 'item-focused' : 'item-default'"
+              :class="[
+                cursorIndex === i ? 'item-focused' : 'item-default',
+                { '!text-ui-bad text-shadow-glow': item === 'QUIT TO TITLE' && cursorIndex === i }
+              ]"
               @click="cursorIndex === i ? triggerEnter() : (cursorIndex = i, audio.playSfx('cursor_move'))"
             >
               <span class="item-cursor" v-if="cursorIndex === i">▶</span>

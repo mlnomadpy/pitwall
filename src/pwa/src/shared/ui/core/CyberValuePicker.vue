@@ -9,7 +9,13 @@ defineProps<{
 </script>
 
 <template>
-  <div class="flex items-center mt-1 mb-1">
+  <div 
+    class="flex items-center mt-1 mb-1"
+    role="spinbutton"
+    :aria-valuenow="typeof value === 'number' ? value : undefined"
+    :aria-valuetext="String(value)"
+    :aria-label="label"
+  >
     <span 
       :style="{ width: labelWidth || 'clamp(60px,15vw,120px)' }" 
       class="inline-block"

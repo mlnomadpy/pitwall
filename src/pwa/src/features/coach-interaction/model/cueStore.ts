@@ -24,6 +24,19 @@ export const useCueStore = defineStore('cue', {
       this._connect(sid)
     },
     
+    consumeNext() {
+      if (this.queue.length > 0) {
+        this.activeCue = this.queue.shift() || null
+      } else {
+        this.activeCue = null
+      }
+    },
+    
+    clearQueue() {
+      this.queue = []
+      this.activeCue = null
+    },
+    
     _connect(sid: string) {
       this._es = new EventSource(`${API_BASE}/cues/stream?session_id=${sid}`)
       

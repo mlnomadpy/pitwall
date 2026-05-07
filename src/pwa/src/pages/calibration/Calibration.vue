@@ -20,9 +20,9 @@ const bars = ref({
 
 const hints = computed(() => {
   if (state.value === 'success') return ['A · DONE']
-  if (state.value === 'throttle') return ['▲ · HOLD THROTTLE']
-  if (state.value === 'brake') return ['▼ · HOLD BRAKE']
-  return ['B · CANCEL']
+  if (state.value === 'throttle') return ['▲ / TOUCH · HOLD THROTTLE', 'A · SKIP']
+  if (state.value === 'brake') return ['▼ / TOUCH · HOLD BRAKE', 'A · SKIP']
+  return ['B · CANCEL', 'A · SKIP']
 })
 
 const phaseEmotion = computed(() => {
@@ -62,21 +62,49 @@ useKeyboard((e: KeyboardEvent) => {
     if (state.value === 'success') return 
     audio.playSfx('cancel')
     router.push('/garage')
-  } else if (e.key === 'Enter' || e.key === 'a') {
+  } else if (e.key === 'Enter' || e.key === 'a' || e.key === 'A') {
     if (state.value === 'success') {
       audio.playSfx('cursor_select')
       router.push('/garage')
+    } else {
+      // Skip the whole calibration
+      state.value = 'success'
+      bars.value.throttle = 100
+      bars.value.brake = 100
+      audio.playSfx('goal_complete')
     }
   }
 })
 
 // Listen to keydown and keyup for holding
 const handleKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'ArrowUp' && state.value === 'throttle') {
+  if (e.key === 'ArrowUp') handleHold('throttle')
+  if (e.key === 'ArrowDown') handleHold('brake')
+}
+
+// Touch/mouse holding simulation
+let holdInterval: number | null = null
+
+const startHold = (type: 'throttle' | 'brake') => {
+  if (holdInterval) return
+  handleHold(type) // fire once immediately
+  holdInterval = window.setInterval(() => {
+    handleHold(type)
+  }, 50)
+}
+
+const stopHold = () => {
+  if (holdInterval) {
+    window.clearInterval(holdInterval)
+    holdInterval = null
+  }
+}
+
+const handleHold = (type: 'throttle' | 'brake') => {
+  if (type === 'throttle' && state.value === 'throttle') {
     bars.value.throttle = Math.min(100, bars.value.throttle + 5)
     if (bars.value.throttle === 100) advance()
-  }
-  if (e.key === 'ArrowDown' && state.value === 'brake') {
+  } else if (type === 'brake' && state.value === 'brake') {
     bars.value.brake = Math.min(100, bars.value.brake + 5)
     if (bars.value.brake === 100) advance()
   }
@@ -104,8 +132,12 @@ onUnmounted(() => {
     <!-- Center Stage -->
     <div class="flex flex-col items-center justify-center py-2 relative flex-grow min-h-0">
       
-      <div class="flex flex-col gap-8 w-full max-w-sm px-4">
-        <div class="flex flex-col gap-2">
+      <div class="flex flex-col gap-8 w-full max-w-sm px-4 relative z-10">
+        <div class="flex flex-col gap-2 touch-none select-none cursor-pointer"
+             @pointerdown="startHold('throttle')"
+             @pointerup="stopHold"
+             @pointerleave="stopHold"
+             @pointercancel="stopHold">
           <div class="flex justify-between font-mono text-small text-silver font-bold tracking-widest">
             <span>THROTTLE SENSOR</span>
             <span :class="bars.throttle === 100 ? 'text-ui-good' : ''">{{ bars.throttle }}%</span>
@@ -116,7 +148,11 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="flex flex-col gap-2">
+        <div class="flex flex-col gap-2 touch-none select-none cursor-pointer"
+             @pointerdown="startHold('brake')"
+             @pointerup="stopHold"
+             @pointerleave="stopHold"
+             @pointercancel="stopHold">
           <div class="flex justify-between font-mono text-small text-silver font-bold tracking-widest">
             <span>BRAKE PRESSURE</span>
             <span :class="bars.brake === 100 ? 'text-ui-warn' : ''">{{ bars.brake }}%</span>
@@ -129,6 +165,9 @@ onUnmounted(() => {
       </div>
 
     </div>
+    
+    <!-- Tap anywhere to skip if not holding anything -->
+    <div class="absolute inset-0 z-0" @click="state !== 'success' ? (state = 'success', bars.throttle = 100, bars.brake = 100, audio.playSfx('goal_complete')) : router.push('/garage')"></div>
     
     <template #floating>
       <CoachFloat

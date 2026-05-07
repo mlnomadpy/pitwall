@@ -125,24 +125,16 @@ onUnmounted(() => {
       
       <!-- Stacked Bar -->
       <div class="w-full h-4 flex mt-2 border border-slate">
-        <div class="h-full bg-ui-good flex items-center overflow-hidden" :style="{ width: `${distribution.throttle}%` }">
-          <span v-if="distribution.throttle > 10" class="text-small text-ink font-bold ml-1">THROTTLE</span>
-        </div>
-        <div class="h-full bg-ui-warn flex items-center overflow-hidden" :style="{ width: `${distribution.brake}%` }">
-          <span v-if="distribution.brake > 10" class="text-small text-ink font-bold ml-1">BRAKE</span>
-        </div>
-        <div class="h-full bg-[#F59E0B] flex items-center overflow-hidden" :style="{ width: `${distribution.trail}%` }">
-          <span v-if="distribution.trail > 10" class="text-small text-ink font-bold ml-1">TRAIL</span>
-        </div>
-        <div class="h-full bg-charcoal flex items-center overflow-hidden" :style="{ width: `${distribution.coast}%` }">
-          <span v-if="distribution.coast > 10" class="text-small text-white font-bold ml-1">COAST</span>
-        </div>
+        <div class="h-full bg-ui-good" :style="{ width: `${distribution.throttle}%` }"></div>
+        <div class="h-full bg-ui-warn" :style="{ width: `${distribution.brake}%` }"></div>
+        <div class="h-full bg-amber" :style="{ width: `${distribution.trail}%` }"></div>
+        <div class="h-full bg-charcoal" :style="{ width: `${distribution.coast}%` }"></div>
       </div>
       
       <div class="flex justify-between text-body mt-2 font-bold">
         <span class="text-ui-good">THROTTLE {{ distribution.throttle.toFixed(1) }}%</span>
         <span class="text-ui-warn">BRAKE {{ distribution.brake.toFixed(1) }}%</span>
-        <span class="text-[#F59E0B]">TRAIL {{ distribution.trail.toFixed(1) }}%</span>
+        <span class="text-amber">TRAIL {{ distribution.trail.toFixed(1) }}%</span>
         <span class="text-silver">COAST {{ distribution.coast.toFixed(1) }}%</span>
       </div>
     </CyberPanel>
@@ -163,7 +155,7 @@ onUnmounted(() => {
                      :class="{
                        'bg-ui-good': state === 'T',
                        'bg-ui-warn': state === 'B',
-                       'bg-[#F59E0B]': state === 'TR',
+                       'bg-amber': state === 'TR',
                        'bg-charcoal': state === 'C'
                      }">
                 </div>
@@ -174,7 +166,7 @@ onUnmounted(() => {
           <div class="mt-auto flex justify-around text-small text-slate pt-2 border-t border-charcoal">
             <span class="flex items-center gap-1"><span class="w-2 h-2 bg-ui-good inline-block"></span> throttle</span>
             <span class="flex items-center gap-1"><span class="w-2 h-2 bg-charcoal inline-block"></span> coast</span>
-            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-[#F59E0B] inline-block"></span> trail</span>
+            <span class="flex items-center gap-1"><span class="w-2 h-2 bg-amber inline-block"></span> trail</span>
             <span class="flex items-center gap-1"><span class="w-2 h-2 bg-ui-warn inline-block"></span> brake</span>
           </div>
         </CyberPanel>
@@ -186,7 +178,7 @@ onUnmounted(() => {
           <div class="text-silver mb-2 font-bold uppercase">Thresholds</div>
           
           <div class="flex flex-col gap-4">
-            <div class="flex flex-col gap-1" :class="activeSlider === 'throttle' ? 'text-white' : 'text-slate'">
+            <div class="flex flex-col gap-1 cursor-pointer" :class="activeSlider === 'throttle' ? 'text-white' : 'text-slate'" @click="activeSlider = 'throttle'; audio.playSfx('cursor_move')">
               <div class="flex justify-between items-end relative">
                 <span class="flex items-center relative">
                   <span v-if="activeSlider === 'throttle'" class="text-ui-good mr-1 absolute -left-3 text-body">▶</span>
@@ -194,12 +186,14 @@ onUnmounted(() => {
                 </span>
                 <span class="font-bold bg-charcoal px-1">{{ thrTh }}</span>
               </div>
-              <div class="w-full h-2 bg-charcoal relative mt-1 border border-slate">
+              <div class="w-full h-2 bg-charcoal relative mt-1 border border-slate cursor-pointer" @click.stop="(e: MouseEvent) => { activeSlider = 'throttle'; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); thrTh = Math.round(((e.clientX - rect.left) / rect.width) * 100); audio.playSfx('cursor_move') }">
                 <div class="absolute h-full bg-ui-good" :style="{ width: `${thrTh}%` }"></div>
+                <!-- Triangle Marker -->
+                <div class="absolute bottom-full -mb-[1px] -ml-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-white" :style="{ left: `${thrTh}%` }"></div>
               </div>
             </div>
             
-            <div class="flex flex-col gap-1" :class="activeSlider === 'brake' ? 'text-white' : 'text-slate'">
+            <div class="flex flex-col gap-1 cursor-pointer" :class="activeSlider === 'brake' ? 'text-white' : 'text-slate'" @click="activeSlider = 'brake'; audio.playSfx('cursor_move')">
               <div class="flex justify-between items-end relative">
                 <span class="flex items-center relative">
                   <span v-if="activeSlider === 'brake'" class="text-ui-good mr-1 absolute -left-3 text-body">▶</span>
@@ -207,8 +201,10 @@ onUnmounted(() => {
                 </span>
                 <span class="font-bold bg-charcoal px-1">{{ brkTh.toFixed(1) }}</span>
               </div>
-              <div class="w-full h-2 bg-charcoal relative mt-1 border border-slate">
+              <div class="w-full h-2 bg-charcoal relative mt-1 border border-slate cursor-pointer" @click.stop="(e: MouseEvent) => { activeSlider = 'brake'; const rect = (e.currentTarget as HTMLElement).getBoundingClientRect(); brkTh = Number((((e.clientX - rect.left) / rect.width) * 20).toFixed(1)); audio.playSfx('cursor_move') }">
                 <div class="absolute h-full bg-ui-warn" :style="{ width: `${brkTh * 5}%` }"></div> <!-- fake scale -->
+                <!-- Triangle Marker -->
+                <div class="absolute bottom-full -mb-[1px] -ml-[5px] w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-white" :style="{ left: `${brkTh * 5}%` }"></div>
               </div>
             </div>
           </div>

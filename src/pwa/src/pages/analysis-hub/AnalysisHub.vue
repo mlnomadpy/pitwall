@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
@@ -12,37 +12,48 @@ const router = useRouter()
 const save = useSaveStore()
 const audio = useAudioStore()
 
-const tiles = [
-  { id: 'lap-times', title: 'LAP TIMES HALL', desc: '24 LAPS THIS SEASON', route: '/analysis/lap-times' },
+const formatLap = (seconds: number) => {
+  if (!seconds) return '--:--.---'
+  const mins = Math.floor(seconds / 60)
+  const secs = (seconds % 60).toFixed(3)
+  return `${mins}:${secs.padStart(6, '0')}`
+}
+
+const lapCount = computed(() => save.activeSlot?.sessions?.reduce((acc, s) => acc + (s.laps?.length ?? 0), 0) ?? 0)
+const sessionCount = computed(() => save.activeSlot?.sessions?.length ?? 0)
+const bestLapTime = computed(() => save.activeSlot?.bestLapBySession?.['sonoma'] ?? 107.284) // fallback to static if none
+
+const tiles = computed(() => [
+  { id: 'lap-times', title: 'LAP TIMES HALL', desc: `${lapCount.value} LAPS THIS SEASON`, route: '/analysis/lap-times' },
   { id: 'corners', title: 'CORNER MASTERY', desc: '11 CORNERS GRADED A-F', route: '/analysis/corners' },
   { id: 'straights', title: 'STRAIGHTS & SPEED', desc: '3 STRAIGHTS', route: '/analysis/straights' },
   { id: 'track', title: 'TRACK ATLAS', desc: 'ELEVATION · MARKERS', route: '/analysis/track' },
-  { id: 'evolution', title: 'DRIVER EVOLUTION', desc: '47 SESSIONS', route: '/analysis/evolution' },
+  { id: 'evolution', title: 'DRIVER EVOLUTION', desc: `${sessionCount.value} SESSIONS`, route: '/analysis/evolution' },
   { id: 'pedals', title: 'PEDAL PROFILE', desc: 'THROTTLE · BRAKE', route: '/analysis/pedals' },
   { id: 'ghosts', title: 'GHOST DATA', desc: 'TELEMETRY OVERLAYS', route: '/analysis/ghosts' },
   { id: 'replay', title: 'VCR REPLAY', desc: 'LAP PLAYBACK', route: '/analysis/replay' }
-]
+])
 
 const cursorIndex = ref(0)
 const hasSessions = ref((save.activeSlot?.sessions?.length ?? 0) > 0)
 
 useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
-    cursorIndex.value = (cursorIndex.value + 1) % tiles.length
+    cursorIndex.value = (cursorIndex.value + 1) % tiles.value.length
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowLeft') {
-    cursorIndex.value = (cursorIndex.value - 1 + tiles.length) % tiles.length
+    cursorIndex.value = (cursorIndex.value - 1 + tiles.value.length) % tiles.value.length
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowDown') {
-    cursorIndex.value = (cursorIndex.value + 2) % tiles.length
+    cursorIndex.value = (cursorIndex.value + 2) % tiles.value.length
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowUp') {
-    cursorIndex.value = (cursorIndex.value - 2 + tiles.length) % tiles.length
+    cursorIndex.value = (cursorIndex.value - 2 + tiles.value.length) % tiles.value.length
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter') {
-    if (hasSessions.value && tiles[cursorIndex.value].route) {
+    if (hasSessions.value && tiles.value[cursorIndex.value].route) {
       audio.playSfx('cursor_select')
-      router.push(tiles[cursorIndex.value].route as string)
+      router.push(tiles.value[cursorIndex.value].route as string)
     } else {
       audio.playSfx('cancel')
     }
@@ -73,17 +84,17 @@ useKeyboard((e: KeyboardEvent) => {
               <div v-if="hasSessions" class="flex flex-col gap-[3vh] flex-grow justify-center">
                 <div class="flex flex-col">
                   <span class="text-slate text-small tracking-widest">BEST LAP</span>
-                  <span class="text-title font-nums text-ui-good pixel-shadow-2">1:47.284</span>
+                  <span class="text-title font-nums text-ui-good pixel-shadow-2">{{ formatLap(bestLapTime) }}</span>
                 </div>
                 
                 <div class="flex gap-[4vw]">
                   <div class="flex flex-col">
                     <span class="text-slate text-small tracking-widest">TOTAL LAPS</span>
-                    <span class="text-title-sm text-white">24</span>
+                    <span class="text-title-sm text-white">{{ lapCount }}</span>
                   </div>
                   <div class="flex flex-col">
                     <span class="text-slate text-small tracking-widest">TRACK</span>
-                    <span class="text-title-sm text-white">SONOMA</span>
+                    <span class="text-title-sm text-white uppercase">{{ save.activeSlot?.preferredTrack ?? 'SONOMA' }}</span>
                   </div>
                 </div>
                 

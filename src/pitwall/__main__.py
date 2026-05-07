@@ -59,7 +59,8 @@ def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths, flu
         return None
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry point for the Pitwall Bridge server."""
     parser = argparse.ArgumentParser(description="Pitwall Bridge Server")
     parser.add_argument("--track", default=os.path.join(SIM_DIR, "sonoma.json"))
     parser.add_argument("--port", type=int, default=8765)
@@ -121,3 +122,7 @@ if __name__ == "__main__":
     finally:
         if state.can_reader is not None:
             state.can_reader.stop()
+
+
+if __name__ == "__main__":
+    main()

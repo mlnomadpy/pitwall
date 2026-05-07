@@ -7,6 +7,7 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
+import { useSwipeGesture } from '@/shared/lib/useSwipeGesture'
 
 const router = useRouter()
 const audio = useAudioStore()
@@ -62,6 +63,17 @@ useKeyboard((e: KeyboardEvent) => {
 
 onMounted(() => {
   audio.playSfx('score_total')
+})
+
+useSwipeGesture(null, {
+  onSwipeLeft: () => {
+    cursorIndex.value = Math.min(cursorIndex.value + 5, sessions.length - 1)
+    audio.playSfx('cursor_move')
+  },
+  onSwipeRight: () => {
+    cursorIndex.value = Math.max(cursorIndex.value - 5, 0)
+    audio.playSfx('cursor_move')
+  },
 })
 
 // Chart coordinates
@@ -127,25 +139,25 @@ const formatLap = (seconds: number) => {
             
             <div class="flex-grow relative border-l border-b border-slate ml-5 mb-4 mt-2">
               <!-- Grid lines -->
-              <div class="absolute w-full h-[1px] bg-charcoal top-[25%]"></div>
-              <div class="absolute w-full h-[1px] bg-charcoal top-[50%]"></div>
-              <div class="absolute w-full h-[1px] bg-charcoal top-[75%]"></div>
+              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[25%]"></div>
+              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[50%]"></div>
+              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[75%]"></div>
               
-              <svg viewBox="0 0 100 100" class="w-full h-full preserve-aspect-ratio-none overflow-visible">
+              <svg viewBox="0 0 100 100" class="w-full h-full preserve-aspect-ratio-none overflow-visible cursor-pointer" @click="(e: MouseEvent) => { const rect = (e.currentTarget as SVGElement).getBoundingClientRect(); const pct = (e.clientX - rect.left) / rect.width; cursorIndex = Math.round(pct * (sessions.length - 1)); audio.playSfx('cursor_move') }">
                 <!-- Median line -->
                 <path :d="`M ` + sessions.map(s => `${getX(s.index)} ${getY(s.medianLap)}`).join(' L ')" 
-                      fill="none" stroke="#4A5568" stroke-width="1.5" stroke-linejoin="bevel" stroke-dasharray="2 2"/>
+                      fill="none" stroke="var(--color-charcoal-light)" stroke-width="1.5" stroke-linejoin="bevel" stroke-dasharray="2 2"/>
                       
                 <!-- Best line -->
                 <path :d="`M ` + sessions.map(s => `${getX(s.index)} ${getY(s.bestLap)}`).join(' L ')" 
-                      fill="none" stroke="#5EED71" stroke-width="1.5" stroke-linejoin="bevel"/>
+                      fill="none" stroke="var(--color-neon-green)" stroke-width="1.5" stroke-linejoin="bevel"/>
                       
                 <!-- Cursor line -->
                 <line :x1="getX(cur.index)" y1="0" :x2="getX(cur.index)" y2="100" stroke="#FFFFFF" stroke-width="0.5" opacity="0.5"/>
                 
                 <!-- Active points -->
-                <circle :cx="getX(cur.index)" :cy="getY(cur.medianLap)" r="1.5" fill="#4A5568" stroke="#FFFFFF" stroke-width="0.5"/>
-                <circle :cx="getX(cur.index)" :cy="getY(cur.bestLap)" r="1.5" fill="#5EED71" stroke="#FFFFFF" stroke-width="0.5"/>
+                <circle :cx="getX(cur.index)" :cy="getY(cur.medianLap)" r="1.5" fill="var(--color-charcoal-light)" stroke="#FFFFFF" stroke-width="0.5"/>
+                <circle :cx="getX(cur.index)" :cy="getY(cur.bestLap)" r="1.5" fill="var(--color-neon-green)" stroke="#FFFFFF" stroke-width="0.5"/>
               </svg>
               
               <div class="absolute -left-[22px] top-[-4px] text-small text-silver">1:46</div>

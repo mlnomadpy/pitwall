@@ -9,6 +9,7 @@ import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberListRow from '@/shared/ui/core/CyberListRow.vue'
 import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
+import CyberEmptyState from '@/shared/ui/core/CyberEmptyState.vue'
 
 const router = useRouter()
 const save = useSaveStore()
@@ -73,7 +74,8 @@ onMounted(() => {
             cursorIndex === i ? 'bg-charcoal' : '',
             item.isRead ? 'opacity-50' : 'opacity-100'
           ]"
-          class="px-2 pt-2 -mx-2 transition-opacity"
+          class="px-2 pt-2 -mx-2 transition-opacity cursor-pointer"
+          @click="cursorIndex = i; store.markRead(item.id); audio.playSfx('cursor_select'); if (item.route) router.push(item.route)"
         >
           <CyberListRow 
             :title="item.title"
@@ -90,14 +92,12 @@ onMounted(() => {
     </template>
     
     <template v-else>
-      <div class="flex-grow flex items-center justify-center text-center">
-        <div class="flex flex-col items-center max-w-[clamp(140px,35vw,280px)]">
-          <CyberAvatar :sheet="save.activeSlot?.preferredCoach ?? 'trod'" size="md" variant="ghost" class="mb-4" />
-          <p class="text-body text-slate leading-relaxed">
-            No new notifications. Drive a session to fill this up.
-          </p>
-        </div>
-      </div>
+      <CyberEmptyState
+        icon="🏁"
+        title="No notifications"
+        description="Drive a session to fill this up."
+        class="flex-grow"
+      />
     </template>
   </PageShell>
 </template>

@@ -8,26 +8,19 @@ import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
+import ErrorBoundary from '@/shared/ui/ErrorBoundary.vue'
+import CyberSkeleton from '@/shared/ui/core/CyberSkeleton.vue'
+import CyberTooltip from '@/shared/ui/core/CyberTooltip.vue'
+import { useLapTimeStore } from '@/entities/lap-time/model/lapTimeStore'
+import { onMounted } from 'vue'
 
 const router = useRouter()
 const audio = useAudioStore()
-const save = useSaveStore()
+const store = useLapTimeStore()
 
-// Mock data
-const bestLap = '1:46.8'
-const idealLap = '1:46.4'
-const gain = '0.4s'
-
-const laps = [
-  { num: 1, total: '1:48.2', s1: '33.1', s2: '38.4', s3: '36.7', delta: '+1.4', best: false },
-  { num: 2, total: '1:47.5', s1: '32.9', s2: '38.2', s3: '36.4', delta: '+0.7', best: false },
-  { num: 3, total: '1:46.8', s1: '32.4', s2: '38.1', s3: '36.3', delta: '-', best: true },
-  { num: 4, total: '1:48.0', s1: '33.0', s2: '38.5', s3: '36.5', delta: '+1.2', best: false },
-  { num: 5, total: '1:47.3', s1: '32.8', s2: '38.2', s3: '36.3', delta: '+0.5', best: false },
-  { num: 6, total: '1:50.1', s1: '34.2', s2: '39.0', s3: '36.9', delta: '+3.3', best: false, outlier: true },
-  { num: 7, total: '1:47.0', s1: '32.5', s2: '38.0', s3: '36.5', delta: '+0.2', best: false },
-  { num: 8, total: '1:46.9', s1: '32.6', s2: '38.0', s3: '36.3', delta: '+0.1', best: false },
-]
+onMounted(() => {
+  store.fetchLapTimes()
+})
 
 const distStats = {
   min: 106.8, // 1:46.8
@@ -43,29 +36,31 @@ const cursorIndex = ref(0)
 const visibleRows = 5
 const scrollOffset = computed(() => {
   if (cursorIndex.value < 2) return 0
-  if (cursorIndex.value > laps.length - 3) return Math.max(0, laps.length - visibleRows)
+  if (cursorIndex.value > store.laps.length - 3) return Math.max(0, store.laps.length - visibleRows)
   return cursorIndex.value - 2
 })
 
 let pbPlayed = false
 
 useKeyboard((e: KeyboardEvent) => {
+  if (store.isLoading || store.laps.length === 0) return
+
   if (e.key === 'ArrowDown') {
-    cursorIndex.value = Math.min(cursorIndex.value + 1, laps.length - 1)
-    if (laps[cursorIndex.value].best && !pbPlayed) {
+    cursorIndex.value = Math.min(cursorIndex.value + 1, store.laps.length - 1)
+    if (store.laps[cursorIndex.value].best && !pbPlayed) {
       audio.playSfx('pb_unlock')
       pbPlayed = true
-    } else if (laps[cursorIndex.value].outlier) {
+    } else if (store.laps[cursorIndex.value].outlier) {
       audio.playSfx('error_quiet')
     } else {
       audio.playSfx('cursor_move')
     }
   } else if (e.key === 'ArrowUp') {
     cursorIndex.value = Math.max(cursorIndex.value - 1, 0)
-    if (laps[cursorIndex.value].best && !pbPlayed) {
+    if (store.laps[cursorIndex.value].best && !pbPlayed) {
       audio.playSfx('pb_unlock')
       pbPlayed = true
-    } else if (laps[cursorIndex.value].outlier) {
+    } else if (store.laps[cursorIndex.value].outlier) {
       audio.playSfx('error_quiet')
     } else {
       audio.playSfx('cursor_move')
@@ -87,6 +82,42 @@ const parseLapToSeconds = (lapStr: string) => {
   const [minStr, secStr] = lapStr.split(':')
   return parseInt(minStr) * 60 + parseFloat(secStr)
 }
+
+// Headline computed values
+const bestLap = computed(() => {
+  if (store.laps.length === 0) return '--:--.---'
+  const validLaps = store.laps.filter(l => l.valid)
+  if (validLaps.length === 0) return '--:--.---'
+  const times = validLaps.map(l => parseLapToSeconds(l.time))
+  const minTime = Math.min(...times)
+  const idx = times.indexOf(minTime)
+  return validLaps[idx].time
+})
+
+const idealLap = computed(() => {
+  if (store.laps.length === 0) return '--:--.---'
+  const validLaps = store.laps.filter(l => l.valid && l.sectors.every(s => s !== '--'))
+  if (validLaps.length === 0) return '--:--.---'
+  // Ideal = sum of best individual sectors
+  const sectorCount = validLaps[0].sectors.length
+  let total = 0
+  for (let s = 0; s < sectorCount; s++) {
+    const sectorTimes = validLaps.map(l => parseFloat(l.sectors[s])).filter(n => !isNaN(n))
+    total += Math.min(...sectorTimes)
+  }
+  const mins = Math.floor(total / 60)
+  const secs = (total % 60).toFixed(3)
+  return `${mins}:${secs.padStart(6, '0')}`
+})
+
+const gain = computed(() => {
+  if (store.laps.length === 0) return '--'
+  const bestSec = parseLapToSeconds(bestLap.value)
+  const idealSec = parseLapToSeconds(idealLap.value)
+  if (isNaN(bestSec) || isNaN(idealSec)) return '--'
+  const diff = (bestSec - idealSec).toFixed(3)
+  return `${diff}s`
+})
 
 const distScale = (val: number) => {
   const range = 111.0 - 106.0 // min plot to max plot (1:46.0 to 1:51.0)
@@ -117,41 +148,54 @@ const distScale = (val: number) => {
       <template #left>
         <!-- Lap Table -->
         <CyberPanel class="h-full flex flex-col text-body overflow-hidden">
-          <div class="flex text-silver border-b border-slate px-1 pb-1 mb-1 bg-charcoal">
-            <span class="w-3 text-center">#</span>
-            <span class="w-9 text-center">TOTAL</span>
-            <span class="w-6 text-center">S1</span>
-            <span class="w-6 text-center">S2</span>
-            <span class="w-6 text-center">S3</span>
-            <span class="w-6 text-center">Δ</span>
-          </div>
-          <div class="flex-grow relative mt-1">
-            <div 
-              class="absolute top-0 left-0 right-0 flex flex-col transition-transform duration-100"
-              :style="{ transform: `translateY(-${scrollOffset * 16}px)` }"
-            >
-              <div 
-                v-for="(lap, i) in laps" :key="lap.num"
-                class="flex items-center px-1 h-[clamp(12px,3vmin,24px)] transition-colors"
-                :class="[
-                  cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver',
-                  lap.best ? 'text-ui-good' : ''
-                ]"
-              >
-                <span class="w-3 text-center relative font-bold">
-                  <span v-if="cursorIndex === i" class="absolute -left-2 text-body">▶</span>
-                  {{ lap.num }}
+          <ErrorBoundary>
+            <div v-if="store.isLoading" class="flex-grow flex flex-col items-center justify-center p-4">
+              <CyberSkeleton variant="row" :count="5" />
+            </div>
+            
+            <div v-else class="flex flex-col h-full overflow-hidden">
+              <div class="flex text-silver border-b border-slate px-1 pb-1 mb-1 bg-charcoal flex-shrink-0">
+                <span class="flex-1 text-center">#</span>
+                <span class="flex-[3] text-center">TOTAL</span>
+                <span class="flex-[2] text-center">S1</span>
+                <span class="flex-[2] text-center">S2</span>
+                <span class="flex-[2] text-center">S3</span>
+                <span class="flex-[2] text-center">
+                  <CyberTooltip text="Time difference vs your best lap" position="bottom">
+                    Δ BEST
+                  </CyberTooltip>
                 </span>
-                <span class="w-9 text-center font-bold">{{ lap.total }}</span>
-                <span class="w-6 text-center">{{ lap.s1 }}</span>
-                <span class="w-6 text-center">{{ lap.s2 }}</span>
-                <span class="w-6 text-center">{{ lap.s3 }}</span>
-                <span class="w-6 text-center">{{ lap.delta }}</span>
-                <span v-if="lap.best" class="ml-[2px] text-body">★</span>
-                <span v-if="lap.outlier" class="ml-[2px] text-body">○</span>
+              </div>
+              <div class="flex-grow relative mt-1 overflow-hidden">
+                <div 
+                  class="absolute top-0 left-0 right-0 flex flex-col transition-transform duration-100"
+                  :style="{ transform: `translateY(-${scrollOffset * 16}px)` }"
+                >
+                  <div 
+                    v-for="(lap, i) in store.laps" :key="lap.lap"
+                    class="flex items-center px-1 h-[clamp(12px,3vmin,24px)] transition-colors relative cursor-pointer"
+                    :class="[
+                      cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver',
+                      lap.best ? 'text-ui-good' : ''
+                    ]"
+                    @click="cursorIndex = i; audio.playSfx('cursor_move')"
+                  >
+                    <span class="flex-1 text-center relative font-bold">
+                      <span v-if="cursorIndex === i" class="absolute -left-2 text-body">▶</span>
+                      {{ lap.lap }}
+                    </span>
+                    <span class="flex-[3] text-center font-bold">{{ lap.time }}</span>
+                    <span class="flex-[2] text-center">{{ lap.sectors[0] }}</span>
+                    <span class="flex-[2] text-center">{{ lap.sectors[1] }}</span>
+                    <span class="flex-[2] text-center">{{ lap.sectors[2] }}</span>
+                    <span class="flex-[2] text-center" :class="lap.delta && lap.delta.startsWith('-') ? 'text-ui-good' : lap.delta && lap.delta !== '--' ? 'text-delta-red' : ''">{{ lap.delta }}</span>
+                    <span v-if="lap.best" class="absolute right-2 text-body drop-shadow-[1px_1px_0_#000]">★</span>
+                    <span v-if="lap.outlier" class="absolute right-2 text-body">○</span>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </ErrorBoundary>
         </CyberPanel>
       </template>
       
@@ -184,7 +228,8 @@ const distScale = (val: number) => {
               
               <!-- Cursor Marker -->
               <div class="absolute text-ui-good font-bold text-body top-[18px] -ml-1 drop-shadow-[1px_1px_0_#000]"
-                   :style="{ left: distScale(parseLapToSeconds(laps[cursorIndex].total)) }">
+                   v-if="store.laps.length > 0"
+                   :style="{ left: distScale(parseLapToSeconds(store.laps[cursorIndex].time)) }">
                 ▲
               </div>
             </div>
@@ -196,14 +241,14 @@ const distScale = (val: number) => {
           </CyberPanel>
           
           <DialogueBox 
-            v-if="laps[cursorIndex].outlier"
+            v-if="store.laps[cursorIndex]?.outlier"
             :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="talk"
             text="You hit traffic at T11 on this one."
             class="scale-[0.8] origin-top-left w-[125%]"
           />
           <DialogueBox 
-            v-else-if="laps[cursorIndex].best"
+            v-else-if="store.laps[cursorIndex]?.best"
             :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
             emotion="victory"
             text="Nailed the exit out of T2 on this lap."

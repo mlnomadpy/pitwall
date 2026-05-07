@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import Tile from './ui/Tile.vue'
 import type { TileData } from './ui/Tile.vue'
-import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
 import PageShell from '@/shared/ui/PageShell.vue'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
@@ -28,21 +27,18 @@ const tiles: TileData[] = [
 const cursorIndex = ref(0)
 const greetingActive = ref(true)
 const greetingText = "Welcome to the Garage! Ready to hit the track?"
-const hints = ['▲ ▼ ◀ ▶ MOVE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE']
+const hints = ['▲ ▼ SWIPE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE']
+
+const moveCursor = (dir: number) => {
+  cursorIndex.value = (cursorIndex.value + dir + tiles.length) % tiles.length
+  audio.playSfx('cursor_move')
+}
 
 useKeyboard((e: KeyboardEvent) => {
-  if (e.key === 'ArrowRight') {
-    cursorIndex.value = (cursorIndex.value + 1) % tiles.length
-    audio.playSfx('cursor_move')
-  } else if (e.key === 'ArrowLeft') {
-    cursorIndex.value = (cursorIndex.value - 1 + tiles.length) % tiles.length
-    audio.playSfx('cursor_move')
-  } else if (e.key === 'ArrowDown') {
-    cursorIndex.value = (cursorIndex.value + 2) % tiles.length
-    audio.playSfx('cursor_move')
-  } else if (e.key === 'ArrowUp') {
-    cursorIndex.value = (cursorIndex.value - 2 + tiles.length) % tiles.length
-    audio.playSfx('cursor_move')
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    moveCursor(1)
+  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    moveCursor(-1)
   } else if (e.key === 'Enter') {
     if (greetingActive.value) return
     audio.playSfx('cursor_select')
@@ -69,31 +65,99 @@ const onSelect = (tileId: string) => {
     router.push(tile.route)
   }
 }
+
+// ── Touch drag navigation ──
+const menuRef = ref<HTMLDivElement | null>(null)
+let touchStartY = 0
+let touchStartX = 0
+let touchStartTime = 0
+let hasMoved = false
+
+const onTouchStart = (e: TouchEvent) => {
+  touchStartY = e.touches[0].clientY
+  touchStartX = e.touches[0].clientX
+  touchStartTime = Date.now()
+  hasMoved = false
+}
+
+const onTouchMove = (e: TouchEvent) => {
+  const dy = e.touches[0].clientY - touchStartY
+  const dx = e.touches[0].clientX - touchStartX
+  // Prevent page scroll when dragging vertically on the menu
+  if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+    e.preventDefault()
+  }
+}
+
+const onTouchEnd = (e: TouchEvent) => {
+  const dy = e.changedTouches[0].clientY - touchStartY
+  const dx = e.changedTouches[0].clientX - touchStartX
+  const dt = Date.now() - touchStartTime
+  const absDy = Math.abs(dy)
+  const absDx = Math.abs(dx)
+
+  // Must be a deliberate gesture (>30px within 500ms)
+  if (dt > 500) return
+
+  if (absDy > 30 && absDy > absDx) {
+    // Vertical swipe — scroll through tiles
+    if (dy < 0) {
+      moveCursor(1) // Swipe up → next
+    } else {
+      moveCursor(-1) // Swipe down → prev
+    }
+    hasMoved = true
+  } else if (absDx > 50 && absDx > absDy && dx > 0) {
+    // Swipe right → enter focused tile
+    if (!greetingActive.value) {
+      audio.playSfx('cursor_select')
+      onSelect(tiles[cursorIndex.value].id)
+    }
+    hasMoved = true
+  }
+}
+
+onMounted(() => {
+  const el = menuRef.value
+  if (el) {
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    el.addEventListener('touchend', onTouchEnd, { passive: true })
+  }
+})
+
+onUnmounted(() => {
+  const el = menuRef.value
+  if (el) {
+    el.removeEventListener('touchstart', onTouchStart)
+    el.removeEventListener('touchmove', onTouchMove)
+    el.removeEventListener('touchend', onTouchEnd)
+  }
+})
 </script>
 
 <template>
   <PageShell title="GARAGE" :hints="hints" bg="neutral" :show-heading="false">
-    <!-- Layered background overrides -->
-    <div class="garage-bg absolute inset-0 z-0 pointer-events-none"></div>
-    <div class="garage-floor absolute bottom-0 left-0 w-full z-1 pointer-events-none"></div>
-    <div class="crt-overlay pointer-events-none"></div>
-    
+
     <div class="content flex flex-col items-center justify-center relative z-10 w-full flex-grow">
       <!-- Section heading -->
       <div class="section-heading mb-[2vmin]">
         <span class="text-title text-slate tracking-[0.3em] font-title">GARAGE</span>
       </div>
       
-      <div class="spatial-menu-container">
+      <div ref="menuRef" class="spatial-menu-container">
         <div 
           v-for="(t, i) in tiles" 
           :key="t.id"
-          class="spatial-item"
-          :class="{
-            'focused': cursorIndex === i,
-            'prev': cursorIndex === (i + 1) % tiles.length || (cursorIndex === 0 && i === tiles.length - 1),
-            'next': cursorIndex === (i - 1 + tiles.length) % tiles.length || (cursorIndex === tiles.length - 1 && i === 0)
-          }"
+          :class="[
+            'spatial-item',
+            (i - cursorIndex + tiles.length) % tiles.length === 0 ? 'focused' :
+            (i - cursorIndex + tiles.length) % tiles.length === 1 ? 'next' :
+            (i - cursorIndex + tiles.length) % tiles.length === 2 ? 'next-2' :
+            (cursorIndex - i + tiles.length) % tiles.length === 1 ? 'prev' :
+            (cursorIndex - i + tiles.length) % tiles.length === 2 ? 'prev-2' : 'hidden-item'
+          ]"
+          @click="cursorIndex = i; if (!t.disabled) onSelect(t.id)"
         >
           <Tile 
             :tile="t" 
@@ -101,13 +165,6 @@ const onSelect = (tileId: string) => {
             @select="onSelect(t.id)"
             @hover="cursorIndex = i"
           />
-        </div>
-      </div>
-      
-      <!-- NPC Band -->
-      <div class="npc-band absolute bottom-[6vh] left-0 w-full flex items-end px-[3vw]" style="height: clamp(48px, 10vh, 80px);">
-        <div class="npc-ground flex items-end">
-          <CyberAvatar :sheet="save.activeSlot?.preferredCoach ?? 'trod'" size="sm" variant="ghost" />
         </div>
       </div>
     </div>
@@ -125,25 +182,6 @@ const onSelect = (tileId: string) => {
 </template>
 
 <style scoped>
-.garage-bg {
-  background-color: var(--color-ink);
-}
-
-.garage-floor {
-  height: 20vh;
-  background-color: var(--color-asphalt-mid);
-  border-top: 2px solid var(--color-slate);
-  /* Asphalt lane markings */
-  background-image:
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 0, 0, 0.06) 2px,
-      rgba(0, 0, 0, 0.06) 4px
-    );
-}
-
 .section-heading {
   text-align: center;
   position: relative;
@@ -176,6 +214,9 @@ const onSelect = (tileId: string) => {
   align-items: center;
   justify-content: center;
   z-index: 10;
+  touch-action: none; /* We handle swipe ourselves */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .spatial-item {
@@ -185,6 +226,7 @@ const onSelect = (tileId: string) => {
   transform-origin: center center;
   opacity: 0;
   pointer-events: none;
+  cursor: pointer;
 }
 
 .spatial-item.focused {
@@ -196,29 +238,35 @@ const onSelect = (tileId: string) => {
 }
 
 .spatial-item.prev {
-  transform: translateZ(-200px) translateY(-80px) rotateX(10deg);
-  opacity: 0.5;
+  transform: translateZ(-150px) translateY(-60px) rotateX(5deg);
+  opacity: 0.6;
   z-index: 5;
+  pointer-events: auto;
+}
+
+.spatial-item.prev-2 {
+  transform: translateZ(-300px) translateY(-120px) rotateX(10deg);
+  opacity: 0.2;
+  z-index: 4;
+  pointer-events: auto;
 }
 
 .spatial-item.next {
-  transform: translateZ(-200px) translateY(80px) rotateX(-10deg);
-  opacity: 0.5;
+  transform: translateZ(-150px) translateY(60px) rotateX(-5deg);
+  opacity: 0.6;
   z-index: 5;
+  pointer-events: auto;
 }
 
-.npc-ground {
-  position: relative;
+.spatial-item.next-2 {
+  transform: translateZ(-300px) translateY(120px) rotateX(-10deg);
+  opacity: 0.2;
+  z-index: 4;
+  pointer-events: auto;
 }
-.npc-ground::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 120%;
-  height: 2px;
-  background-color: var(--color-slate);
+
+.hidden-item {
+  opacity: 0;
 }
 </style>
 

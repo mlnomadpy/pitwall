@@ -20,8 +20,11 @@ const ghosts = ref([
 
 const cursorIndex = ref(0)
 const selectedGhost = ref(ghosts.value[0])
+const processing = ref(false)
 
 useKeyboard((e: KeyboardEvent) => {
+  if (processing.value) return
+
   if (e.key === 'ArrowDown') {
     cursorIndex.value = (cursorIndex.value + 1) % ghosts.value.length
     selectedGhost.value = ghosts.value[cursorIndex.value]
@@ -32,19 +35,27 @@ useKeyboard((e: KeyboardEvent) => {
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter' || e.key === 'a') {
     audio.playSfx('cursor_select')
-    ghosts.value.forEach((g, i) => {
-      if (i === cursorIndex.value) g.active = !g.active
-      else if (g.track === selectedGhost.value.track) g.active = false // Only one active ghost per track
-    })
+    processing.value = true
+    setTimeout(() => {
+      ghosts.value.forEach((g, i) => {
+        if (i === cursorIndex.value) g.active = !g.active
+        else if (g.track === selectedGhost.value.track) g.active = false // Only one active ghost per track
+      })
+      processing.value = false
+    }, 500)
   } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
     audio.playSfx('cancel')
     router.back()
   } else if (e.key === 'Delete' || e.key === 'd') {
-    audio.playSfx('cancel')
     if (ghosts.value.length > 1) {
-      ghosts.value.splice(cursorIndex.value, 1)
-      if (cursorIndex.value >= ghosts.value.length) cursorIndex.value = ghosts.value.length - 1
-      selectedGhost.value = ghosts.value[cursorIndex.value]
+      audio.playSfx('cancel')
+      processing.value = true
+      setTimeout(() => {
+        ghosts.value.splice(cursorIndex.value, 1)
+        if (cursorIndex.value >= ghosts.value.length) cursorIndex.value = ghosts.value.length - 1
+        selectedGhost.value = ghosts.value[cursorIndex.value]
+        processing.value = false
+      }, 500)
     }
   }
 })
@@ -75,8 +86,9 @@ useKeyboard((e: KeyboardEvent) => {
               class="mb-1"
             >
               <div 
-                class="flex items-center px-2 py-2 border transition-colors"
+                class="flex items-center px-2 py-2 border transition-colors cursor-pointer"
                 :class="cursorIndex === i ? 'bg-charcoal border-white text-white' : 'border-transparent text-silver'"
+                @click="cursorIndex = i; selectedGhost = g; audio.playSfx('cursor_select'); if (!processing) { processing = true; setTimeout(() => { ghosts.forEach((gh, gi) => { if (gi === i) gh.active = !gh.active; else if (gh.track === g.track) gh.active = false; }); processing = false; }, 500) }"
               >
                 <span class="w-6 shrink-0 font-bold text-ui-good" v-if="cursorIndex === i">▶</span>
                 <span class="w-6 shrink-0" v-else></span>
@@ -121,7 +133,8 @@ useKeyboard((e: KeyboardEvent) => {
           </div>
           
           <div class="mt-auto pt-4 border-t border-slate text-center text-small text-slate">
-            Use A to toggle this ghost on track. Only one ghost can be active per track.
+            <span v-if="processing" class="text-ui-warn animate-pulse font-bold tracking-widest">PROCESSING...</span>
+            <span v-else>Use A to toggle this ghost on track. Only one ghost can be active per track.</span>
           </div>
         </CyberPanel>
       </template>

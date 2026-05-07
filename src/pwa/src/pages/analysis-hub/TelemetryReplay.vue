@@ -74,9 +74,6 @@ onUnmounted(() => {
 <template>
   <PageShell title="TELEMETRY REPLAY" :hints="['SPACE · PLAY/PAUSE', 'B · BACK', '◀ ▶ SPEED']" bg="neutral">
     
-    <!-- VCR Scanline effect -->
-    <div class="absolute inset-0 pointer-events-none bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(0,0,0,0.1)_2px,rgba(0,0,0,0.1)_4px)] z-50"></div>
-
     <template #heading>
       <div class="heading-block mb-[1.5vh] flex justify-between items-end relative z-10">
         <h1 class="text-title font-title text-silver tracking-[0.2em]">LAP PLAYBACK</h1>
@@ -89,32 +86,38 @@ onUnmounted(() => {
     <div class="flex-grow flex flex-col mx-2 pb-6 gap-4 relative z-10">
       
       <!-- Video / Track visualization area -->
-      <CyberPanel class="flex-grow flex items-center justify-center bg-black border-slate relative overflow-hidden">
-        
-        <!-- Track rendering -->
-        <TrackMap :carProgress="progress" strokeClass="stroke-slate stroke-[20] opacity-50" />
+      <div class="flex-grow flex items-center justify-center relative max-h-full min-h-0">
+        <CyberPanel class="w-full aspect-video flex items-center justify-center bg-black border-slate relative overflow-hidden max-w-4xl max-h-full">
+          
+          <!-- VCR Effects -->
+          <div class="absolute inset-0 pointer-events-none bg-[repeating-linear-gradient(0deg,transparent,transparent_2px,rgba(0,0,0,0.2)_2px,rgba(0,0,0,0.2)_4px)] z-50 mix-blend-overlay"></div>
+          <div class="absolute inset-0 pointer-events-none vhs-overlay z-40"></div>
+          
+          <!-- Track rendering -->
+          <TrackMap :carProgress="progress" strokeClass="stroke-slate stroke-[20] opacity-50 vhs-blur" />
 
-        <!-- Overlays -->
-        <div class="absolute top-4 left-4 font-mono text-ui-good font-bold tracking-widest bg-ink/80 px-2 py-1">
-          CH 1: SPEED
-        </div>
-        
-        <div class="absolute bottom-4 right-4 font-mono text-white text-title tracking-widest bg-ink/80 px-2 shadow-lg flex items-baseline gap-2">
-          {{ currentSpeed }} <span class="text-small text-slate">KM/H</span>
-        </div>
-        
-        <div class="absolute bottom-4 left-4 font-mono flex gap-4 bg-ink/80 px-3 py-2 shadow-lg">
-          <div class="flex flex-col items-center">
-            <span class="text-small text-slate">GEAR</span>
-            <span class="text-title-sm text-ui-warn">{{ currentGear }}</span>
+          <!-- Overlays -->
+          <div class="absolute top-4 left-4 font-mono text-ui-good font-bold tracking-widest px-2 py-1 z-50 vhs-text">
+            CH 1: SPEED
           </div>
-          <div class="flex flex-col items-center">
-            <span class="text-small text-slate">RPM</span>
-            <span class="text-title-sm text-white">{{ currentRpm }}</span>
+          
+          <div class="absolute bottom-4 right-4 font-mono text-white text-title tracking-widest px-2 shadow-lg flex items-baseline gap-2 z-50 vhs-text">
+            {{ currentSpeed }} <span class="text-small text-slate">KM/H</span>
           </div>
-        </div>
+        
+          <div class="absolute bottom-4 left-4 font-mono flex gap-4 px-3 py-2 shadow-lg z-50">
+            <div class="flex flex-col items-center">
+              <span class="text-small text-slate">GEAR</span>
+              <span class="text-title-sm text-ui-warn vhs-text">{{ currentGear }}</span>
+            </div>
+            <div class="flex flex-col items-center">
+              <span class="text-small text-slate">RPM</span>
+              <span class="text-title-sm text-white vhs-text">{{ currentRpm }}</span>
+            </div>
+          </div>
 
-      </CyberPanel>
+        </CyberPanel>
+      </div>
 
       <!-- Scrubber & Controls -->
       <CyberPanel class="h-24 shrink-0 flex flex-col justify-center px-4 bg-ink border-charcoal">
@@ -148,3 +151,25 @@ onUnmounted(() => {
     </div>
   </PageShell>
 </template>
+
+<style scoped>
+.vhs-overlay {
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  background-size: 100% 2px, 3px 100%;
+  box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+  animation: flicker 0.15s infinite;
+}
+
+.vhs-text {
+  text-shadow: 2px 0 1px rgba(255,0,0,0.5), -2px 0 1px rgba(0,255,255,0.5);
+}
+
+.vhs-blur {
+  filter: blur(0.5px);
+}
+
+@keyframes flicker {
+  0% { opacity: 0.95; }
+  100% { opacity: 1; }
+}
+</style>

@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pitwall"
+version = "0.1.0"
+description = "Telemetry-driven virtual racing coach — Flask backend, DuckDB persistence, CAN ingest"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "mlnomadpy" }]
+keywords = ["motorsport", "telemetry", "coaching", "racing", "CAN"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Flask",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+
+dependencies = [
+    "flask>=3.0",
+    "flask-cors>=4.0",
+    "duckdb>=1.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+can = [
+    "python-can>=4.3",
+    "cantools>=39.0",
+]
+ml = [
+    "torch>=2.2",
+]
+adk = [
+    "google-adk>=0.1",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+all = [
+    "pitwall[can,ml,adk,dev]",
+]
+
+[project.scripts]
+pitwall = "pitwall.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/mlnomadpy/pitwall"
+
+# ── Tool configuration ────────────────────────────────────────────────────────
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pitwall"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "--cov=src/pitwall --cov-report=term-missing --cov-report=xml --tb=short"
+
+[tool.coverage.run]
+source = ["src/pitwall"]
+omit = ["*/tests/*", "*/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true

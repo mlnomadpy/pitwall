@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
@@ -7,9 +7,10 @@ import { useBridgeStore } from '@/shared/api/bridgeStore'
 import { usePauseStore } from '@/shared/lib/pauseStore'
 import BridgeOfflineBanner from '@/widgets/bridge-offline/BridgeOfflineBanner.vue'
 import PauseMenu from '@/widgets/pause-menu/PauseMenu.vue'
-import VirtualGamepad from '@/widgets/gamepad/VirtualGamepad.vue'
 import ParticleBackground from '@/shared/ui/ParticleBackground.vue'
 import UpdateToast from '@/widgets/update-toast/UpdateToast.vue'
+import TransitionWipe from '@/widgets/transition-wipe/TransitionWipe.vue'
+import { useTouchNavigation } from '@/shared/lib/useTouchNavigation'
 
 const saveStore = useSaveStore()
 const audioStore = useAudioStore()
@@ -25,58 +26,25 @@ const handleGlobalKey = (e: KeyboardEvent) => {
   }
 }
 
-// Initialize subsystems
-let touchStartX = 0
-let touchStartY = 0
-let touchLastX = 0
-let touchLastY = 0
+useTouchNavigation()
 
-const onGlobalTouchStart = (e: TouchEvent) => {
-  if (e.touches.length > 0) {
-    touchStartX = e.touches[0].clientX
-    touchStartY = e.touches[0].clientY
-    touchLastX = touchStartX
-    touchLastY = touchStartY
+watch(() => saveStore.activeSlot?.settings?.display?.reducedMotion, (reduce) => {
+  if (reduce) {
+    document.body.classList.add('reduced-motion')
+  } else {
+    document.body.classList.remove('reduced-motion')
   }
-}
-
-const onGlobalTouchMove = (e: TouchEvent) => {
-  if (e.touches.length > 0) {
-    const currentX = e.touches[0].clientX
-    const currentY = e.touches[0].clientY
-    const deltaX = currentX - touchLastX
-    const deltaY = currentY - touchLastY
-    
-    const threshold = 40
-    
-    // Dispatch the dominant axis if it exceeds the threshold
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > threshold) {
-      const key = deltaX > 0 ? 'ArrowRight' : 'ArrowLeft'
-      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
-      touchLastX = currentX
-      touchLastY = currentY
-    } else if (Math.abs(deltaY) > threshold) {
-      const key = deltaY > 0 ? 'ArrowDown' : 'ArrowUp'
-      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
-      touchLastX = currentX
-      touchLastY = currentY
-    }
-  }
-}
+}, { immediate: true })
 
 onMounted(async () => {
   await saveStore.hydrate()
   bridgeStore.startPolling()
   
   window.addEventListener('keydown', handleGlobalKey)
-  window.addEventListener('touchstart', onGlobalTouchStart, { passive: true })
-  window.addEventListener('touchmove', onGlobalTouchMove, { passive: true })
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKey)
-  window.removeEventListener('touchstart', onGlobalTouchStart)
-  window.removeEventListener('touchmove', onGlobalTouchMove)
 })
 </script>
 
@@ -85,7 +53,7 @@ onUnmounted(() => {
     <!-- The application container is now permanently full screen -->
     <div class="app-container relative">
       <!-- CRT screen overlay -->
-      <div class="crt-overlay"></div>
+      <div class="crt-overlay" v-if="!route.meta.performance"></div>
   
       <RouterView v-slot="{ Component }">
         <transition name="fade" mode="out-in">
@@ -94,19 +62,23 @@ onUnmounted(() => {
       </RouterView>
   
       <!-- Global Overlays -->
-      <ParticleBackground />
+      <ParticleBackground v-if="!route.meta.performance" />
       <BridgeOfflineBanner />
       <PauseMenu />
       <UpdateToast />
+      <TransitionWipe />
     </div>
 
     <!-- Portrait Mode Warning -->
     <div class="portrait-warning">
-      <span>PLEASE ROTATE YOUR DEVICE</span>
+      <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mb-4 animate-bounce text-ui-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+        <line x1="12" y1="18" x2="12.01" y2="18"></line>
+        <path d="M19 8l-4-4-4 4"></path>
+        <path d="M15 4v10"></path>
+      </svg>
+      <span class="text-white relative z-10 p-2 bg-ink/80 border-l-4 border-ui-good">PLEASE ROTATE YOUR DEVICE</span>
     </div>
-
-    <!-- Mobile Virtual Gamepad Overlay -->
-    <VirtualGamepad />
   </div>
 </template>
 
@@ -130,7 +102,7 @@ onUnmounted(() => {
   overflow: hidden;
   position: relative;
   /* Simulated CRT Bezel */
-  border-radius: 12px;
+  border-radius: 0px;
   box-shadow: 
     0 0 0 4px #1a1a1a,
     0 0 0 12px #0a0a0a,
@@ -153,7 +125,7 @@ onUnmounted(() => {
     rgba(255,255,255,0) 100%
   );
   pointer-events: none;
-  z-index: 1000;
+  z-index: 200;
   transform: translateY(-20%) translateX(-20%);
 }
 

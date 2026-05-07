@@ -6,16 +6,18 @@ interface Props {
   statusState?: 'checking' | 'ok' | 'error' | 'pending' | 'none'
   statusText?: string
   subLines?: string[]
+  focused?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
   statusState: 'none',
-  subLines: () => []
+  subLines: () => [],
+  focused: false
 })
 </script>
 
 <template>
-  <div class="cyber-list-row" :class="{ 'row-pending': statusState === 'pending' }">
+  <div class="cyber-list-row" :class="{ 'row-pending': statusState === 'pending', 'row-focused': focused }">
     <div class="icon-col">
       <slot name="icon">
         <span v-if="statusState === 'checking'" class="text-ui-info animate-pulse">▒▒</span>
@@ -32,18 +34,16 @@ withDefaults(defineProps<Props>(), {
         
         <CyberBadge 
           v-if="statusState === 'ok'" 
-          variant="good" 
-          :text="statusText || 'OK'" 
-          size="sm" 
-          solid
-        />
+          variant="good"
+        >
+          {{ statusText || 'OK' }}
+        </CyberBadge>
         <CyberBadge 
           v-else-if="statusState === 'error'" 
-          variant="bad" 
-          text="FAIL" 
-          size="sm" 
-          solid
-        />
+          variant="bad"
+        >
+          FAIL
+        </CyberBadge>
       </div>
       
       <div v-for="(line, i) in subLines" :key="i" class="row-sub">
@@ -67,7 +67,12 @@ withDefaults(defineProps<Props>(), {
 }
 
 .cyber-list-row:hover {
-  background: linear-gradient(90deg, rgba(78, 205, 196, 0.05) 0%, transparent 100%);
+  background: linear-gradient(90deg, rgba(78, 205, 196, 0.15) 0%, transparent 100%);
+}
+
+.row-focused {
+  background: var(--color-charcoal);
+  border-bottom-color: var(--color-ui-good);
 }
 
 .row-pending { opacity: 0.4; filter: grayscale(1); }

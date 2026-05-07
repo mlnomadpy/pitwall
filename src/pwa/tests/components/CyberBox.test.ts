@@ -32,7 +32,7 @@ describe('CyberBox.vue', () => {
       }
     })
     
-    expect(wrapper.classes()).toContain('bg-glass')
+    expect(wrapper.classes()).toContain('glass')
     expect(wrapper.classes()).toContain('border-good')
     expect(wrapper.classes()).toContain('interactive')
     expect(wrapper.classes()).toContain('selected')

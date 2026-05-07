@@ -12,12 +12,22 @@ const save = useSaveStore()
 const audio = useAudioStore()
 const cursor = ref(0)
 const loading = ref(true)
+const deleteProgress = ref(0)
+let deleteTimer: number | null = null
 
-const hints = ['▲ ▼ MOVE', 'A · LOAD / NEW', 'B · BACK']
+const hints = ['▲ ▼ MOVE', 'A · LOAD / NEW', 'HOLD B · DELETE']
 
 onMounted(async () => {
   await save.hydrate()
   loading.value = false
+  window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('keyup', handleGlobalKeyup)
+})
+
+import { onUnmounted } from 'vue'
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('keyup', handleGlobalKeyup)
 })
 
 useKeyboard((e: KeyboardEvent) => {
@@ -28,12 +38,62 @@ useKeyboard((e: KeyboardEvent) => {
     cursor.value = (cursor.value - 1 + 3) % 3
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter') {
+    if (deleteProgress.value > 0) return // Ignore if deleting
     audio.playSfx('cursor_select')
     handleSelect((cursor.value + 1) as 1|2|3)
   } else if (e.key === 'Escape') {
+    if (deleteProgress.value > 0) return
     audio.playSfx('cancel')
   }
 })
+
+const startDelete = (index?: number) => {
+  if (deleteTimer) return
+  const targetIndex = index ?? cursor.value
+  const slotData = save.slots[targetIndex]
+  if (!slotData) return
+  
+  if (index !== undefined) {
+    cursor.value = index
+  }
+  
+  deleteTimer = window.setInterval(() => {
+    deleteProgress.value = Math.min(100, deleteProgress.value + 5)
+    if (deleteProgress.value === 100) {
+      finishDelete()
+    }
+  }, 50)
+}
+
+const stopDelete = () => {
+  if (deleteTimer) {
+    window.clearInterval(deleteTimer)
+    deleteTimer = null
+  }
+  if (deleteProgress.value < 100) {
+    deleteProgress.value = 0
+  }
+}
+
+const finishDelete = () => {
+  stopDelete()
+  audio.playSfx('cancel')
+  save.slots[cursor.value] = null
+  save.save()
+  deleteProgress.value = 0
+}
+
+const handleGlobalKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Backspace' || e.key === 'b' || e.key === 'B') {
+    startDelete()
+  }
+}
+
+const handleGlobalKeyup = (e: KeyboardEvent) => {
+  if (e.key === 'Backspace' || e.key === 'b' || e.key === 'B') {
+    stopDelete()
+  }
+}
 
 const handleSelect = (slotId: 1 | 2 | 3) => {
   save.activeSlotId = slotId
@@ -71,8 +131,15 @@ const handleSelect = (slotId: 1 | 2 | 3) => {
           :slot-id="(i + 1) as 1|2|3"
           :slot-data="slot"
           :focused="cursor === i"
+          :delete-progress="cursor === i ? deleteProgress : 0"
           @select="handleSelect((i + 1) as 1|2|3)"
           @mouseover="cursor = i"
+          @pointerdown="startDelete(i)"
+          @pointerup="stopDelete"
+          @pointerleave="stopDelete"
+          @pointercancel="stopDelete"
+          class="touch-none select-none"
+          @contextmenu.prevent
         />
       </div>
     </div>

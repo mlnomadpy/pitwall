@@ -34,7 +34,7 @@ const routes = [
   { path: '/analysis/replay', name: 'replay', component: () => import('@/pages/analysis-hub/TelemetryReplay.vue'), meta: { wipe: 'left', requiresSave: true } },
   { path: '/analysis/sql', name: 'sql', component: () => import('@/pages/sql-console/SqlConsole.vue'), meta: { wipe: 'down', requiresSave: true } },
   { path: '/briefing', name: 'briefing', component: () => import('@/pages/pre-brief/PreBrief.vue'), meta: { wipe: 'up', requiresSave: true } },
-  { path: '/hud', name: 'hud', component: () => import('@/pages/on-track-hud/OnTrackHud.vue'), meta: { wipe: 'down', requiresSave: true } },
+  { path: '/hud', name: 'hud', component: () => import('@/pages/on-track-hud/OnTrackHud.vue'), meta: { wipe: 'down', requiresSave: true, performance: true } },
   { path: '/stage-clear', name: 'stage-clear', component: () => import('@/pages/stage-clear/StageClear.vue'), meta: { wipe: 'up', requiresSave: true } },
   { path: '/calibration', name: 'calibration', component: () => import('@/pages/calibration/Calibration.vue'), meta: { wipe: 'down', requiresSave: true } },
   { path: '/notifications', name: 'notifications', component: () => import('@/pages/notifications/NotificationCenter.vue'), meta: { wipe: 'up', requiresSave: true } },
@@ -53,6 +53,7 @@ export const router = createRouter({
 
 router.beforeEach(async (to, from) => {
   const save = useSaveStore()
+  await save.hydrate()
   if (to.meta.requiresSave && save.activeSlotId === null) {
     return { name: 'title' } // No save -> back to title
   }
@@ -60,7 +61,11 @@ router.beforeEach(async (to, from) => {
   const trans = useTransitionStore()
   const wipe = (to.meta.wipe ?? 'right') as TransitionDirection
   if (wipe && from.name !== undefined) {
-    await trans.play(wipe)
+    // Add a 2s timeout fallback so navigation never hangs if animation fails
+    await Promise.race([
+      trans.play(wipe),
+      new Promise(resolve => setTimeout(resolve, 2000))
+    ])
   }
   // Return true (or undefined) to allow navigation
 })

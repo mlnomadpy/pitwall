@@ -1,38 +1,59 @@
-site/
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+dist/
+.venv/
+__pypackages__/
+
+# ── Environment ───────────────────────────────────────────────────────────────
 .env
+
+# ── Testing & Coverage ───────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.profraw
+
+# ── Data & Model artifacts ───────────────────────────────────────────────────
 *.vbo
 *.mp4
 *.npz
 *.pkl
 *.pt
 kaggle_data/
+*.duckdb
+*.duckdb.wal
 
-# Vertex AI / GCP credentials — never commit
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Android ───────────────────────────────────────────────────────────────────
 flutter/android/local.properties
 local.properties
 *.keystore
 *.jks
-
 android/app/build/
 build/
 .gradle/
-bridge.log
-
 android/.idea/caches/
 android/.idea/workspace.xml
-android/.idea/tasks.xml
+
+# ── ML models (large files) ──────────────────────────────────────────────────
 models/gemma-4-E2B-it.task
 
+# ── Editor / IDE ──────────────────────────────────────────────────────────────
 .claude
+.idea/
+.vscode/
 
-# Testing & Coverage
-.pytest_cache/
-.coverage
-coverage.xml
+# ── Logs ──────────────────────────────────────────────────────────────────────
+bridge.log
 scratch/
 
-# Database
-*.duckdb
-*.duckdb.wal
+# ── Build artifacts ───────────────────────────────────────────────────────────
+site/
+node_modules/

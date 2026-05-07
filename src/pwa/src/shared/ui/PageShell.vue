@@ -14,6 +14,7 @@ interface Props {
   headingAlign?: 'center' | 'left'
   statusExtra?: string
   hideStatus?: boolean
+  performanceMode?: boolean
 }
 
 withDefaults(defineProps<Props>(), {
@@ -21,33 +22,40 @@ withDefaults(defineProps<Props>(), {
   bgVariant: 'grid',
   showHeading: true,
   headingAlign: 'center',
-  hideStatus: false
+  hideStatus: false,
+  performanceMode: false
 })
 </script>
 
 <template>
-  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui">
+  <div class="viewport pixelated relative w-full h-full bg-ink text-silver overflow-hidden font-ui" role="application" :aria-label="title ?? 'Pitwall'">
     <StatusBar v-if="!hideStatus" :extra="statusExtra" />
 
-    <CyberBackground :variant="bgVariant" :color="bg" />
+    <CyberBackground v-if="!performanceMode" :variant="bgVariant" :color="bg" />
 
     <div class="shell-content">
       <!-- Heading -->
-      <slot name="heading">
-        <PageHeading
-          v-if="showHeading && title"
-          :title="title"
-          :subtitle="subtitle"
-          :align="headingAlign"
-          class="mb-[1.5vh]"
-        />
-      </slot>
+      <div class="stagger-1">
+        <slot name="heading">
+          <PageHeading
+            v-if="showHeading && title"
+            :title="title"
+            :subtitle="subtitle"
+            :align="headingAlign"
+            class="mb-[1.5vh]"
+          />
+        </slot>
+      </div>
 
       <!-- Main page content -->
-      <slot></slot>
+      <div class="stagger-2 flex-grow min-h-0 flex flex-col" role="main">
+        <slot></slot>
+      </div>
 
       <!-- Floating content above HintBar (e.g. CoachFloat) -->
-      <slot name="floating"></slot>
+      <div class="stagger-3" aria-live="polite">
+        <slot name="floating"></slot>
+      </div>
     </div>
 
     <HintBar :hints="hints" />
@@ -58,10 +66,10 @@ withDefaults(defineProps<Props>(), {
 .shell-content {
   position: relative;
   z-index: 1;
-  padding-top: clamp(26px, 6vh, 52px);
+  padding-top: clamp(36px, 7vh, 56px); /* Must clear StatusBar: clamp(32px, 6vh, 52px) + gap */
   padding-left: clamp(8px, 2vw, 16px);
   padding-right: clamp(8px, 2vw, 16px);
-  padding-bottom: clamp(28px, 6vh, 48px);
+  padding-bottom: clamp(36px, 7vh, 56px); /* Must clear HintBar: clamp(28px, 5.5vh, 48px) + gap */
   height: 100%;
   display: flex;
   flex-direction: column;

@@ -8,6 +8,7 @@ const props = defineProps<{
   coachId: string
   emotion: string
   text: string
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{ (e: 'done'): void }>()
@@ -47,38 +48,45 @@ const toggleListen = (e: Event) => {
 </script>
 
 <template>
-  <div class="dialogue-box pixelated" @keydown.stop @click="handleClick">
-    <div class="dialogue-inner flex items-center">
-      <!-- Portrait frame -->
-      <div class="portrait-frame">
-        <CoachCard 
-          :id="coachId" 
-          :animation="emotion || 'idle'" 
-          :paused="!isTyping"
-          portrait-only
-        />
+  <div class="dialogue-box pixelated" :class="{ compact }" @keydown.stop>
+    <div class="dialogue-layout" @click="handleClick">
+      <!-- Coach NPC — stands next to speech bubble -->
+      <div class="npc-column">
+        <div class="npc-character">
+          <CoachCard 
+            :id="coachId" 
+            :animation="emotion || 'idle'" 
+            :paused="!isTyping"
+            portrait-only
+          />
+        </div>
+        <div class="npc-shadow" aria-hidden="true"></div>
       </div>
       
-      <!-- Text area -->
-      <div class="text-area">
-        <div class="speaker-name">{{ coachId.toUpperCase() }}</div>
+      <!-- Speech bubble -->
+      <div class="speech-bubble">
+        <div class="speech-header">
+          <span class="speaker-name">{{ coachId.toUpperCase() }}</span>
+          <span v-if="isTyping" class="typing-dots" aria-label="typing">···</span>
+        </div>
         <div class="dialogue-text text-body">
           {{ displayedText }}
           <span v-if="!isTyping" class="advance-indicator">▼</span>
         </div>
+        
+        <!-- Voice Input / Mic -->
+        <button 
+          class="mic-button"
+          :class="isListening ? 'mic-active' : ''"
+          @click="toggleListen"
+          aria-label="Toggle voice input"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="mic-icon" :class="isListening ? 'text-ui-bad animate-pulse' : 'text-silver'" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+          </svg>
+        </button>
       </div>
-      
-      <!-- Voice Input Bar / Microphone -->
-      <button 
-        class="mic-button flex-shrink-0 w-[clamp(36px,8vmin,48px)] h-[clamp(36px,8vmin,48px)] rounded-full flex items-center justify-center transition-all duration-300 ml-2"
-        :class="isListening ? 'bg-ui-bad/20 border-2 border-ui-bad shadow-[0_0_15px_rgba(255,71,87,0.4)]' : 'bg-slate/20 border border-slate hover:bg-slate/40'"
-        @click="toggleListen"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" class="w-1/2 h-1/2" :class="isListening ? 'text-ui-bad animate-pulse' : 'text-silver'" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-        </svg>
-      </button>
     </div>
   </div>
 </template>
@@ -91,37 +99,99 @@ const toggleListen = (e: Event) => {
   width: 100%;
   padding: 0 clamp(8px, 2vw, 24px) clamp(4px, 1vh, 12px);
   z-index: 50;
+  pointer-events: none; /* Let clicks pass through to tiles behind */
 }
 
-.dialogue-inner {
-  border: 2px solid var(--color-slate);
-  background-color: var(--color-ink);
-  padding: clamp(6px, 1.5vmin, 16px);
+.dialogue-box.compact {
+  transform: scale(0.85);
+  transform-origin: bottom left;
+  width: 117%;
+}
+
+.dialogue-layout {
   display: flex;
-  gap: clamp(8px, 2vmin, 20px);
-  min-height: clamp(56px, 10vh, 100px);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
-  position: relative;
-  overflow: hidden;
+  align-items: flex-end;
+  gap: 0;
+  pointer-events: auto; /* Only the actual bubble captures clicks */
+  width: fit-content; /* Don't stretch to full width */
 }
 
-/* Subtle top-edge highlight (Removed for strict retro) */
-
-.portrait-frame {
+/* ── NPC Character Column ── */
+.npc-column {
   flex-shrink: 0;
-  width: clamp(40px, 8vmin, 72px);
-  height: clamp(40px, 8vmin, 72px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-}
-
-.text-area {
-  flex: 1;
   display: flex;
   flex-direction: column;
-  gap: clamp(2px, 0.5vmin, 6px);
+  align-items: center;
+  z-index: 2;
+  margin-right: clamp(-4px, -0.5vw, -2px); /* Overlap speech bubble slightly */
+}
+
+.npc-character {
+  width: clamp(52px, 12vmin, 88px);
+  height: clamp(52px, 12vmin, 88px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
+  transition: transform 0.2s ease;
+}
+
+.dialogue-box:active .npc-character {
+  transform: scale(0.95);
+}
+
+.npc-shadow {
+  width: clamp(36px, 8vmin, 56px);
+  height: clamp(4px, 0.8vmin, 6px);
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.6) 0%, transparent 70%);
+  margin-top: -2px;
+  filter: blur(2px);
+}
+
+/* ── Speech Bubble ── */
+.speech-bubble {
+  flex: 1;
+  border: 2px solid var(--color-slate);
+  background-color: var(--color-ink);
+  padding: clamp(8px, 2vmin, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 0.8vmin, 8px);
+  min-height: clamp(48px, 8vh, 80px);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
+  position: relative;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+}
+
+/* Speech tail pointing to NPC */
+.speech-bubble::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  bottom: clamp(12px, 2.5vmin, 20px);
+  width: 0;
+  height: 0;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+  border-right: 8px solid var(--color-slate);
+}
+
+.speech-bubble::after {
+  content: '';
+  position: absolute;
+  left: -5px;
+  bottom: clamp(13px, 2.6vmin, 21px);
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 6px solid var(--color-ink);
+}
+
+.speech-header {
+  display: flex;
+  align-items: center;
+  gap: clamp(4px, 1vmin, 8px);
 }
 
 .speaker-name {
@@ -131,9 +201,17 @@ const toggleListen = (e: Event) => {
   letter-spacing: 0.1em;
 }
 
+.typing-dots {
+  color: var(--color-ui-info);
+  animation: dots-blink 1s steps(3) infinite;
+  font-size: 1.2em;
+  letter-spacing: 2px;
+}
+
 .dialogue-text {
   color: var(--color-silver);
   flex: 1;
+  line-height: 1.5;
 }
 
 .advance-indicator {
@@ -142,8 +220,43 @@ const toggleListen = (e: Event) => {
   animation: advance-blink 1s steps(2) infinite;
 }
 
+/* Mic button */
+.mic-button {
+  position: absolute;
+  top: clamp(6px, 1.5vmin, 12px);
+  right: clamp(6px, 1.5vmin, 12px);
+  width: clamp(28px, 6vmin, 36px);
+  height: clamp(28px, 6vmin, 36px);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(44, 62, 80, 0.3);
+  border: 1px solid var(--color-slate);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mic-active {
+  background: rgba(255, 71, 87, 0.15);
+  border-color: var(--color-ui-bad);
+  box-shadow: 0 0 12px rgba(255, 71, 87, 0.3);
+}
+
+.mic-icon {
+  width: 50%;
+  height: 50%;
+}
+
 @keyframes advance-blink {
   0%, 100% { opacity: 0; }
   50% { opacity: 1; }
+}
+
+@keyframes dots-blink {
+  0% { opacity: 0.3; }
+  50% { opacity: 1; }
+  100% { opacity: 0.3; }
 }
 </style>

@@ -13,38 +13,71 @@ defineProps<{
 </script>
 
 <template>
-  <div class="cyber-data-grid" :class="`cols-${columns || 2}`">
-    <div 
-      v-for="(item, i) in items" 
-      :key="i"
-      class="data-cell"
-      :class="item.status ? `status-${item.status}` : 'status-default'"
-    >
-      <div class="cell-label">{{ item.label }}</div>
-      <div class="cell-value-row">
-        <span class="cell-value">{{ item.value }}</span>
-        <span v-if="item.unit" class="cell-unit">{{ item.unit }}</span>
+  <div class="cyber-data-grid-wrapper">
+    <div class="scroll-hint-left"></div>
+    <div class="cyber-data-grid" :class="`cols-${columns || 2}`">
+      <div 
+        v-for="(item, i) in items" 
+        :key="i"
+        class="data-cell"
+        :class="item.status ? `status-${item.status}` : 'status-default'"
+      >
+        <div class="cell-label">{{ item.label }}</div>
+        <div class="cell-value-row">
+          <span class="cell-value">{{ item.value }}</span>
+          <span v-if="item.unit" class="cell-unit">{{ item.unit }}</span>
+        </div>
       </div>
     </div>
+    <div class="scroll-hint-right"></div>
   </div>
 </template>
 
 <style scoped>
+.cyber-data-grid-wrapper {
+  position: relative;
+  width: 100%;
+}
+
+.scroll-hint-left, .scroll-hint-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  pointer-events: none;
+  z-index: 10;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.scroll-hint-left {
+  left: 0;
+  background: linear-gradient(to right, rgba(11, 12, 16, 0.8), transparent);
+}
+
+.scroll-hint-right {
+  right: 0;
+  background: linear-gradient(to left, rgba(11, 12, 16, 0.8), transparent);
+}
+
+/* Show hints on touch devices via media query, since we can't easily detect scroll state in CSS alone without JS */
+@media (hover: none) and (pointer: coarse) {
+  .scroll-hint-right { opacity: 1; }
+}
+
 .cyber-data-grid {
   display: grid;
   gap: clamp(8px, 2vmin, 16px);
   width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px; /* Room for scrollbar */
 }
 
 .cols-1 { grid-template-columns: 1fr; }
-.cols-2 { grid-template-columns: repeat(2, 1fr); }
-.cols-3 { grid-template-columns: repeat(3, 1fr); }
-.cols-4 { grid-template-columns: repeat(4, 1fr); }
-
-/* On mobile, collapse columns slightly if 3 or 4 are requested to avoid squishing */
-@media (max-width: 600px) {
-  .cols-3, .cols-4 { grid-template-columns: repeat(2, 1fr); }
-}
+.cols-2 { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+.cols-3 { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
+.cols-4 { grid-template-columns: repeat(4, minmax(90px, 1fr)); }
 
 .data-cell {
   background: rgba(11, 12, 16, 0.6);

@@ -15,7 +15,10 @@ defineProps<{
         :style="{ height: `${Math.min(100, Math.max(0, pct))}%` }"
       ></div>
     </div>
-    <div class="grip-label text-small">{{ label }} {{ Math.floor(pct) }}%</div>
+    <div class="grip-label text-small flex flex-col items-center">
+      <span class="text-slate">{{ label }}</span>
+      <span class="text-white font-bold text-num">{{ Math.floor(pct) }}%</span>
+    </div>
   </div>
 </template>
 
@@ -55,7 +58,8 @@ defineProps<{
 
 .fill {
   width: 100%;
-  transition: height 0.1s ease;
+  transition: height 0.05s linear;
+  will-change: height;
   position: relative;
 }
 

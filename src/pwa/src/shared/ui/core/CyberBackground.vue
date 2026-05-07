@@ -64,7 +64,7 @@ withDefaults(defineProps<Props>(), {
     linear-gradient(90deg, transparent 65%, rgba(78, 205, 196, 0.4) 66%, transparent 67%);
   background-size: 40px 40px;
   transform: perspective(600px) rotateX(60deg) translateY(100px);
-  animation: grid-move 3s linear infinite;
+  animation: grid-move 15s linear infinite;
   mask-image: linear-gradient(to top, black 20%, transparent 80%);
   -webkit-mask-image: linear-gradient(to top, black 20%, transparent 80%);
 }

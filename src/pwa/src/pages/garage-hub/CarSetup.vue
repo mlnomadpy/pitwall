@@ -130,7 +130,7 @@ const deltaColor = (val: number) => {
           </div>
 
           <div class="flex flex-col gap-6 z-10 relative">
-            <div class="p-2 border border-transparent transition-colors" :class="{ 'bg-charcoal border-slate': cursorIndex === 0 }">
+            <div class="p-2 border border-transparent transition-colors cursor-pointer" :class="{ 'bg-charcoal border-slate': cursorIndex === 0 }" @click="cursorIndex = 0; rotateValue(aero, aeroOptions, 1)">
               <CyberValuePicker 
                 label="AERODYNAMICS"
                 :value="aeroOptions.find(o => o.id === aero)?.label || ''"
@@ -141,7 +141,7 @@ const deltaColor = (val: number) => {
               />
             </div>
 
-            <div class="p-2 border border-transparent transition-colors" :class="{ 'bg-charcoal border-slate': cursorIndex === 1 }">
+            <div class="p-2 border border-transparent transition-colors cursor-pointer" :class="{ 'bg-charcoal border-slate': cursorIndex === 1 }" @click="cursorIndex = 1; rotateValue(brakeBias, brakeBiasOptions, 1)">
               <CyberValuePicker 
                 label="BRAKE BIAS"
                 :value="brakeBiasOptions.find(o => o.id === brakeBias)?.label || ''"
@@ -152,7 +152,7 @@ const deltaColor = (val: number) => {
               />
             </div>
 
-            <div class="p-2 border border-transparent transition-colors" :class="{ 'bg-charcoal border-slate': cursorIndex === 2 }">
+            <div class="p-2 border border-transparent transition-colors cursor-pointer" :class="{ 'bg-charcoal border-slate': cursorIndex === 2 }" @click="cursorIndex = 2; rotateValue(diff, diffOptions, 1)">
               <CyberValuePicker 
                 label="DIFFERENTIAL"
                 :value="diffOptions.find(o => o.id === diff)?.label || ''"
@@ -163,7 +163,7 @@ const deltaColor = (val: number) => {
               />
             </div>
 
-            <div class="mt-8 p-3 border-t border-charcoal text-center" :class="{ 'bg-ui-good text-ink font-bold animate-pulse': cursorIndex === 3, 'text-silver': cursorIndex !== 3 }">
+            <div class="mt-8 p-3 border-t border-charcoal text-center cursor-pointer" :class="{ 'bg-ui-good text-ink font-bold animate-pulse': cursorIndex === 3, 'text-silver': cursorIndex !== 3 }" @click="cursorIndex = 3; audio.playSfx('cursor_select'); router.back()">
               <span v-if="cursorIndex === 3">▶ </span>APPLY TO ECU<span v-if="cursorIndex === 3"> ◀</span>
             </div>
           </div>

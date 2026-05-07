@@ -6,7 +6,6 @@ import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
-import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
 import TrackMap from '@/shared/ui/core/TrackMap.vue'
 
@@ -131,9 +130,12 @@ useKeyboard((e: KeyboardEvent) => {
     </div>
 
     <!-- Corner Detail Modal -->
+    <Transition name="fade">
+      <div v-if="state === 'corner-detail'" class="absolute inset-0 bg-ink/80 z-20 backdrop-blur-sm" @click="state = 'idle'"></div>
+    </Transition>
     <Transition name="slide-up">
-      <div v-if="state === 'corner-detail'" class="absolute inset-x-2 bottom-[6vh] top-[6vh] z-30 flex flex-col">
-        <CyberPanel class="flex-grow flex flex-col bg-ink shadow-2xl p-2 border-slate">
+      <div v-if="state === 'corner-detail'" class="absolute inset-x-2 bottom-[6vh] top-[6vh] z-30 flex flex-col pointer-events-none">
+        <CyberPanel class="flex-grow flex flex-col bg-ink shadow-2xl p-2 border-slate pointer-events-auto">
           <div class="flex justify-between border-b border-slate pb-1 mb-2">
             <span class="text-white font-bold text-body">{{ selectedCorner.id }} · "{{ selectedCorner.name }}"</span>
             <span class="text-body font-bold" :class="getGradeColor(selectedCorner.grade)">Grade: {{ selectedCorner.grade }}</span>
@@ -143,7 +145,7 @@ useKeyboard((e: KeyboardEvent) => {
             <CyberPanel class="bg-charcoal p-2 border-slate">
               <span class="text-slate">COACH SAYS</span>
               <div class="mt-1 flex gap-2">
-                <CyberAvatar :sheet="save.activeSlot?.preferredCoach ?? 'trod'" size="sm" variant="ghost" class="shrink-0" />
+                <span class="text-ui-good font-bold text-body shrink-0">{{ (save.activeSlot?.preferredCoach ?? 'TROD').toUpperCase() }}:</span>
                 <div class="text-silver">
                   "{{ selectedCorner.tip }}"
                 </div>
@@ -212,5 +214,14 @@ useKeyboard((e: KeyboardEvent) => {
 .slide-up-enter-from,
 .slide-up-leave-to {
   transform: translateY(100%);
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

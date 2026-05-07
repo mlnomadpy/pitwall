@@ -78,20 +78,20 @@ useKeyboard((e: KeyboardEvent) => {
 })
 
 const getColorClass = (state: string) => {
-  if (state === 'purple') return 'text-[#c084fc] font-bold'
+  if (state === 'purple') return 'text-purple-glow font-bold'
   if (state === 'green') return 'text-ui-good'
   return 'text-ui-warn'
 }
 </script>
 
 <template>
-  <PageShell title="PIT WALL" :hints="['B · BACK', 'LIVE TELEMETRY ACTIVE']" bg="neutral">
+  <PageShell title="PIT WALL" :hints="['B · BACK', 'LIVE TELEMETRY ACTIVE']" bg="danger">
     
     <div class="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,rgba(0,0,0,0)_0%,rgba(0,0,0,0.8)_100%)] z-0"></div>
 
     <template #heading>
       <div class="heading-block mb-[1vh] flex justify-between items-end relative z-10">
-        <h1 class="text-title font-title text-silver tracking-[0.2em]">RACE ENGINEER</h1>
+        <button class="text-title font-title text-silver tracking-[0.2em] bg-transparent border-none cursor-pointer" @click="audio.playSfx('cancel'); router.back()">◀ RACE ENGINEER</button>
         <div class="text-ui-warn font-bold text-small animate-pulse border border-ui-warn px-2 rounded">LIVE</div>
       </div>
     </template>

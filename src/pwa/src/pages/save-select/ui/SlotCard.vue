@@ -7,6 +7,7 @@ defineProps<{
   slotId: 1 | 2 | 3
   slotData: SaveSlot | null
   focused: boolean
+  deleteProgress?: number
 }>()
 
 const emit = defineEmits<{ (e: 'select'): void; (e: 'delete'): void }>()
@@ -22,7 +23,7 @@ const emit = defineEmits<{ (e: 'select'): void; (e: 'delete'): void }>()
     @click="emit('select')"
     :class="[
       'mb-2 w-full',
-      slotData ? 'h-20' : 'h-12'
+      slotData ? 'h-20' : 'h-12 border-2 border-dashed border-slate opacity-60'
     ]"
   >
     <div class="slot-content w-full flex items-center justify-between text-left relative z-10 px-2 pointer-events-none">
@@ -48,8 +49,12 @@ const emit = defineEmits<{ (e: 'select'): void; (e: 'delete'): void }>()
             </div>
           </div>
           
-          <div class="time-col shrink-0 text-right pr-4">
+          <div class="time-col shrink-0 text-right pr-4 flex flex-col items-end justify-center">
             <span class="last-played text-small text-white/60 font-mono">{{ new Date(slotData.lastPlayedAt).toLocaleDateString() }}</span>
+            
+            <div v-if="deleteProgress !== undefined && deleteProgress > 0" class="mt-1 w-16 h-2 bg-charcoal border border-slate overflow-hidden">
+              <div class="h-full bg-ui-warn transition-all duration-75" :style="{ width: `${deleteProgress}%` }"></div>
+            </div>
           </div>
         </div>
       </template>

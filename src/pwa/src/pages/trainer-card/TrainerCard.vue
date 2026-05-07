@@ -11,6 +11,8 @@ import CyberTabs from '@/shared/ui/core/CyberTabs.vue'
 import CyberAvatar from '@/shared/ui/core/CyberAvatar.vue'
 import MedalGrid from '@/widgets/medal-grid/MedalGrid.vue'
 import CyberRadarChart from '@/shared/ui/core/CyberRadarChart.vue'
+import CyberSkeleton from '@/shared/ui/core/CyberSkeleton.vue'
+import { useSwipeGesture } from '@/shared/lib/useSwipeGesture'
 
 // Dummy medal data
 const allMedals = Array.from({ length: 40 }).map((_, i) => ({
@@ -78,6 +80,11 @@ const formatLap = (s: number | null) => {
   const sec = (s % 60).toFixed(1)
   return `${min}:${sec.padStart(4, '0')}`
 }
+
+useSwipeGesture(null, {
+  onSwipeLeft: () => { activeTab.value = activeTab.value === 0 ? 1 : 0 },
+  onSwipeRight: () => { activeTab.value = activeTab.value === 0 ? 1 : 0 },
+})
 </script>
 
 <template>
@@ -86,6 +93,7 @@ const formatLap = (s: number | null) => {
       <div class="heading-block mb-[2vh] text-center">
         <h1 class="text-title font-title text-silver tracking-[0.3em]">TRAINER CARD</h1>
         <div class="heading-rule"></div>
+        <button class="mt-2 text-small text-slate bg-transparent border border-slate px-3 py-1 cursor-pointer tracking-widest" @click="router.push('/garage')">◀ BACK TO GARAGE</button>
       </div>
     </template>
     
@@ -125,8 +133,9 @@ const formatLap = (s: number | null) => {
             <CyberTabs :tabs="tabs" v-model="activeTab" @change="switchTab" class="mb-[1.5vh]" />
             
             <CyberPanel variant="glass" border="secondary" class="flex-1 flex flex-col overflow-hidden min-h-0 p-3">
-              <div v-if="loading" class="text-body animate-pulse text-slate w-full h-full flex items-center justify-center">
-                LOADING ANALYTICS...
+              <div v-if="loading" class="w-full h-full flex flex-col items-center justify-center p-4 gap-4">
+                <CyberSkeleton variant="chart" />
+                <CyberSkeleton variant="stat" :count="3" />
               </div>
               
               <template v-else>

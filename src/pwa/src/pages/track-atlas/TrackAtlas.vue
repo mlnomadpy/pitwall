@@ -137,14 +137,14 @@ useKeyboard((e: KeyboardEvent) => {
     <!-- Toggles & Weather -->
     <div class="flex justify-between items-center text-body mx-2">
       <div class="flex gap-4">
-        <div class="flex items-center gap-1" :class="showElevation ? 'text-ui-good' : 'text-slate'">
-          <span>[{{ showElevation ? 'x' : ' ' }}]</span> <span class="uppercase">Elevation <span class="text-silver text-small opacity-50">(1)</span></span>
+        <div class="flex items-center gap-1 cursor-pointer" :class="showElevation ? 'text-ui-good' : 'text-slate'" @click="showElevation = !showElevation; audio.playSfx('cursor_select')">
+          <span>[{{ showElevation ? 'x' : ' ' }}]</span> <span class="uppercase">Elevation</span>
         </div>
-        <div class="flex items-center gap-1" :class="showMarkers ? 'text-ui-good' : 'text-slate'">
-          <span>[{{ showMarkers ? 'x' : ' ' }}]</span> <span class="uppercase">Markers <span class="text-silver text-small opacity-50">(2)</span></span>
+        <div class="flex items-center gap-1 cursor-pointer" :class="showMarkers ? 'text-ui-good' : 'text-slate'" @click="showMarkers = !showMarkers; cursorIndex = 0; audio.playSfx('cursor_select')">
+          <span>[{{ showMarkers ? 'x' : ' ' }}]</span> <span class="uppercase">Markers</span>
         </div>
-        <div class="flex items-center gap-1" :class="showDanger ? 'text-ui-warn' : 'text-slate'">
-          <span>[{{ showDanger ? 'x' : ' ' }}]</span> <span class="uppercase">Danger Zones <span class="text-silver text-small opacity-50">(3)</span></span>
+        <div class="flex items-center gap-1 cursor-pointer" :class="showDanger ? 'text-ui-warn' : 'text-slate'" @click="showDanger = !showDanger; cursorIndex = 0; audio.playSfx('cursor_select')">
+          <span>[{{ showDanger ? 'x' : ' ' }}]</span> <span class="uppercase">Danger Zones</span>
         </div>
       </div>
       <div class="text-silver">

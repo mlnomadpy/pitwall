@@ -86,50 +86,50 @@ const rotateValue = (model: any, options: any[], dir: number) => {
     
     <template #heading>
       <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title font-title text-[#4ade80] tracking-[0.2em]">COACH BIOS v1.4.2</h1>
-        <div class="heading-rule bg-[#4ade80] h-[2px] w-full"></div>
+        <h1 class="text-title font-title text-bios-green tracking-[0.2em]">COACH BIOS v1.4.2</h1>
+        <div class="heading-rule bg-bios-green h-[2px] w-full"></div>
       </div>
     </template>
 
-    <CyberPanel class="flex-grow flex flex-col p-4 bg-ink/90 border-[#4ade80] overflow-hidden mx-2 pb-6 text-[#4ade80] font-mono bios-text shadow-[0_0_15px_rgba(74,222,128,0.3)]">
+    <CyberPanel class="flex-grow flex flex-col p-4 bg-ink/90 border-bios-green overflow-hidden mx-2 pb-6 text-bios-green font-mono bios-text shadow-[0_0_15px_rgba(74, 222, 128,0.3)]">
       
-      <div class="mb-6 border-b border-[#4ade80]/30 pb-2">
+      <div class="mb-6 border-b border-bios-green/30 pb-2">
         <div>> INITIALIZING NEURAL LINK... OK</div>
         <div>> ESTABLISHING PARAMETERS FOR: <span class="font-bold text-white">{{ save.activeSlot?.preferredCoach?.toUpperCase() || 'UNKNOWN' }}</span></div>
       </div>
 
       <div class="flex flex-col gap-4 pl-4">
-        <div class="flex items-center p-1" :class="{ 'bg-[#4ade80]/20 text-white': cursorIndex === 0 }">
+        <div class="flex items-center p-1 cursor-pointer" :class="{ 'bg-bios-green/20 text-white': cursorIndex === 0 }" @click="cursorIndex = 0; rotateValue(verbosity, verbosityOptions, 1)">
           <CyberValuePicker 
             label="VERBOSITY"
             :value="verbosityOptions.find(o => o.id === verbosity)?.label || ''"
             :focused="cursorIndex === 0"
             :editing="true"
-            class="flex-grow"
+            class="flex-grow pointer-events-none"
           />
         </div>
 
-        <div class="flex items-center p-1" :class="{ 'bg-[#4ade80]/20 text-white': cursorIndex === 1 }">
+        <div class="flex items-center p-1 cursor-pointer" :class="{ 'bg-bios-green/20 text-white': cursorIndex === 1 }" @click="cursorIndex = 1; rotateValue(focus, focusOptions, 1)">
           <CyberValuePicker 
             label="FOCUS PRIORITY"
             :value="focusOptions.find(o => o.id === focus)?.label || ''"
             :focused="cursorIndex === 1"
             :editing="true"
-            class="flex-grow"
+            class="flex-grow pointer-events-none"
           />
         </div>
 
-        <div class="flex items-center p-1" :class="{ 'bg-[#4ade80]/20 text-white': cursorIndex === 2 }">
+        <div class="flex items-center p-1 cursor-pointer" :class="{ 'bg-bios-green/20 text-white': cursorIndex === 2 }" @click="cursorIndex = 2; rotateValue(tone, toneOptions, 1)">
           <CyberValuePicker 
             label="COACH TONE"
             :value="toneOptions.find(o => o.id === tone)?.label || ''"
             :focused="cursorIndex === 2"
             :editing="true"
-            class="flex-grow"
+            class="flex-grow pointer-events-none"
           />
         </div>
 
-        <div class="flex items-center mt-4 p-1" :class="{ 'bg-[#4ade80]/20 text-white': cursorIndex === 3 }">
+        <div class="flex items-center mt-4 p-1 cursor-pointer" :class="{ 'bg-bios-green/20 text-white': cursorIndex === 3 }" @click="cursorIndex = 3; autoMute = !autoMute; audio.playSfx('cursor_select')">
           <CyberCheckbox 
             label="AUTO-MUTE ON HOT LAPS" 
             :checked="autoMute" 
@@ -137,7 +137,7 @@ const rotateValue = (model: any, options: any[], dir: number) => {
           />
         </div>
 
-        <div class="flex items-center mt-6 p-2 border-t border-[#4ade80]/30" :class="{ 'bg-[#4ade80]/20 text-white': cursorIndex === 4 }">
+        <div class="flex items-center mt-6 p-2 border-t border-bios-green/30 cursor-pointer" :class="{ 'bg-bios-green/20 text-white': cursorIndex === 4 }" @click="cursorIndex = 4; audio.playSfx('cursor_select'); router.back()">
           <span class="w-6 shrink-0 font-bold text-center" v-if="cursorIndex === 4">▶</span>
           <span class="w-6 shrink-0" v-else></span>
           <span class="font-bold cursor-pointer uppercase tracking-widest text-title-sm">APPLY & REBOOT</span>

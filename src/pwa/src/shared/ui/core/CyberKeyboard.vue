@@ -26,6 +26,7 @@ const chars = [
 const cursorX = ref(0)
 const cursorY = ref(0)
 const maxCols = 7
+const numRows = Math.ceil(chars.length / maxCols)
 
 const selectChar = () => {
   const idx = cursorY.value * maxCols + cursorX.value
@@ -60,15 +61,20 @@ useKeyboard((e: KeyboardEvent) => {
     cursorX.value = (cursorX.value - 1 + maxCols) % maxCols
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowDown') {
-    cursorY.value = (cursorY.value + 1) % 5
+    cursorY.value = (cursorY.value + 1) % numRows
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowUp') {
-    cursorY.value = (cursorY.value - 1 + 5) % 5
+    cursorY.value = (cursorY.value - 1 + numRows) % numRows
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter') {
     selectChar()
-  } else if (e.key === 'Escape' || e.key === 'Backspace') {
+  } else if (e.key === 'Escape') {
     emit('back')
+  } else if (e.key === 'Backspace') {
+    emit('del')
+  } else if (e.key.length === 1 && e.key.match(/[a-zA-Z0-9.\-_ ]/)) {
+    emit('char', e.key.toUpperCase())
+    audio.playSfx('cursor_select')
   }
 })
 </script>

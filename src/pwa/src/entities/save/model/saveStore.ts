@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { get, set } from 'idb-keyval'
+import { get, set, del } from 'idb-keyval'
+import { toRaw } from 'vue'
 import type { SaveSlot } from '@/shared/types/save'
 
 export const useSaveStore = defineStore('save', {
@@ -22,8 +23,13 @@ export const useSaveStore = defineStore('save', {
       const slot = this.slots[id - 1]
       if (!slot) return
       // Strip Pinia reactive proxy — IDB's structured clone can't handle Proxy objects
-      const plain = JSON.parse(JSON.stringify(slot)) as SaveSlot
+      const plain = structuredClone(toRaw(slot)) as SaveSlot
       await set(`slot:${id}`, plain)
+    },
+    async deleteSlot(id: 1 | 2 | 3) {
+      this.slots[id - 1] = null
+      if (this.activeSlotId === id) this.activeSlotId = null
+      await del(`slot:${id}`)
     }
   }
 })

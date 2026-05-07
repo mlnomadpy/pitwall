@@ -72,7 +72,7 @@ onMounted(() => {
       addCustomInterval(1200 / steps, () => {
         current += stepAmt
         displayedScore.value = Math.min(Math.round(current), finalScore)
-        audio.playSfx('cursor_move') 
+        audio.playSfx('score_tick') 
         stepCount++
         if (stepCount >= steps) {
           displayedScore.value = finalScore
@@ -101,14 +101,14 @@ onMounted(() => {
 <template>
   <PageShell 
     :hints="phase >= 13 || phase === 99 ? ['A · CONTINUE', 'B · HOME', '◆ SHARE'] : []" 
-    bg="neutral" 
+    bg="warm" bgVariant="stars" 
     :show-heading="false"
     :hide-status="true"
   >
     <!-- Background overrides -->
     <div class="stage-bg absolute inset-0 z-0 pointer-events-none"></div>
     
-    <div class="content h-full flex flex-col relative z-10 w-full">
+    <div class="content h-full flex flex-col relative z-10 w-full" @click="phase < 13 ? skip(() => { displayedScore = finalScore }) : (audio.playSfx('cursor_select'), router.push('/garage'))">
       
       <!-- Banner -->
       <div 
@@ -123,8 +123,12 @@ onMounted(() => {
       <!-- Score -->
       <div v-if="phase >= 2 || phase === 99" class="text-center mt-[3vh] mb-[2vh]">
         <div class="text-small text-slate tracking-[0.2em] mb-[0.5vh]">TOTAL SCORE</div>
-        <div class="text-title-lg text-ui-warn tracking-widest font-title">
+        <div class="text-title-lg text-ui-warn tracking-widest font-title flex items-center justify-center gap-4">
           {{ displayedScore }}
+          
+          <div v-if="phase >= 8 || phase === 99" class="grade-badge animate-stamp">
+            S
+          </div>
         </div>
       </div>
       
@@ -162,6 +166,11 @@ onMounted(() => {
         </div>
       </div>
       
+    </div>
+
+    <!-- Visible tappable CONTINUE when animation is done -->
+    <div v-if="phase >= 13 || phase === 99" class="absolute bottom-[10vh] left-0 right-0 text-center z-20 cursor-pointer" @click="audio.playSfx('cursor_select'); router.push('/garage')">
+      <span class="text-ui-good font-bold text-body tracking-widest animate-pulse border border-ui-good px-4 py-2 bg-ink/80">TAP TO CONTINUE ▶</span>
     </div>
     
     <template #floating>
@@ -255,6 +264,29 @@ onMounted(() => {
   font-size: clamp(9px, 2vmin, 16px);
   color: var(--color-silver);
   box-shadow: 0 0 6px rgba(181, 137, 0, 0.15);
+}
+
+.grade-badge {
+  font-size: clamp(32px, 8vmin, 64px);
+  color: var(--color-ui-good);
+  text-shadow: 2px 2px 0 #000, 0 0 10px var(--color-ui-good);
+  border: clamp(2px, 0.5vmin, 4px) solid var(--color-ui-good);
+  border-radius: 50%;
+  width: clamp(48px, 12vmin, 80px);
+  height: clamp(48px, 12vmin, 80px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform: rotate(15deg);
+}
+
+.animate-stamp {
+  animation: stamp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+
+@keyframes stamp {
+  0% { transform: scale(3) rotate(0deg); opacity: 0; }
+  100% { transform: scale(1) rotate(15deg); opacity: 1; }
 }
 </style>
 

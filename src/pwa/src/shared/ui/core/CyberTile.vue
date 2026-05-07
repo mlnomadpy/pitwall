@@ -26,24 +26,51 @@ const emit = defineEmits<{ (e: 'click'): void; (e: 'hover'): void }>()
     :border="focused ? 'good' : 'slate'"
     interactive
     :class="['cyber-tile', { locked, focused }]"
+    :aria-disabled="locked || undefined"
+    :role="locked ? undefined : 'button'"
     @click="$emit('click')"
     @mouseenter="$emit('hover')"
   >
     <!-- Focus Marker -->
-    <div v-if="focused && !locked" class="focus-marker">▼</div>
+    <div v-if="focused && !locked" class="focus-marker" aria-hidden="true">▼</div>
     
     <!-- Kerb Accent -->
-    <div v-if="showKerb && focused" class="tile-kerb"></div>
+    <div v-if="showKerb && focused" class="tile-kerb" aria-hidden="true"></div>
+
+    <!-- Badge slot (top-right) -->
+    <div v-if="$slots.badge" class="tile-badge">
+      <slot name="badge"></slot>
+    </div>
     
     <div class="tile-content w-full h-full flex flex-col justify-center">
       <slot>
         <!-- Default layout if no slot provided -->
-        <div class="font-bold text-body flex items-center pixel-shadow">
-          <span v-if="focused" class="text-curb-red mr-1 cursor-bounce">▶</span>
-          {{ title }}
+        <div class="tile-inner">
+          <!-- Icon slot -->
+          <div v-if="$slots.icon" class="tile-icon" aria-hidden="true">
+            <slot name="icon"></slot>
+          </div>
+          <div class="tile-text">
+            <div class="font-bold text-body flex items-center pixel-shadow">
+              <span v-if="focused" class="text-curb-red mr-1 cursor-bounce" aria-hidden="true">▶</span>
+              {{ title }}
+            </div>
+            <div v-if="subText" class="text-body text-silver ml-3">{{ subText }}</div>
+          </div>
         </div>
-        <div v-if="subText" class="text-body text-silver ml-3">{{ subText }}</div>
       </slot>
+    </div>
+
+    <!-- Lock Overlay -->
+    <div v-if="locked" class="lock-overlay" aria-hidden="true">
+      <span class="lock-badge">
+        <!-- SVG lock icon instead of emoji for cross-platform consistency -->
+        <svg class="lock-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        LOCKED
+      </span>
     </div>
   </CyberBox>
 </template>
@@ -61,6 +88,34 @@ const emit = defineEmits<{ (e: 'click'): void; (e: 'hover'): void }>()
   opacity: 0.4;
   filter: saturate(0.2) brightness(0.7);
   pointer-events: none;
+}
+
+.tile-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm, clamp(4px, 1vmin, 8px));
+}
+
+.tile-icon {
+  flex-shrink: 0;
+  width: clamp(20px, 4vmin, 32px);
+  height: clamp(20px, 4vmin, 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-slate);
+}
+
+.tile-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.tile-badge {
+  position: absolute;
+  top: clamp(4px, 1vmin, 8px);
+  right: clamp(4px, 1vmin, 8px);
+  z-index: 15;
 }
 
 .tile-kerb {
@@ -90,17 +145,34 @@ const emit = defineEmits<{ (e: 'click'): void; (e: 'hover'): void }>()
   z-index: 10;
 }
 
+.lock-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-ink) 50%, transparent);
+  z-index: 20;
+}
+
+.lock-badge {
+  background: var(--color-charcoal);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: clamp(9px, 2vmin, 14px);
+  border: 1px solid var(--color-slate);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-silver);
+}
+
+.lock-icon {
+  width: clamp(12px, 2.5vmin, 18px);
+  height: clamp(12px, 2.5vmin, 18px);
+}
+
 @keyframes retro-blink {
   0%, 100% { opacity: 0; }
   50% { opacity: 1; }
-}
-
-@keyframes cursor-bounce {
-  0%, 100% { transform: translateX(0); }
-  50% { transform: translateX(2px); }
-}
-
-.cursor-bounce {
-  animation: cursor-bounce 0.25s steps(2) infinite;
 }
 </style>

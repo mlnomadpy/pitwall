@@ -12,6 +12,13 @@ export const useAudioStore = defineStore('audio', {
   }),
   actions: {
     playSfx(id: string) {
+      if (this.sfx.size > 50) {
+        const firstKey = this.sfx.keys().next().value;
+        if (firstKey) {
+          this.sfx.get(firstKey)?.unload();
+          this.sfx.delete(firstKey);
+        }
+      }
       let h = this.sfx.get(id)
       if (!h) {
         // We use dummy URLs; Howler will fail silently if the mp3 is missing
@@ -22,6 +29,13 @@ export const useAudioStore = defineStore('audio', {
     },
     
     playMusic(track: string) {
+      if (this.music.size > 10) {
+        const firstKey = this.music.keys().next().value;
+        if (firstKey && firstKey !== track) {
+          this.music.get(firstKey)?.unload();
+          this.music.delete(firstKey);
+        }
+      }
       let h = this.music.get(track)
       if (!h) {
         h = new Howl({ src: [`/music/${track}.mp3`], loop: true, volume: 0.15 })
@@ -43,6 +57,13 @@ export const useAudioStore = defineStore('audio', {
     
     playVoice(coachId: string, phraseId: string, hintMs = 0) {
       const key = `${coachId}/${phraseId}`
+      if (this.voice.size > 20) {
+        const firstKey = this.voice.keys().next().value;
+        if (firstKey && firstKey !== key) {
+          this.voice.get(firstKey)?.unload();
+          this.voice.delete(firstKey);
+        }
+      }
       let h = this.voice.get(key)
       if (!h) {
         h = new Howl({ src: [`/audio/coaches/${key}.mp3`], volume: 1.0 })
@@ -57,8 +78,13 @@ export const useAudioStore = defineStore('audio', {
         this.duckMusic(false)
       })
       
-      // Stop all other voices
-      this.voice.forEach((v) => v.stop())
+      // Fade out all other voices quickly instead of hard stopping
+      this.voice.forEach((v) => {
+        if (v.playing()) {
+          v.fade(v.volume(), 0, 100)
+          setTimeout(() => v.stop(), 100)
+        }
+      })
       h.play()
     },
     

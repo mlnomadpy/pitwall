@@ -59,14 +59,14 @@ useKeyboard((e: KeyboardEvent) => {
       audio.playSfx('cursor_select')
     }
   }
-}, { capture: true })
+})
 </script>
 
 <template>
   <Teleport to="body">
     <!-- Banner State -->
     <div v-if="state === 'banner' && !isReconnected" 
-         class="fixed top-0 left-0 w-full h-[clamp(12px,3vmin,24px)] bg-ui-bad z-50 flex items-center px-2 cursor-pointer font-ui text-body justify-between text-white border-b border-charcoal shadow-md"
+         class="fixed top-0 left-0 w-full h-[clamp(24px,4vmin,36px)] bg-ui-bad z-50 flex items-center px-2 cursor-pointer font-ui text-body justify-between text-white border-b border-charcoal shadow-md"
          @click="state = 'expanded'; audio.playSfx('cursor_select')">
       <div class="flex items-center gap-2">
         <span class="animate-spin text-ink leading-none">⚙</span>
@@ -77,7 +77,7 @@ useKeyboard((e: KeyboardEvent) => {
 
     <!-- Reconnected Flash -->
     <div v-if="isReconnected" 
-         class="fixed top-0 left-0 w-full h-[clamp(12px,3vmin,24px)] bg-ui-good z-50 flex items-center px-2 font-ui text-body justify-center text-ink border-b border-charcoal shadow-md transition-all">
+         class="fixed top-0 left-0 w-full h-[clamp(24px,4vmin,36px)] bg-ui-good z-50 flex items-center px-2 font-ui text-body justify-center text-ink border-b border-charcoal shadow-md transition-all">
       <span class="font-bold">BRIDGE RECONNECTED</span>
     </div>
 

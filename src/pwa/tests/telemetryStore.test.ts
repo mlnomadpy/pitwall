@@ -36,12 +36,11 @@ describe('telemetryStore', () => {
     const handler = addEventListenerMock.mock.calls[0][1] as EventListener
 
     const mockEvent = {
-      data: JSON.stringify({ speed: 100, distance: 50 })
+      data: JSON.stringify({ speed: 100, distance: 50, timestamp: 12345 })
     }
-
     handler(mockEvent as any)
 
-    expect(store.frame).toEqual({ speed: 100, distance: 50 })
+    expect(store.frame).toEqual({ speed: 100, distance: 50, timestamp: 12345 })
   })
 
   it('handles invalid json payload', () => {

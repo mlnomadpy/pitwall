@@ -93,7 +93,7 @@ const getBarHeight = (val: number) => {
 
     <!-- Pickers -->
     <div class="px-2 mb-2 text-body flex flex-col gap-1">
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 cursor-pointer" @click="activePicker = activePicker === 'left' ? 'none' : 'left'; audio.playSfx('cursor_move')">
         <span class="w-[clamp(24px,6vw,48px)] text-slate">LEFT</span>
         <span class="text-ui-info" v-if="activePicker === 'left'">▼</span>
         <span class="text-slate" v-else>▼</span>
@@ -101,7 +101,7 @@ const getBarHeight = (val: number) => {
           [ {{ leftSel }} ]
         </CyberPanel>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 cursor-pointer" @click="activePicker = activePicker === 'right' ? 'none' : 'right'; audio.playSfx('cursor_move')">
         <span class="w-[clamp(24px,6vw,48px)] text-slate">RIGHT</span>
         <span class="text-ui-info" v-if="activePicker === 'right'">▼</span>
         <span class="text-slate" v-else>▼</span>

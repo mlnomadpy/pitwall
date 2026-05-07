@@ -34,7 +34,13 @@ const emit = defineEmits<{
     <template #icon>
       <span v-if="focused" class="cursor-bounce text-ui-warn absolute left-[10px]">▶</span>
     </template>
-    {{ tile.title }}
+    <div class="relative z-10">{{ tile.title }}</div>
+    
+    <div v-if="tile.disabled" class="absolute inset-0 bg-ink/60 z-20 flex items-center justify-center">
+      <span class="bg-charcoal px-2 py-1 text-xs border border-slate flex items-center gap-1 shadow-md">
+        <span>🔒</span> LOCKED
+      </span>
+    </div>
   </CyberButton>
 </template>
 

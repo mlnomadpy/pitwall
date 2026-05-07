@@ -19,7 +19,7 @@ watch(() => props.cue, (newCue) => {
     typeInterval = window.setInterval(() => {
       if (i < newCue.text.length) {
         displayedText.value += newCue.text.charAt(i)
-        if (i % 2 === 0) audio.playSfx('dialogue_blip')
+        if (i % 4 === 0) audio.playSfx('dialogue_blip')
         i++
       } else {
         clearInterval(typeInterval!)

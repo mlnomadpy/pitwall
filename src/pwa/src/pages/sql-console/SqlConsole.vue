@@ -195,19 +195,21 @@ onMounted(() => {
         </div>
         
         <template v-else-if="state === 'result' && resultData">
-          <div class="text-slate mb-2">RESULT {{ resultData.length }} rows · {{ resultTime }} s</div>
-          <table class="w-full text-left font-mono">
-            <thead>
-              <tr class="text-ui-info border-b border-charcoal">
-                <th v-for="key in Object.keys(resultData[0])" :key="key" class="pb-1 pr-2">{{ key }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, i) in resultData" :key="i" class="text-silver">
-                <td v-for="key in Object.keys(row)" :key="key" class="pr-2">{{ row[key] }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="text-slate mb-2 shrink-0">RESULT {{ resultData.length }} rows · {{ resultTime }} s</div>
+          <div class="overflow-x-auto overflow-y-auto flex-grow w-full no-scrollbar">
+            <table class="w-full text-left font-mono min-w-max">
+              <thead>
+                <tr class="text-ui-info border-b border-charcoal">
+                  <th v-for="key in Object.keys(resultData[0])" :key="key" class="pb-1 pr-4 whitespace-nowrap">{{ key }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, i) in resultData" :key="i" class="text-silver hover:bg-charcoal/50 transition-colors">
+                  <td v-for="key in Object.keys(row)" :key="key" class="pr-4 py-1 whitespace-nowrap">{{ row[key] }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </template>
 
         <template v-else-if="state === 'error'">

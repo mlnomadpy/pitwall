@@ -29,13 +29,13 @@ describe('SSE reconnection', () => {
       const store = useTelemetryStore()
       store.open('test-session')
       
-      // Simulate some retries
       store._retryCount = 5
       
       // Simulate successful telemetry event
-      const handler = vi.mocked(store._es!.addEventListener).mock.calls[0][1] as EventListener
-      handler({ data: JSON.stringify({ speed: 100 }) } as any)
-      
+      const addEventListenerMock = vi.mocked(store._es!.addEventListener)
+      const handler = addEventListenerMock.mock.calls[0][1] as EventListener
+      handler({ data: JSON.stringify({ speed: 100, timestamp: 12345 }) } as any)
+
       expect(store._retryCount).toBe(0)
     })
 

@@ -19,7 +19,8 @@ const sponsors = ref([
     desc: 'Focuses on smooth steering and high minimum corner speeds.',
     goal: 'Complete 3 laps at Sonoma without exceeding 1.2G lateral.',
     reward: '250 CR · Aero Part LV2',
-    active: true
+    active: true,
+    logoUrl: '/img/sponsors/neo.png'
   },
   { 
     id: 's2', 
@@ -28,7 +29,8 @@ const sponsors = ref([
     desc: 'Aggressive braking and tire management.',
     goal: 'Zero lockups in Turn 7 and 11 over a 5 lap stint.',
     reward: '500 CR · Soft Compound',
-    active: false
+    active: false,
+    logoUrl: '/img/sponsors/syntho.png'
   },
   { 
     id: 's3', 
@@ -37,7 +39,8 @@ const sponsors = ref([
     desc: 'Efficiency and throttle application.',
     goal: 'Maintain >80% throttle application smoothness score.',
     reward: '150 CR',
-    active: false
+    active: false,
+    logoUrl: '/img/sponsors/omni.png'
   }
 ])
 
@@ -66,12 +69,12 @@ useKeyboard((e: KeyboardEvent) => {
 </script>
 
 <template>
-  <PageShell title="CONTRACTS" :hints="['A · SIGN CONTRACT', 'B · BACK', '▲ ▼ BROWSE']" bg="neutral">
+  <PageShell title="CONTRACTS" :hints="['A · SIGN CONTRACT', 'B · BACK', '▲ ▼ BROWSE']" bg="warm">
     
     <template #heading>
       <div class="heading-block mb-[1.5vh]">
-        <h1 class="text-title font-title text-[#eab308] tracking-[0.2em] drop-shadow-[2px_2px_0_#ca8a04]">SPONSORS</h1>
-        <div class="heading-rule bg-[#eab308]"></div>
+        <h1 class="text-title font-title text-gold-dark tracking-[0.2em] drop-shadow-[2px_2px_0_#ca8a04]">SPONSORS</h1>
+        <div class="heading-rule bg-gold-dark"></div>
       </div>
     </template>
 
@@ -79,7 +82,7 @@ useKeyboard((e: KeyboardEvent) => {
       
       <template #left>
         <CyberPanel class="flex flex-col h-full overflow-hidden p-0 bg-ink min-h-0">
-          <div class="bg-[#ca8a04] px-3 py-2 border-b border-slate font-bold text-ink text-small sticky top-0 z-10 flex justify-between tracking-widest">
+          <div class="bg-gold-dark px-3 py-2 border-b border-slate font-bold text-ink text-small sticky top-0 z-10 flex justify-between tracking-widest">
             <span>CORPORATION</span>
             <span>STATUS</span>
           </div>
@@ -92,10 +95,10 @@ useKeyboard((e: KeyboardEvent) => {
             >
               <div 
                 class="flex items-center px-2 py-3 border transition-colors cursor-pointer"
-                :class="cursorIndex === i ? 'bg-charcoal border-[#eab308] text-white shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'border-transparent text-silver'"
+                :class="cursorIndex === i ? 'bg-charcoal border-gold-dark text-white shadow-[0_0_10px_rgba(234,179,8,0.2)]' : 'border-transparent text-silver'"
                 @click="cursorIndex = i; selectedSponsor = s"
               >
-                <span class="w-6 shrink-0 font-bold text-[#eab308]" v-if="cursorIndex === i">▶</span>
+                <span class="w-6 shrink-0 font-bold text-gold-dark" v-if="cursorIndex === i">▶</span>
                 <span class="w-6 shrink-0" v-else></span>
                 
                 <div class="flex-grow flex flex-col">
@@ -103,7 +106,7 @@ useKeyboard((e: KeyboardEvent) => {
                   <span class="text-small text-slate font-mono">{{ s.type }}</span>
                 </div>
                 
-                <span v-if="s.active" class="text-ink text-small px-2 py-1 bg-[#eab308] font-bold">SIGNED</span>
+                <span v-if="s.active" class="text-ink text-small px-2 py-1 bg-gold-dark font-bold">SIGNED</span>
               </div>
             </div>
           </div>
@@ -121,8 +124,9 @@ useKeyboard((e: KeyboardEvent) => {
           
           <div class="flex flex-col gap-6 font-mono text-body mt-2 z-10">
             <div class="flex gap-4 items-start">
-              <div class="w-16 h-16 bg-charcoal border border-slate flex items-center justify-center text-title font-bold text-slate shrink-0">
-                {{ selectedSponsor.name.substring(0, 1) }}
+              <div class="w-16 h-16 bg-charcoal border border-slate flex items-center justify-center text-title font-bold text-slate shrink-0 overflow-hidden relative">
+                <span class="absolute">{{ selectedSponsor.name.substring(0, 1) }}</span>
+                <img v-if="selectedSponsor.logoUrl" :src="selectedSponsor.logoUrl" :alt="selectedSponsor.name" class="w-full h-full object-cover z-10 bg-charcoal" @error="e => (e.target as HTMLElement).style.display='none'" />
               </div>
               <div class="flex flex-col">
                 <span class="text-white font-bold text-title-sm tracking-widest">{{ selectedSponsor.name }}</span>
@@ -131,7 +135,7 @@ useKeyboard((e: KeyboardEvent) => {
             </div>
 
             <div class="flex flex-col bg-charcoal/50 p-3 border border-slate/50">
-              <span class="text-[#eab308] text-small mb-1 font-bold tracking-widest">CURRENT DIRECTIVE</span>
+              <span class="text-gold-dark text-small mb-1 font-bold tracking-widest">CURRENT DIRECTIVE</span>
               <span class="font-bold text-white leading-relaxed">{{ selectedSponsor.goal }}</span>
             </div>
             

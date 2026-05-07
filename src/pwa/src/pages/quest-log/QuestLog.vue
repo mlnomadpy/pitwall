@@ -56,7 +56,7 @@ useKeyboard((e: KeyboardEvent) => {
   }
 
   const max = filteredMedals.value.length
-  const COLS = 5 // Matched to grid-cols-5
+  const COLS = 4 // Matched to grid-cols-4
 
   if (e.key === 'ArrowRight') {
     if (e.shiftKey) {
@@ -83,19 +83,24 @@ useKeyboard((e: KeyboardEvent) => {
     cursorIndex.value = (cursorIndex.value - COLS + max) % max
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter') {
-    const m = filteredMedals.value[cursorIndex.value]
-    if (m?.unlocked) {
-      audio.playSfx('cursor_select')
-      detailText.value = m.desc
-    } else {
-      audio.playSfx('cancel')
-      detailText.value = "Keep driving to unlock this."
-    }
+    viewDetails()
   } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
     audio.playSfx('cancel')
     router.push('/garage')
   }
 })
+
+const viewDetails = (index = cursorIndex.value) => {
+  cursorIndex.value = index
+  const m = filteredMedals.value[index]
+  if (m?.unlocked) {
+    audio.playSfx('cursor_select')
+    detailText.value = m.desc
+  } else {
+    audio.playSfx('cancel')
+    detailText.value = "Keep driving to unlock this."
+  }
+}
 
 const onCodexPlay = (phrase: any) => {
   detailText.value = phrase.text
@@ -109,7 +114,7 @@ const switchTab = (i: number) => {
 </script>
 
 <template>
-  <PageShell :title="mode === 'MEDALS' ? 'QUEST LOG' : 'COACH CODEX'" :hints="mode === 'MEDALS' ? ['A · DETAIL', 'SHIFT+◀ ▶ TAB', 'C · CODEX', 'B · GARAGE'] : ['A · PLAY', 'SHIFT+◀ ▶ COACH', 'C · QUESTS', 'B · GARAGE']" bg="neutral">
+  <PageShell :title="mode === 'MEDALS' ? 'QUEST LOG' : 'COACH CODEX'" :hints="mode === 'MEDALS' ? ['A · DETAIL', 'SHIFT+◀ ▶ TAB', 'C · CODEX', 'B · GARAGE'] : ['A · PLAY', 'SHIFT+◀ ▶ COACH', 'C · QUESTS', 'B · GARAGE']" bg="warm">
     <template #heading>
       <div class="quest-header flex items-center justify-between mb-2">
         <div class="heading-block">
@@ -178,7 +183,7 @@ const switchTab = (i: number) => {
                 <MedalGrid 
                   :medals="filteredMedals" 
                   :cursorIndex="cursorIndex" 
-                  @select="i => cursorIndex = i" 
+                  @select="viewDetails" 
                   class="flex-1"
                 />
               </CyberPanel>

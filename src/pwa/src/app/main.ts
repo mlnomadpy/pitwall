@@ -5,6 +5,7 @@ import App from './App.vue'
 
 // Import global styles (Tailwind v4)
 import './styles/global.css'
+import './styles/buttons.css'
 
 const app = createApp(App)
 const pinia = createPinia()

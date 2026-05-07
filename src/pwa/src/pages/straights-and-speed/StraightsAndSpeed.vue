@@ -14,9 +14,9 @@ const audio = useAudioStore()
 
 // Mock data
 const straights = [
-  { id: 'front', name: 'FRONT STRAIGHT', speed: 198.4, lap: 7, delta: '+2.1', deltaType: 'up', note: '' },
-  { id: 't4', name: 'T4 RUN', speed: 138.7, lap: 12, delta: '-1.0', deltaType: 'down', note: '(-cost on T3a exit)' },
-  { id: 't7', name: 'T7 → T8a', speed: 187.2, lap: 11, delta: '0', deltaType: 'flat', note: '' },
+  { id: 'front', name: 'FRONT STRAIGHT', speed: 198.4, lap: 7, delta: '+2.1', deltaType: 'up', note: '', sparkline: 'M0,20 L10,18 L20,12 L30,10 L50,5 L70,2 L100,0' },
+  { id: 't4', name: 'T4 RUN', speed: 138.7, lap: 12, delta: '-1.0', deltaType: 'down', note: '(-cost on T3a exit)', sparkline: 'M0,15 L20,12 L40,10 L60,11 L80,13 L100,15' },
+  { id: 't7', name: 'T7 → T8a', speed: 187.2, lap: 11, delta: '0', deltaType: 'flat', note: '', sparkline: 'M0,20 L20,15 L40,10 L60,5 L80,2 L100,2' },
 ]
 
 const cursorIndex = ref(0)
@@ -73,8 +73,9 @@ useKeyboard((e: KeyboardEvent) => {
           <div 
             v-for="(s, i) in straights" 
             :key="s.id"
-            class="p-2 border transition-colors flex flex-col gap-1"
+            class="p-2 border transition-colors flex flex-col gap-1 cursor-pointer"
             :class="cursorIndex === i ? 'border-ui-good bg-charcoal' : 'border-slate bg-ink'"
+            @click="cursorIndex = i; audio.playSfx('cursor_move')"
           >
             <div class="flex justify-between items-end">
               <div class="font-bold">
@@ -89,7 +90,14 @@ useKeyboard((e: KeyboardEvent) => {
                 {{ s.speed }} km/h
               </span>
               
-              <span class="text-body flex items-center gap-1"
+              <div class="flex-grow h-8 relative mr-4 ml-4">
+                <svg viewBox="0 0 100 20" class="w-full h-full preserve-aspect-ratio-none overflow-visible">
+                  <path :d="s.sparkline" fill="none" :stroke="s.deltaType === 'down' ? '#ef4444' : s.deltaType === 'up' ? '#5EED71' : '#A0AAB5'" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <div class="absolute inset-0 bg-gradient-to-r from-transparent to-ink/20 pointer-events-none"></div>
+              </div>
+              
+              <span class="text-body flex items-center gap-1 flex-shrink-0"
                     :class="{
                       'text-ui-good': s.deltaType === 'up',
                       'text-ui-warn': s.deltaType === 'down',

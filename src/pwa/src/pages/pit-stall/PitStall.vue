@@ -10,9 +10,11 @@ import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 import CyberButton from '@/shared/ui/core/CyberButton.vue'
 import ConnRow from './ui/ConnRow.vue'
 import LiveCarState from './ui/LiveCarState.vue'
+import { useBridgeStore } from '@/shared/api/bridgeStore'
 
 const router = useRouter()
 const audio = useAudioStore()
+const bridgeStore = useBridgeStore()
 
 const bridgeState = ref<'checking' | 'ok' | 'error' | 'pending'>('checking')
 const usbCanState = ref<'checking' | 'ok' | 'error' | 'pending'>('pending')
@@ -66,50 +68,70 @@ const runSequence = () => {
   addLog('INITIATING BOOT SEQUENCE...', 'warn')
   addLog('Connecting to bridge at 127.0.0.1:8765')
 
-  addStep({ phase: 1, timeMs: 1000, sfx: 'goal_complete', callback: () => {
-    bridgeState.value = 'ok'
-    usbCanState.value = 'checking'
-    addLog('BRIDGE CONNECTED (Engine: sonic_model, AI: LiteRT-LM)', 'good')
-    addLog('Querying /dev/ttyACM0 for slcan interface...')
-  }})
+  bridgeStore.startPolling()
 
-  addStep({ phase: 2, timeMs: 2500, sfx: 'goal_complete', callback: () => {
-    usbCanState.value = 'ok'
-    dbcState.value = 'checking'
-    addLog('USB-CAN STREAM ESTABLISHED @ 500 kbps', 'good')
-    addLog('Loading network definitions (pitwall.dbc, bmw_e46_m3.dbc)...')
-  }})
-
-  addStep({ phase: 3, timeMs: 3500, sfx: 'goal_complete', callback: () => {
-    dbcState.value = 'ok'
-    carState.value = 'checking'
-    addLog('DBC LOADED. Signals: 93 mapped, 3 unknown', 'good')
-    addLog('Waiting for ignition pulse from ECU...')
-  }})
-
-  addStep({ phase: 4, timeMs: 5000, sfx: 'level_up', callback: () => {
-    carState.value = 'ok'
-    addLog('IGNITION DETECTED.', 'good')
-    addLog('LINK STABLE. STREAMING TELEMETRY.', 'good')
-    // Start fake live telemetry
-    liveInterval = window.setInterval(() => {
-      liveState.value = {
-        rpm: Math.floor(800 + Math.random() * 200).toString(),
-        gear: '1',
-        speed: '0',
-        oil: '94',
-        coolant: '88',
-        fuel: '62',
-        throttle: Math.floor(Math.random() * 10).toString(),
-        brake: '0',
-        steer: (Math.random() * 2 - 1).toFixed(1),
-        glat: '0.0',
-        glong: '0.0',
-        gcombo: '0.0'
-      }
-    }, 100)
-  }})
+  let pollCount = 0
+  const checkBridge = () => {
+    if (bridgeStore.health) {
+      bridgeState.value = 'ok'
+      usbCanState.value = 'checking'
+      addLog('BRIDGE CONNECTED (Engine: sonic_model, AI: LiteRT-LM)', 'good')
+      addLog('Querying /dev/ttyACM0 for slcan interface...')
+      audio.playSfx('goal_complete')
+      
+      // Continue to phase 2
+      setTimeout(() => {
+        usbCanState.value = 'ok'
+        dbcState.value = 'checking'
+        addLog('USB-CAN STREAM ESTABLISHED @ 500 kbps', 'good')
+        addLog('Loading network definitions...')
+        audio.playSfx('goal_complete')
+        
+        setTimeout(() => {
+          dbcState.value = 'ok'
+          carState.value = 'checking'
+          addLog('DBC LOADED. Signals: 93 mapped, 3 unknown', 'good')
+          addLog('Waiting for ignition pulse from ECU...')
+          audio.playSfx('goal_complete')
+          
+          setTimeout(() => {
+            carState.value = 'ok'
+            addLog('IGNITION DETECTED.', 'good')
+            addLog('LINK STABLE. STREAMING TELEMETRY.', 'good')
+            audio.playSfx('level_up')
+            liveInterval = window.setInterval(() => {
+              liveState.value = {
+                rpm: Math.floor(800 + Math.random() * 200).toString(),
+                gear: '1',
+                speed: '0',
+                oil: '94',
+                coolant: '88',
+                fuel: '62',
+                throttle: Math.floor(Math.random() * 10).toString(),
+                brake: '0',
+                steer: (Math.random() * 2 - 1).toFixed(1),
+                glat: '0.0',
+                glong: '0.0',
+                gcombo: '0.0'
+              }
+            }, 100)
+          }, 1500)
+        }, 1000)
+      }, 1500)
+    } else if (bridgeStore.healthError || pollCount > 10) {
+      bridgeState.value = 'error'
+      addLog('BRIDGE CONNECTION FAILED. Is the daemon running?', 'bad')
+      audio.playSfx('cancel')
+    } else {
+      pollCount++
+      setTimeout(checkBridge, 500)
+    }
+  }
+  
+  setTimeout(checkBridge, 1000)
 }
+
+// (Sequence functions replaced with nested timeouts above)
 
 // Initial Run
 runSequence()
@@ -145,7 +167,7 @@ useKeyboard((e: KeyboardEvent) => {
               <span>CONNECTION CHAIN</span>
               <div class="flex gap-2">
                 <CyberButton size="sm" variant="primary" @click="$router.push('/pit-stall/live')" v-if="carState === 'ok'" style="font-size: 10px; padding: 2px 6px;">LIVE WALL</CyberButton>
-                <CyberButton size="sm" variant="secondary" @click="runSequence" v-if="carState === 'ok'" style="font-size: 10px; padding: 2px 6px;">REBOOT LINK</CyberButton>
+                <CyberButton size="sm" variant="secondary" @click="runSequence" style="font-size: 10px; padding: 2px 6px;">RETRY / REBOOT</CyberButton>
               </div>
             </div>
             <div class="flex flex-col gap-2 px-[1.5vmin] pb-[1.5vmin] flex-grow no-scrollbar min-h-0">

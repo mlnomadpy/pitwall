@@ -53,11 +53,13 @@ useKeyboard((e: KeyboardEvent) => {
 </script>
 
 <template>
-  <div class="cyber-menu-list">
+  <div class="cyber-menu-list" role="listbox" :aria-label="'Menu'">
     <div 
       v-for="(opt, i) in options" 
       :key="i"
       class="menu-option"
+      role="option"
+      :aria-selected="cursorIndex === i && (active === undefined || active)"
       :class="(cursorIndex === i && (active === undefined || active)) ? 'option-focused' : 'option-default'"
       @click="selectOption(i)"
       @mouseenter="() => { if(active === undefined || active) { cursorIndex = i; audio.playSfx('cursor_move') } }"
@@ -98,6 +100,12 @@ useKeyboard((e: KeyboardEvent) => {
   transform: translate(-2px, -2px);
   color: white;
   font-weight: bold;
+  animation: focus-glow 2s ease-in-out infinite;
+}
+
+@keyframes focus-glow {
+  0%, 100% { box-shadow: 4px 4px 0 rgba(0,0,0,0.8), 0 0 4px rgba(78,205,196,0.2); }
+  50% { box-shadow: 4px 4px 0 rgba(0,0,0,0.8), 0 0 16px rgba(78,205,196,0.4); }
 }
 
 .option-default {

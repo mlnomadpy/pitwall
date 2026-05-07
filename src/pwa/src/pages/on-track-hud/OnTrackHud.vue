@@ -6,7 +6,7 @@ import { useCueStore } from '@/features/coach-interaction/model/cueStore'
 import { useSessionStore } from '@/entities/session/model/sessionStore'
 import { useTelemetryStore } from '@/entities/session/model/telemetryStore'
 import GripBar from '@/widgets/hud/GripBar.vue'
-import TrackMap from '@/widgets/hud/TrackMap.vue'
+import HudTrackMap from '@/widgets/hud/HudTrackMap.vue'
 import CueBand from '@/features/coach-interaction/ui/CueBand.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 
@@ -39,7 +39,7 @@ onMounted(async () => {
   }
 
   cueStore.open(sid)
-  telemetry.open(sid)
+  telemetry.open('SIM') // Use SIM mode for testing since APIs don't exist yet
   
   simInterval = window.setInterval(() => {
     if (paused.value) return
@@ -84,7 +84,7 @@ useKeyboard((e: KeyboardEvent) => {
           <div class="absolute top-[2vmin] left-[2vmin] flex gap-[3vw]">
             <div class="flex flex-col">
               <span class="text-small text-slate tracking-widest">LAP</span>
-              <span class="text-title-sm text-white font-bold">3 / 8</span>
+              <span class="text-title-sm text-white font-bold">{{ telemetry.frame?.lap_number ?? 1 }} / {{ session.totalLaps ?? 8 }}</span>
             </div>
             <div class="flex flex-col">
               <span class="text-small text-slate tracking-widest">TIME</span>
@@ -92,7 +92,7 @@ useKeyboard((e: KeyboardEvent) => {
             </div>
           </div>
           
-          <TrackMap track="sonoma" :pos-m="distanceM" class="track-center self-center" />
+          <HudTrackMap track="sonoma" :pos-m="distanceM" class="track-center self-center" />
           
           <div class="absolute bottom-[2vmin] left-0 w-full text-center text-small text-slate tracking-[0.2em]">
             SONOMA RACEWAY
@@ -127,7 +127,7 @@ useKeyboard((e: KeyboardEvent) => {
                 {{ telemetry.frame ? 'STREAMING' : 'WAITING' }}
               </span>
             </div>
-            <div class="grid grid-cols-2 gap-x-4 gap-y-2 font-monospace text-body">
+            <div class="grid grid-cols-2 gap-x-4 gap-y-2 font-monospace text-[clamp(10px,2vmin,16px)]">
               <div class="flex justify-between">
                 <span class="text-slate">FRC</span>
                 <span class="text-white">{{ frictionPct.toFixed(1) }} %</span>
@@ -158,7 +158,7 @@ useKeyboard((e: KeyboardEvent) => {
       <h2 class="text-title-lg text-ui-warn font-title mb-[2vh] animate-pulse">PAUSED</h2>
       <p class="text-body mb-[4vh] text-silver">SYS HALT</p>
       <div class="flex gap-[4vw] text-body">
-        <span class="text-silver hover:text-white cursor-pointer" @click="router.push('/garage')">ENTER · QUIT</span>
+        <span class="text-silver hover:text-white cursor-pointer" @click="router.push('/garage')">ENTER · GARAGE</span>
         <span class="text-silver hover:text-white cursor-pointer" @click="paused = false">B · RESUME</span>
       </div>
     </div>
