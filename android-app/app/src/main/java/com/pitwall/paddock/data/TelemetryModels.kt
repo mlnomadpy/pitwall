@@ -31,7 +31,7 @@ data class SignalValue(
 
 // ── Telemetry frame ───────────────────────────────────────────────────────────
 
-data class TelemetryFrame(
+data class LegacyTelemetryFrame(
     val timestamp: Double,
     val sources: List<String>,
 

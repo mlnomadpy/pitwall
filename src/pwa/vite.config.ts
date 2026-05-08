@@ -60,7 +60,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8765', rewrite: p => p.replace(/^\/api/, '') },
+      // Match only known Flask blueprint prefixes — everything else stays in Vite
+      '^/(health|analyze|session|sessions|insights|coach|score|conversations|signals|track|markers|driver|telemetry|cue|spectator|diagnostics|upload|can)(/?|/.*)$': {
+        target: 'http://127.0.0.1:8765',
+        changeOrigin: true,
+      },
     },
   },
 })

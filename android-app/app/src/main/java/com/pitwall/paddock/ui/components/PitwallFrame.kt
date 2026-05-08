@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import com.pitwall.paddock.ui.theme.ColorCharcoal
 import com.pitwall.paddock.ui.theme.ColorSlate
 import com.pitwall.paddock.ui.theme.Dimens
@@ -47,7 +49,8 @@ fun PitwallFrame(
     ) {
         if (accentColor != null) {
             // Left accent bar — same as web 4px colored strip
-            Row(Modifier.matchParentSize()) {
+            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)) {
+                // Accent bar matches the height of the content due to IntrinsicSize.Min
                 Box(
                     Modifier
                         .width(Dimens.AccentBarWidth)
@@ -55,13 +58,14 @@ fun PitwallFrame(
                         .background(
                             accentColor,
                             RoundedCornerShape(
-                                topStart     = cornerRadius,
-                                bottomStart  = cornerRadius,
-                                topEnd       = androidx.compose.ui.unit.Dp.Unspecified,
-                                bottomEnd    = androidx.compose.ui.unit.Dp.Unspecified,
+                                topStart    = cornerRadius,
+                                bottomStart = cornerRadius,
+                                topEnd      = 0.dp,
+                                bottomEnd   = 0.dp,
                             ),
                         ),
                 )
+                // Main content
                 Box(Modifier.weight(1f).padding(start = Dimens.SpaceSm)) {
                     content()
                 }

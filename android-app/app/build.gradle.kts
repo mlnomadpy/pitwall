@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 val localProps = Properties().apply {
@@ -81,4 +82,19 @@ dependencies {
     implementation(libs.okhttp.logging)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Local save slots & settings
+    implementation("androidx.datastore:datastore-preferences:1.1.1")
+
+    // Image loading (Coach avatars)
+    implementation("io.coil-kt:coil-compose:2.6.0")
+    implementation("io.coil-kt:coil-gif:2.6.0")
+
+    // SSE Streaming
+    implementation("com.squareup.okhttp3:okhttp-sse:4.12.0")
+
+    // Room Database
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 }

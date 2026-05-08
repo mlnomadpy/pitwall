@@ -4,6 +4,9 @@ import android.util.Log
 import com.pitwall.paddock.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -76,5 +79,54 @@ class BridgeClient(
                 .build()
             http.newCall(req).execute().use { it.isSuccessful }
         } catch (e: Exception) { false }
+    }
+
+    /** SSE: /telemetry/stream */
+    fun telemetryStream(sid: String): kotlinx.coroutines.flow.Flow<TelemetryFrame> = kotlinx.coroutines.flow.callbackFlow {
+        val req = Request.Builder().url("$baseUrl/telemetry/stream?session_id=$sid").build()
+        val factory = okhttp3.sse.EventSources.createFactory(http)
+        val listener = object : okhttp3.sse.EventSourceListener() {
+            override fun onEvent(eventSource: okhttp3.sse.EventSource, id: String?, type: String?, data: String) {
+                try {
+                    val frame = Json { ignoreUnknownKeys = true }.decodeFromString<TelemetryFrame>(data)
+                    trySend(frame)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse telemetry: ${e.message}")
+                }
+            }
+            override fun onFailure(eventSource: okhttp3.sse.EventSource, t: Throwable?, response: okhttp3.Response?) {
+                Log.e(TAG, "Telemetry stream failed: ${t?.message}")
+                // In production, might want to implement reconnect logic here if okhttp-sse doesn't auto-reconnect
+            }
+            override fun onClosed(eventSource: okhttp3.sse.EventSource) {
+                close()
+            }
+        }
+        val es = factory.newEventSource(req, listener)
+        awaitClose { es.cancel() }
+    }
+
+    /** SSE: /cues/stream */
+    fun cueStream(sid: String): kotlinx.coroutines.flow.Flow<CueEvent> = kotlinx.coroutines.flow.callbackFlow {
+        val req = Request.Builder().url("$baseUrl/cues/stream?session_id=$sid").build()
+        val factory = okhttp3.sse.EventSources.createFactory(http)
+        val listener = object : okhttp3.sse.EventSourceListener() {
+            override fun onEvent(eventSource: okhttp3.sse.EventSource, id: String?, type: String?, data: String) {
+                try {
+                    val cue = Json { ignoreUnknownKeys = true }.decodeFromString<CueEvent>(data)
+                    trySend(cue)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to parse cue: ${e.message}")
+                }
+            }
+            override fun onFailure(eventSource: okhttp3.sse.EventSource, t: Throwable?, response: okhttp3.Response?) {
+                Log.e(TAG, "Cue stream failed: ${t?.message}")
+            }
+            override fun onClosed(eventSource: okhttp3.sse.EventSource) {
+                close()
+            }
+        }
+        val es = factory.newEventSource(req, listener)
+        awaitClose { es.cancel() }
     }
 }
