@@ -33,7 +33,7 @@ defineProps<{
 
 .grip-bar {
   width: clamp(16px, 3.5vw, 32px);
-  height: clamp(100px, 30vh, 240px);
+  height: clamp(80px, 20vh, 180px);
   border: 2px solid var(--color-slate);
   background: var(--color-ink);
   display: flex;
@@ -61,17 +61,26 @@ defineProps<{
   transition: height 0.05s linear;
   will-change: height;
   position: relative;
+  /* Texture pattern for colorblind clarity */
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(255, 255, 255, 0.1),
+    rgba(255, 255, 255, 0.1) 2px,
+    transparent 2px,
+    transparent 4px
+  );
 }
 
 .fill-normal {
-  background: linear-gradient(180deg, var(--color-ui-good) 0%, rgba(42, 161, 152, 0.6) 100%);
-  box-shadow: 0 0 6px rgba(42, 161, 152, 0.3);
+  background-color: var(--color-ui-good);
+  box-shadow: 0 0 10px rgba(78, 205, 196, 0.4);
 }
 
 .fill-over {
-  background: linear-gradient(180deg, var(--color-ui-bad) 0%, rgba(220, 50, 47, 0.6) 100%);
-  box-shadow: 0 0 6px rgba(220, 50, 47, 0.3);
+  background-color: var(--color-ui-bad);
+  box-shadow: 0 0 10px rgba(255, 71, 87, 0.4);
 }
+
 
 .grip-label {
   color: var(--color-silver);

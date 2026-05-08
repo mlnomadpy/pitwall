@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { bridge } from '@/shared/api/bridge'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberTabs from '@/shared/ui/core/CyberTabs.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
@@ -30,14 +31,50 @@ const coaches = [
 const activeCoachIndex = ref(0)
 const activeCoach = computed(() => coaches[activeCoachIndex.value])
 
-// Mock phrases
-const phrases = Array.from({ length: 50 }).map((_, i) => ({
-  id: `phrase_${i}`,
-  key: i === 0 ? 'distance_is_king' : i === 1 ? 'trail_brake' : `phrase_key_${i}`,
-  text: i === 0 ? "Distance is king" : i === 1 ? "Roll the brake to apex" : `Mock phrase text for ${i}`,
-  emotion: i % 3 === 0 ? '🅴' : i % 3 === 1 ? '🅸' : '🅼',
-  unlocked: i < 47, // First 47 unlocked
-}))
+interface Concept {
+  id: string
+  key: string
+  text: string
+  emotion: string
+  unlocked: boolean
+}
+
+// Phrases populated from backend or fallback
+const phrases = ref<Concept[]>([])
+
+const FALLBACK_CONCEPTS = [
+  { id: 'trail_brake', description: 'Smoothly release brake as steering increases at corner entry.' },
+  { id: 'entry_release', description: 'Keep some brake on entry to load front tires.' },
+  { id: 'exit_speed', description: 'Throttle on early — exit speed beats corner speed.' },
+  { id: 'hustle', description: 'Commit to 100% throttle on the straights.' },
+  { id: 'eob', description: 'Look at the end of braking, not the start.' },
+  { id: 'downhill_brake', description: 'Downhill: brake earlier — gravity adds speed.' },
+  { id: 'uphill_brake', description: 'Uphill: brake zone is shorter.' },
+  { id: 'late_apex', description: 'Late apex for a faster exit.' },
+  { id: 'look_ahead', description: 'Eyes far ahead — vision drives the line.' },
+]
+
+onMounted(async () => {
+  try {
+    const res = await bridge.get<{ concepts: { id: string; description: string; fires_when: string }[] }>('/coach/concepts')
+    phrases.value = res.concepts.map((c, i) => ({
+      id: c.id,
+      key: c.id,
+      text: c.description,
+      emotion: i % 3 === 0 ? '🅴' : i % 3 === 1 ? '🅸' : '🅼',
+      unlocked: true,
+    }))
+  } catch {
+    // Fallback to static Bentley concepts
+    phrases.value = FALLBACK_CONCEPTS.map((c, i) => ({
+      id: c.id,
+      key: c.id,
+      text: c.description,
+      emotion: i % 3 === 0 ? '🅴' : i % 3 === 1 ? '🅸' : '🅼',
+      unlocked: true,
+    }))
+  }
+})
 
 const cursorIndex = ref(0)
 
@@ -58,7 +95,7 @@ useKeyboard((e: KeyboardEvent) => {
     }
   } else if (e.key === 'ArrowDown') {
     if (!e.shiftKey) {
-      cursorIndex.value = (cursorIndex.value + 1) % phrases.length
+      cursorIndex.value = (cursorIndex.value + 1) % phrases.value.length
       audio.playSfx('cursor_move')
       // auto scroll logic would normally go here if not native
       const el = document.getElementById(`phrase-${cursorIndex.value}`)
@@ -66,13 +103,13 @@ useKeyboard((e: KeyboardEvent) => {
     }
   } else if (e.key === 'ArrowUp') {
     if (!e.shiftKey) {
-      cursorIndex.value = (cursorIndex.value - 1 + phrases.length) % phrases.length
+      cursorIndex.value = (cursorIndex.value - 1 + phrases.value.length) % phrases.value.length
       audio.playSfx('cursor_move')
       const el = document.getElementById(`phrase-${cursorIndex.value}`)
       el?.scrollIntoView({ block: 'nearest' })
     }
   } else if (e.key === 'Enter' || e.key === 'a') {
-    const p = phrases[cursorIndex.value]
+    const p = phrases.value[cursorIndex.value]
     if (p.unlocked) {
       audio.playSfx('cursor_select')
       emit('play', { coachId: activeCoach.value.id, text: p.text })
@@ -100,7 +137,7 @@ useKeyboard((e: KeyboardEvent) => {
           
           <div class="w-full bg-charcoal border-t border-slate p-3 text-center z-10">
             <h2 class="text-[clamp(16px,4vmin,24px)] text-silver tracking-[0.2em] font-bold">{{ activeCoach.name }}</h2>
-            <div class="text-small text-ui-good mt-1 font-bold">47 / 50 PHRASES UNLOCKED (94%)</div>
+            <div class="text-small text-ui-good mt-1 font-bold">{{ phrases.length }} CONCEPTS LOADED</div>
           </div>
         </CyberPanel>
       </div>

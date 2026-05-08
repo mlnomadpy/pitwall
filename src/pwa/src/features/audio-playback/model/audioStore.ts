@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { markRaw } from 'vue'
 import { Howl } from 'howler'
+import { useSaveStore } from '@/entities/save/model/saveStore'
 
 export const useAudioStore = defineStore('audio', {
   state: () => ({
@@ -12,7 +13,25 @@ export const useAudioStore = defineStore('audio', {
   }),
   actions: {
     playSfx(id: string) {
+      const saveStore = useSaveStore()
+      
+      // Haptic Feedback for GBA-style tactility
+      if (saveStore.activeSlot?.settings?.ux?.hapticFeedback) {
+        try {
+          if (id.includes('cursor_move')) {
+            navigator.vibrate?.(5)
+          } else if (id.includes('cursor_select') || id.includes('level_up')) {
+            navigator.vibrate?.([10, 30])
+          } else if (id.includes('cancel') || id.includes('error')) {
+            navigator.vibrate?.(40)
+          } else if (id.includes('goal_complete')) {
+            navigator.vibrate?.([20, 10, 20])
+          }
+        } catch { /* Fail silently if vibration is blocked */ }
+      }
+
       if (this.sfx.size > 50) {
+
         const firstKey = this.sfx.keys().next().value;
         if (firstKey) {
           this.sfx.get(firstKey)?.unload();

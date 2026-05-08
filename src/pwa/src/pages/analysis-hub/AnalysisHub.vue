@@ -7,6 +7,7 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberTile from '@/shared/ui/core/CyberTile.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
+import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 
 const router = useRouter()
 const save = useSaveStore()

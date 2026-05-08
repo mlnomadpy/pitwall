@@ -22,13 +22,16 @@ bp = Blueprint("core", __name__)
 def health():
     """Return bridge status, engine type, and DuckDB availability."""
     return jsonify({
-        "status":    "ok",
-        "version":   "2.0",
-        "engine":    "sonic_model" if state.has_sonic else "rules",
-        "track":     state.track.name if state.track else None,
-        "duckdb":    state.has_duckdb,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "status":            "ok",
+        "version":           "2.0",
+        "engine":            "sonic_model" if state.has_sonic else "rules",
+        "track":             state.track.name if state.track else None,
+        "duckdb":            state.has_duckdb,
+        "active_session_id": state.active_session_id,
+        "timestamp":         datetime.now(timezone.utc).isoformat(),
     })
+
+
 
 
 @bp.route("/analyze", methods=["POST"])

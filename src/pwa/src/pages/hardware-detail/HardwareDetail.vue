@@ -5,12 +5,15 @@ import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { bridge } from '@/shared/api/bridge'
 
+import { useTelemetryStore } from '@/entities/session/model/telemetryStore'
+
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberBox from '@/shared/ui/core/CyberBox.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
+const telemetry = useTelemetryStore()
 
 
 interface SignalCapability {
@@ -99,7 +102,6 @@ useKeyboard((e: KeyboardEvent) => {
     if (cursorIndex.value < totalSignals.value - 1) {
       cursorIndex.value++
       audio.playSfx('cursor_move')
-      // Auto-scroll logic could be added here if needed
     }
   } else if (e.key === 'ArrowUp') {
     if (cursorIndex.value > 0) {
@@ -140,9 +142,32 @@ onMounted(async () => {
 
 let liveTimer: number | null = null
 
+/** Map telemetry frame data to signal table when available */
+const SIGNAL_MAP: Record<string, (frame: any) => number> = {
+  'rpm': f => f.rpm,
+  'speed': f => f.speed,
+  'throttle': f => f.throttle,
+  'brake_pressure': f => f.brake_pressure,
+  'steering': f => f.steering,
+  'g_lat': f => f.g_lat,
+  'g_long': f => f.g_long,
+  'combo_g': f => f.combo_g,
+  'distance': f => f.distance,
+}
+
 const updateLiveValues = () => {
+  const frame = telemetry.frame
   signals.value.forEach(s => {
-    s.last = (s.baseValue + (Math.random() * s.variance * 2 - s.variance)).toFixed(2)
+    const getter = SIGNAL_MAP[s.name.toLowerCase()]
+    if (frame && getter) {
+      try {
+        s.last = getter(frame).toFixed(2)
+      } catch {
+        s.last = (s.baseValue + (Math.random() * s.variance * 2 - s.variance)).toFixed(2)
+      }
+    } else {
+      s.last = (s.baseValue + (Math.random() * s.variance * 2 - s.variance)).toFixed(2)
+    }
   })
 }
 

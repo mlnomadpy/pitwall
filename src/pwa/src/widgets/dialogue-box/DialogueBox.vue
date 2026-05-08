@@ -94,26 +94,29 @@ const toggleListen = (e: Event) => {
 <style scoped>
 .dialogue-box {
   position: absolute;
-  bottom: clamp(26px, 5vh, 50px); /* above hint bar */
-  left: 0;
-  width: 100%;
-  padding: 0 clamp(8px, 2vw, 24px) clamp(4px, 1vh, 12px);
-  z-index: 50;
-  pointer-events: none; /* Let clicks pass through to tiles behind */
+  /* Float above HintBar: HintBar height (calc(var(--safe-bottom) + 32px)) + gap */
+  bottom: calc(var(--safe-bottom) + 36px + var(--space-sm));
+  left: var(--safe-left);
+  right: var(--safe-right);
+  padding: 0 var(--space-md);
+  z-index: var(--z-modal); /* Increased z-index to clear sticky footer */
+  pointer-events: none;
 }
 
+
 .dialogue-box.compact {
-  transform: scale(0.85);
+  transform: scale(0.9);
   transform-origin: bottom left;
-  width: 117%;
 }
 
 .dialogue-layout {
   display: flex;
   align-items: flex-end;
-  gap: 0;
-  pointer-events: auto; /* Only the actual bubble captures clicks */
-  width: fit-content; /* Don't stretch to full width */
+  gap: var(--space-xs);
+  pointer-events: auto;
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
 }
 
 /* ── NPC Character Column ── */
@@ -123,29 +126,16 @@ const toggleListen = (e: Event) => {
   flex-direction: column;
   align-items: center;
   z-index: 2;
-  margin-right: clamp(-4px, -0.5vw, -2px); /* Overlap speech bubble slightly */
+  margin-right: calc(-1 * var(--space-xs));
 }
 
 .npc-character {
-  width: clamp(52px, 12vmin, 88px);
-  height: clamp(52px, 12vmin, 88px);
+  width: clamp(64px, 15vmin, 120px);
+  height: clamp(64px, 15vmin, 120px);
   display: flex;
   align-items: flex-end;
   justify-content: center;
   filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
-  transition: transform 0.2s ease;
-}
-
-.dialogue-box:active .npc-character {
-  transform: scale(0.95);
-}
-
-.npc-shadow {
-  width: clamp(36px, 8vmin, 56px);
-  height: clamp(4px, 0.8vmin, 6px);
-  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.6) 0%, transparent 70%);
-  margin-top: -2px;
-  filter: blur(2px);
 }
 
 /* ── Speech Bubble ── */
@@ -153,15 +143,16 @@ const toggleListen = (e: Event) => {
   flex: 1;
   border: 2px solid var(--color-slate);
   background-color: var(--color-ink);
-  padding: clamp(8px, 2vmin, 16px);
+  padding: var(--space-sm);
   display: flex;
   flex-direction: column;
-  gap: clamp(4px, 0.8vmin, 8px);
-  min-height: clamp(48px, 8vh, 80px);
-  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.8);
+  gap: var(--space-xs);
+  min-height: clamp(60px, 12vh, 100px);
+  box-shadow: var(--shadow-hard);
   position: relative;
   clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
 }
+
 
 /* Speech tail pointing to NPC */
 .speech-bubble::before {

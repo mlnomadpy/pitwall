@@ -1,41 +1,92 @@
 import { defineStore } from 'pinia'
+import { bridge } from '@/shared/api/bridge'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
+
+// ── Types matching GET /session/:sid/lap_time_table response ─────────────────
+
+export interface SectorTime {
+  name: string
+  time_s: number
+  is_best: boolean
+}
 
 export interface LapTime {
-  lap: number
-  time: string
-  delta: string
-  valid: boolean
-  sectors: string[]
-  best?: boolean
-  outlier?: boolean
+  lap_number: number
+  lap_time_s: number
+  delta_to_best_s: number
+  is_best: boolean
+  sectors: SectorTime[]
 }
+
+interface LapTimeTableResponse {
+  session_id: string
+  lap_count: number
+  best_lap_s: number
+  best_lap_number: number
+  laps: LapTime[]
+}
+
+// ── Store ────────────────────────────────────────────────────────────────────
 
 export const useLapTimeStore = defineStore('lapTime', {
   state: () => ({
     laps: [] as LapTime[],
+    bestLapS: null as number | null,
+    bestLapNumber: null as number | null,
     isLoading: false,
-    error: null as Error | null
+    error: null as string | null,
   }),
+
+  getters: {
+    /** Best lap formatted as M:SS.mmm */
+    bestFormatted: (state) => {
+      if (!state.bestLapS) return '--:--.---'
+      const mins = Math.floor(state.bestLapS / 60)
+      const secs = (state.bestLapS % 60).toFixed(3)
+      return `${mins}:${secs.padStart(6, '0')}`
+    },
+    /** Laps sorted fastest-first */
+    sortedByTime: (state) => [...state.laps].sort((a, b) => a.lap_time_s - b.lap_time_s),
+    /** Lap count */
+    count: (state) => state.laps.length,
+  },
+
   actions: {
-    async fetchLapTimes() {
+    /**
+     * Fetch lap times from the backend.
+     * Uses the active session from sessionStore if no sid provided.
+     */
+    async fetchLapTimes(sid?: string) {
+      const sessionStore = useSessionStore()
+      const sessionId = sid ?? sessionStore.activeSessionId
+      if (!sessionId) {
+        this.error = 'No active session'
+        return
+      }
+
       this.isLoading = true
       this.error = null
-      
-      await new Promise(resolve => setTimeout(resolve, 800))
-      
+
       try {
-        this.laps = [
-          { lap: 5, time: '1:36.450', delta: '-0.120', valid: true, sectors: ['31.2', '35.1', '30.150'] },
-          { lap: 4, time: '1:36.570', delta: '+0.400', valid: true, sectors: ['31.4', '35.0', '30.170'] },
-          { lap: 3, time: '1:36.170', delta: '-0.800', valid: false, sectors: ['31.1', '34.8', '--'], outlier: true }, 
-          { lap: 2, time: '1:36.970', delta: '-2.100', valid: true, sectors: ['31.5', '35.2', '30.270'] },
-          { lap: 1, time: '1:39.070', delta: 'OUT', valid: true, sectors: ['--', '36.1', '31.400'], best: true },
-        ]
+        const res = await bridge.get<LapTimeTableResponse>(`/session/${sessionId}/lap_time_table`)
+        this.laps = res.laps
+        this.bestLapS = res.best_lap_s
+        this.bestLapNumber = res.best_lap_number
       } catch (e: any) {
-        this.error = e
+        this.error = e.message ?? String(e)
+        console.warn('[lapTimeStore] fetchLapTimes failed:', e)
+        // Keep existing data on error (graceful degradation)
       } finally {
         this.isLoading = false
       }
-    }
+    },
+
+    /** Clear lap data (e.g., on session change). */
+    clear() {
+      this.laps = []
+      this.bestLapS = null
+      this.bestLapNumber = null
+      this.error = null
+    },
   }
 })

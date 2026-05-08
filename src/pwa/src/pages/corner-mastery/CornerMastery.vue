@@ -2,7 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
+import { bridge } from '@/shared/api/bridge'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
@@ -10,30 +12,95 @@ import TrackMap from '@/shared/ui/core/TrackMap.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
+const session = useSessionStore()
 
-// Mock corner data
-const corners = ref([
-  { id: 'T1', progress: 8, svgTurnId: undefined as number | undefined, name: 'Turn 1', grade: 'B', entry: 140, apex: 120, exit: 145, brake: 20, glat: 1.1, time: 2.1, delta: '+0.1', class: 'med', throttle: { min: 10, q1: 30, med: 60, q3: 85, max: 100 } },
-  { id: 'T2', progress: 14, svgTurnId: undefined as number | undefined, name: 'Turn 2', grade: 'A', entry: 120, apex: 85, exit: 110, brake: 60, glat: 1.3, time: 3.4, delta: '-0.2', class: 'low', throttle: { min: 0, q1: 15, med: 45, q3: 70, max: 90 } },
-  { id: 'T3', progress: 18, svgTurnId: undefined as number | undefined, name: 'Turn 3', grade: 'C+', entry: 140, apex: 115, exit: 135, brake: 35, glat: 1.2, time: 2.8, delta: '+0.4', class: 'med', throttle: { min: 20, q1: 40, med: 55, q3: 80, max: 100 } },
-  { id: 'T3a', progress: 21, svgTurnId: undefined as number | undefined, name: 'Turn 3a', grade: 'B-', entry: 135, apex: 125, exit: 140, brake: 15, glat: 1.0, time: 1.5, delta: '+0.2', class: 'high', throttle: { min: 40, q1: 50, med: 70, q3: 90, max: 100 } },
-  { id: 'T4', progress: 24, svgTurnId: undefined as number | undefined, name: 'Turn 4', grade: 'A+', entry: 160, apex: 130, exit: 155, brake: 40, glat: 1.4, time: 2.5, delta: '-0.4', class: 'med', throttle: { min: 0, q1: 10, med: 30, q3: 60, max: 100 } },
-  { id: 'T5', progress: 30, svgTurnId: undefined as number | undefined, name: 'Turn 5', grade: 'B', entry: 140, apex: 105, exit: 125, brake: 50, glat: 1.2, time: 3.0, delta: '+0.1', class: 'low', throttle: { min: 0, q1: 20, med: 40, q3: 70, max: 95 } },
-  { id: 'T6', progress: 45, svgTurnId: undefined as number | undefined, name: 'Carousel', grade: 'B+', entry: 150, apex: 110, exit: 135, brake: 45, glat: 1.3, time: 4.5, delta: '-0.1', class: 'med', throttle: { min: 10, q1: 30, med: 50, q3: 80, max: 100 } },
-  { id: 'T7', progress: 55, svgTurnId: undefined as number | undefined, name: 'Turn 7', grade: 'F', entry: 165, apex: 82, exit: 105, brake: 85, glat: 1.1, time: 4.8, delta: '+0.8', class: 'low', throttle: { min: 0, q1: 5, med: 20, q3: 50, max: 80 } },
-  { id: 'T8', progress: 65, svgTurnId: undefined as number | undefined, name: 'Esses 1', grade: 'A', entry: 155, apex: 140, exit: 160, brake: 10, glat: 1.3, time: 1.8, delta: '-0.2', class: 'high', throttle: { min: 30, q1: 60, med: 80, q3: 95, max: 100 } },
-  { id: 'T8a', progress: 68, svgTurnId: undefined as number | undefined, name: 'Esses 2', grade: 'A-', entry: 160, apex: 145, exit: 165, brake: 5, glat: 1.2, time: 1.7, delta: '-0.1', class: 'high', throttle: { min: 40, q1: 70, med: 85, q3: 95, max: 100 } },
-  { id: 'T9', progress: 70, svgTurnId: undefined as number | undefined, name: 'Turn 9', grade: 'B', entry: 170, apex: 135, exit: 150, brake: 30, glat: 1.1, time: 2.4, delta: '+0.2', class: 'med', throttle: { min: 20, q1: 45, med: 65, q3: 85, max: 100 } },
-  { id: 'T10', progress: 80, svgTurnId: undefined as number | undefined, name: 'Turn 10', grade: 'C', entry: 180, apex: 110, exit: 130, brake: 65, glat: 1.2, time: 3.2, delta: '+0.5', class: 'low', throttle: { min: 0, q1: 15, med: 35, q3: 65, max: 95 } },
-  { id: 'T11', progress: 90, svgTurnId: undefined as number | undefined, name: 'Hairpin', grade: 'B+', entry: 175, apex: 64, exit: 95, brake: 90, glat: 1.4, time: 5.1, delta: '-0.1', class: 'low', throttle: { min: 0, q1: 0, med: 10, q3: 40, max: 100 } },
+interface Corner {
+  id: string
+  progress: number
+  svgTurnId: number | undefined
+  name: string
+  grade: string
+  entry: number
+  apex: number
+  exit: number
+  brake: number
+  glat: number
+  time: number
+  delta: string
+  class: string
+  throttle: { min: number; q1: number; med: number; q3: number; max: number }
+}
+
+// Default corner data — grades and stats overwritten when real scorecard is available
+const corners = ref<Corner[]>([
+  { id: 'T1', progress: 8, svgTurnId: undefined, name: 'Turn 1', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 10, q1: 30, med: 60, q3: 85, max: 100 } },
+  { id: 'T2', progress: 14, svgTurnId: undefined, name: 'Turn 2', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 15, med: 45, q3: 70, max: 90 } },
+  { id: 'T3', progress: 18, svgTurnId: undefined, name: 'Turn 3', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 20, q1: 40, med: 55, q3: 80, max: 100 } },
+  { id: 'T3a', progress: 21, svgTurnId: undefined, name: 'Turn 3a', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 40, q1: 50, med: 70, q3: 90, max: 100 } },
+  { id: 'T4', progress: 24, svgTurnId: undefined, name: 'Turn 4', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 10, med: 30, q3: 60, max: 100 } },
+  { id: 'T5', progress: 30, svgTurnId: undefined, name: 'Turn 5', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 20, med: 40, q3: 70, max: 95 } },
+  { id: 'T6', progress: 45, svgTurnId: undefined, name: 'Carousel', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 10, q1: 30, med: 50, q3: 80, max: 100 } },
+  { id: 'T7', progress: 55, svgTurnId: undefined, name: 'Turn 7', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 5, med: 20, q3: 50, max: 80 } },
+  { id: 'T8', progress: 65, svgTurnId: undefined, name: 'Esses 1', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 30, q1: 60, med: 80, q3: 95, max: 100 } },
+  { id: 'T8a', progress: 68, svgTurnId: undefined, name: 'Esses 2', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 40, q1: 70, med: 85, q3: 95, max: 100 } },
+  { id: 'T9', progress: 70, svgTurnId: undefined, name: 'Turn 9', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 20, q1: 45, med: 65, q3: 85, max: 100 } },
+  { id: 'T10', progress: 80, svgTurnId: undefined, name: 'Turn 10', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 15, med: 35, q3: 65, max: 95 } },
+  { id: 'T11', progress: 90, svgTurnId: undefined, name: 'Hairpin', grade: '--', entry: 0, apex: 0, exit: 0, brake: 0, glat: 0, time: 0, delta: '--', class: 'med', throttle: { min: 0, q1: 0, med: 10, q3: 40, max: 100 } },
 ])
+
+const activeSessionId = computed(() => {
+  // Pick the most recent session with laps
+  const withLaps = session.sessions.filter(s => s.lap_count > 0)
+  return session.activeSessionId ?? withLaps[0]?.session_id ?? null
+})
+
+// Fetch real scorecard from backend and merge into corners
+async function fetchScorecard() {
+  const sid = activeSessionId.value
+  if (!sid) return
+  try {
+    const data = await bridge.get<any>(`/session/${sid}/scorecard`)
+    if (!data?.corners) return
+    // Corner name → scorecard data map
+    const cardMap = new Map<string, any>()
+    for (const c of data.corners) {
+      // Map scorecard corner names to our IDs (Turn 1 → T1, The Carousel → T6, etc.)
+      const name: string = c.corner ?? c.name ?? ''
+      cardMap.set(name, c)
+    }
+
+    corners.value.forEach(corner => {
+      // Try matching by corner name
+      const card = cardMap.get(corner.name) ?? cardMap.get(`Turn ${corner.id.replace('T', '')}`)
+      if (card) {
+        corner.grade = card.grade ?? corner.grade
+        corner.entry = card.entry_speed_kmh ?? card.avg_entry_kmh ?? corner.entry
+        corner.apex = card.apex_speed_kmh ?? card.min_speed_kmh ?? corner.apex
+        corner.exit = card.exit_speed_kmh ?? card.avg_exit_kmh ?? corner.exit
+        corner.brake = card.peak_brake_bar ?? corner.brake
+        corner.glat = card.peak_g_lat ?? card.max_lateral_g ?? corner.glat
+        corner.time = card.time_s ?? corner.time
+        corner.delta = card.delta_s != null ? `${card.delta_s >= 0 ? '+' : ''}${card.delta_s.toFixed(1)}` : corner.delta
+        corner.class = card.grade?.startsWith('A') ? 'high' : card.grade?.startsWith('F') ? 'low' : 'med'
+      }
+    })
+  } catch {
+    // Scorecard not available — keep defaults
+  }
+}
 
 const cursorIndex = ref(0)
 const cur = computed(() => corners.value[cursorIndex.value])
 
 const trackMapRef = ref<any>(null)
 
-onMounted(() => {
+onMounted(async () => {
+  // Fetch sessions if not already loaded
+  if (session.sessions.length === 0) await session.fetchSessions()
+
+  // Fetch real corner grades
+  await fetchScorecard()
+
   setTimeout(() => {
     if (trackMapRef.value && trackMapRef.value.trackTurns) {
       corners.value.forEach(c => {
@@ -96,89 +163,84 @@ useKeyboard((e: KeyboardEvent) => {
 </script>
 
 <template>
-  <PageShell title="CORNER MASTERY" subtitle="session 2026-04-29-1503" :hints="['A · DRILL DOWN (SOON)', '◀ ▶ MOVE', 'B · BACK']" bg="cool">
-    <!-- Interactive Track Minimap -->
-    <CyberPanel class="h-[25vh] flex items-center justify-center bg-[#1A252C] overflow-hidden p-0 relative border-b border-slate">
-      <TrackMap ref="trackMapRef" 
-                class="absolute inset-[-10%] w-[120%] h-[120%] opacity-80"
-                :activeTurnId="cur.svgTurnId"
-                @turn-click="(id: number) => { const idx = corners.findIndex(c => c.svgTurnId === id); if (idx !== -1) { cursorIndex = idx; audio.playSfx('cursor_select'); } }" />
-      <div class="absolute top-2 left-2 text-silver text-small font-bold z-10">TRACK MINIMAP</div>
-    </CyberPanel>
+  <PageShell title="CORNER MASTERY" subtitle="session 2026-04-29-1503" :hints="['A · DRILL DOWN', '◀ ▶ MOVE', 'B · BACK']" bg="cool">
     
-    <!-- Drill Panel -->
-    <CyberPanel class="p-2 min-h-[50px] relative transition-colors duration-200"
-           :class="cur.grade.startsWith('A') ? 'border-ui-good/50 bg-ui-good/10' : cur.grade === 'F' ? 'border-ui-warn/50 bg-ui-warn/10' : ''">
-      <div class="flex justify-between items-end mb-2 border-b border-slate pb-1">
-        <span class="font-bold text-body"><span class="text-ui-info mr-1">▶</span>{{ cur.id }}  {{ cur.name.toUpperCase() }}</span>
-        <span class="text-title-lg leading-none" :class="getGradeColor(cur.grade)">{{ cur.grade }}</span>
-      </div>
+    <div class="grid grid-cols-[1.2fr_1fr] gap-[2vw] flex-grow min-h-0">
       
-      <div class="grid grid-cols-3 gap-2 text-body">
-        <div>ENTRY <span class="font-bold text-white ml-1">{{ cur.entry }}</span> km/h</div>
-        <div>APEX <span class="font-bold text-white ml-1">{{ cur.apex }}</span> km/h</div>
-        <div>EXIT <span class="font-bold text-white ml-1">{{ cur.exit }}</span> km/h</div>
+      <!-- Left: Map & Drill -->
+      <div class="flex flex-col gap-[2vh]">
+        <!-- Interactive Track Minimap -->
+        <Frame variant="inset" padding="0" class="h-[35vh] flex items-center justify-center bg-[#1A252C] overflow-hidden relative border-slate/30">
+          <TrackMap ref="trackMapRef" 
+                    class="absolute inset-[-10%] w-[120%] h-[120%] opacity-80"
+                    :activeTurnId="cur.svgTurnId"
+                    @turn-click="(id: number) => { const idx = corners.findIndex(c => c.svgTurnId === id); if (idx !== -1) { cursorIndex = idx; audio.playSfx('cursor_select'); } }" />
+          <div class="absolute top-2 left-2 text-small text-slate font-bold z-10 tracking-widest uppercase">Track Navigation</div>
+        </Frame>
         
-        <div>PEAK BRAKE <span class="font-bold text-white ml-1">{{ cur.brake }}</span> bar</div>
-        <div>MAX gLat <span class="font-bold text-white ml-1">{{ cur.glat }}</span></div>
-        <div>TIME <span class="font-bold text-white ml-1">{{ cur.time }}</span>s</div>
+        <!-- Drill Panel -->
+        <Frame variant="default" padding="16px" class="relative transition-colors duration-300 flex-grow"
+               :class="cur.grade.startsWith('A') ? 'bg-ui-good/5 border-ui-good/50' : cur.grade === 'F' ? 'bg-ui-bad/5 border-ui-bad/50' : 'bg-ink/40'">
+          <div class="flex justify-between items-end mb-4 border-b border-slate/30 pb-2">
+            <span class="font-bold text-title-sm"><span class="text-ui-info mr-2">▶</span>{{ cur.id }}  {{ cur.name.toUpperCase() }}</span>
+            <span class="text-[clamp(32px,8vmin,56px)] leading-none font-bold" :class="getGradeColor(cur.grade)">{{ cur.grade }}</span>
+          </div>
+          
+          <div class="grid grid-cols-2 gap-x-8 gap-y-2 text-small tracking-wider">
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>ENTRY</span> <span class="font-bold text-white">{{ cur.entry }} km/h</span></div>
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>PEAK BRAKE</span> <span class="font-bold text-white">{{ cur.brake }} bar</span></div>
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>APEX</span> <span class="font-bold text-white">{{ cur.apex }} km/h</span></div>
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>MAX gLAT</span> <span class="font-bold text-white">{{ cur.glat }}</span></div>
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>EXIT</span> <span class="font-bold text-white">{{ cur.exit }} km/h</span></div>
+            <div class="flex justify-between border-b border-slate/10 pb-1"><span>TIME</span> <span class="font-bold text-white">{{ cur.time }}s</span></div>
+          </div>
+          
+          <div class="absolute bottom-4 right-4 text-small font-bold uppercase tracking-widest">
+            Delta <span :class="cur.delta.startsWith('-') ? 'text-ui-good' : 'text-ui-bad'">{{ cur.delta }}s</span>
+          </div>
+        </Frame>
       </div>
-      
-      <div class="absolute bottom-2 right-2 text-body text-silver">
-        GOLD DELTA <span class="font-bold" :class="cur.delta.startsWith('-') ? 'text-ui-good' : 'text-ui-warn'">{{ cur.delta }}</span>s
-      </div>
-    </CyberPanel>
-    
-    <!-- Throttle/Brake Mock Charts -->
-    <CyberSplitView split="50-50" gap="sm" class="flex-grow min-h-0">
-      <template #left>
-        <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
-          <div class="text-silver mb-1">THROTTLE % BY CORNER</div>
-          <div class="flex flex-col gap-1 overflow-y-auto no-scrollbar pr-1">
-            <!-- Real box plots -->
+
+      <!-- Right: Charts & Analysis -->
+      <div class="flex flex-col gap-[2vh]">
+        <Frame variant="default" padding="16px" class="h-[50%] flex flex-col overflow-hidden bg-ink/40">
+          <div class="text-small text-slate tracking-widest uppercase mb-4 border-b border-slate/30 pb-1">Throttle Profile</div>
+          <div class="flex flex-col gap-2 overflow-y-auto no-scrollbar flex-grow pr-2">
             <div v-for="c in corners" :key="c.id" 
-                 class="flex items-center gap-2 transition-colors px-1 rounded-sm"
-                 :class="cur.id === c.id ? 'bg-charcoal text-white' : ''"
+                 class="flex items-center gap-4 transition-all py-1 px-2 rounded"
+                 :class="cur.id === c.id ? 'bg-slate/20' : 'opacity-60'"
                  @click="() => { const idx = corners.findIndex(x => x.id === c.id); if (idx !== -1) { cursorIndex = idx; audio.playSfx('cursor_select'); } }"
             >
-              <span class="w-6 text-[clamp(10px,2vmin,14px)] font-bold text-center" :class="cur.id === c.id ? 'text-white' : 'text-silver'">{{ c.id }}</span>
-              <div class="flex-grow h-[8px] relative border-b border-slate my-[2px]">
-                <!-- Whisker caps -->
-                <div class="absolute w-[1px] h-[6px] bg-silver top-[1px]" :style="{ left: c.throttle.min + '%' }"></div>
-                <div class="absolute w-[1px] h-[6px] bg-silver top-[1px]" :style="{ left: c.throttle.max + '%' }"></div>
-                <!-- Whisker line -->
-                <div class="absolute h-[1px] bg-silver top-[4px]" :style="{ left: c.throttle.min + '%', right: (100 - c.throttle.max) + '%' }"></div>
-                <!-- Box -->
-                <div class="absolute h-[6px] bg-ink border border-silver top-[1px]" :style="{ left: c.throttle.q1 + '%', width: (c.throttle.q3 - c.throttle.q1) + '%' }"></div>
-                <!-- Median -->
-                <div class="absolute w-[2px] h-[6px] top-[1px]" :class="cur.id === c.id ? 'bg-ui-good' : 'bg-ui-warn'" :style="{ left: c.throttle.med + '%' }"></div>
+              <span class="w-8 text-small font-black text-center" :class="cur.id === c.id ? 'text-white' : 'text-slate'">{{ c.id }}</span>
+              <div class="flex-grow h-3 relative border-b border-slate/30">
+                <div class="absolute w-[1px] h-full bg-slate/50" :style="{ left: c.throttle.min + '%' }"></div>
+                <div class="absolute w-[1px] h-full bg-slate/50" :style="{ left: c.throttle.max + '%' }"></div>
+                <div class="absolute h-[1px] bg-slate/30 top-1/2 w-full" :style="{ left: c.throttle.min + '%', width: (c.throttle.max - c.throttle.min) + '%' }"></div>
+                <div class="absolute h-full bg-charcoal-mid border border-slate/40" :style="{ left: c.throttle.q1 + '%', width: (c.throttle.q3 - c.throttle.q1) + '%' }"></div>
+                <div class="absolute w-1 h-full bg-ui-warn" :style="{ left: c.throttle.med + '%' }"></div>
               </div>
             </div>
           </div>
-        </CyberPanel>
-      </template>
-      
-      <template #right>
-        <CyberPanel class="h-full flex flex-col text-body overflow-hidden p-2">
-          <div class="text-silver mb-1">BRAKE / ACCEL ZONES</div>
-          <div class="flex flex-col gap-2 mt-2">
-            <div class="flex gap-2 items-center">
-              <span class="text-ui-warn">▼</span> <span class="w-8">DECEL</span>
-              <div class="flex-grow h-2 bg-charcoal flex items-center">
-                <div class="h-full bg-ui-warn w-1/3"></div>
-                <span class="ml-1 text-small">T7</span>
-              </div>
-            </div>
-            <div class="flex gap-2 items-center">
-              <span class="text-ui-good">▲</span> <span class="w-8">ACCEL</span>
-              <div class="flex-grow h-2 bg-charcoal flex items-center">
-                <div class="h-full bg-ui-good w-1/2"></div>
-                <span class="ml-1 text-small">T11</span>
-              </div>
-            </div>
+        </Frame>
+
+        <Frame variant="default" padding="16px" class="flex-grow flex flex-col bg-ink/40">
+          <div class="text-small text-slate tracking-widest uppercase mb-4 border-b border-slate/30 pb-1">Brake Consistency</div>
+          <div class="flex-grow flex items-center justify-center">
+             <PixelChart 
+                :data="[20, 45, 80, 85, 70, 30, 10, 0]" 
+                color="var(--color-ui-bad)"
+                :height="80"
+                :width="300"
+                :stroke-width="3"
+             />
           </div>
-        </CyberPanel>
-      </template>
-    </CyberSplitView>
+          <div class="mt-4 text-small text-center italic text-slate/80">
+            "Roll the brake to the apex, don't square-wave it."
+          </div>
+        </Frame>
+      </div>
+
+    </div>
   </PageShell>
 </template>
+

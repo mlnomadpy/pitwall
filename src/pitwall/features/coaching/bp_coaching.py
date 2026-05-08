@@ -100,8 +100,18 @@ def coach_debrief():
     if state.has_adk:
         try:
             adk_prompt = f"Generate a post-session debrief for session '{sid}', driver '{driver_id}'. Query DuckDB for lap times, corner grades, coaching notes. Structure: 1 highlight sentence, then FOCUS list of 3 items."
-            adk_narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver")
+            
+            # State overrides to speed up reasoning with pre-computed bundle context
+            overrides = {
+                "temp:session_id": sid,
+                "temp:best_lap": bundle.get("scorecard", {}).get("best_lap_s"),
+                "temp:n_laps": bundle.get("scorecard", {}).get("n_laps"),
+                "temp:highlights_count": len(bundle.get("highlights", [])),
+            }
+            
+            adk_narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
             _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid)
+
             _em = re.search(r"\[EMOTION:(\w+)\]", adk_narrative)
             if _em: bundle["emotion"]=_em.group(1); adk_narrative=re.sub(r"\[EMOTION:\w+\]\s*","",adk_narrative).strip()
             bundle["narrative"]=adk_narrative; bundle["narrative_source"]="adk"
@@ -214,10 +224,29 @@ def coach_brief():
     HAS_ADK_THIS_REQUEST = False
     if state.has_adk:
         try:
-            adk_prompt = f"Generate a pre-session brief for driver '{driver_id}'. Date: {today}, weather: {weather_phase.id}, focus: {markers_selected or 'any'}, goal: {goal}. Weakest corner: {profile.get('weakest_recent_corner')}. Danger: {danger_today or 'none'}. 2-4 sentences + FOCUS list of 3."
-            narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver")
+            adk_prompt = f"Generate a pre-session brief for driver '{driver_id}'. Date: {today}, weather: {weather_phase.id}, focus: {markers_selected or 'any'}, goal: {goal}. Weakest corner: {profile.get('weakest_recent_corner')}. Danger: {danger_today or 'none'}. Format as 2-4 sentences of narrative, followed by exactly 'FOCUS:' and 3 bullet points."
+            
+            # State overrides to persist driver context across the paddock agents
+            overrides = {
+                "app:track_phase": weather_phase.id,
+                "user:driver_level": "intermediate", # fallback
+                "user:weakest_corner": profile.get("weakest_recent_corner"),
+                "temp:markers_selected": markers_selected,
+            }
+            
+            narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
             _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid_param or "")
+
+            
             focus = markers_selected[:3] or []
+            if "FOCUS:" in narrative:
+                parts = narrative.split("FOCUS:")
+                narrative = parts[0].strip()
+                focus_text = parts[1].strip()
+                bullets = [re.sub(r"^[-*0-9.]+\s*", "", line).strip() for line in focus_text.split("\n") if line.strip() and re.match(r"^[-*0-9.]+\s*", line.strip())]
+                if bullets:
+                    focus = bullets[:3]
+                    
             _em = re.search(r"\[EMOTION:(\w+)\]", narrative)
             if _em: emotion=_em.group(1); narrative=re.sub(r"\[EMOTION:\w+\]\s*","",narrative).strip()
             HAS_ADK_THIS_REQUEST = True

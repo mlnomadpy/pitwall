@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia'
 import { API_BASE } from '@/shared/config/api'
+import { useBridgeStore } from '@/shared/api/bridgeStore'
+
 
 export interface TelemetryFrame {
   timestamp: number
@@ -29,12 +31,19 @@ export const useTelemetryStore = defineStore('telemetry', {
   actions: {
     open(sid: string) {
       this.close()
-      if (sid === 'SIM') {
+      const bridge = useBridgeStore()
+      
+      // If bridge is online and reporting an active session, always prefer the real stream
+      const sessionToConnect = sid === 'SIM' ? (bridge.health?.active_session_id || 'SIM') : sid
+      
+      // Only run local fake simulation if we are explicitly in SIM mode AND bridge is unreachable
+      if (sid === 'SIM' && !bridge.health) {
         this.startSimulation()
       } else {
-        this._connect(sid)
+        this._connect(sessionToConnect)
       }
     },
+
     
     startSimulation() {
       this.close()

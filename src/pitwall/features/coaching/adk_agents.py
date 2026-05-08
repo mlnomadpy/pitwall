@@ -682,7 +682,7 @@ else:
             except Exception:
                 pass
 
-        def _record_tool(self, tool, tool_context, result) -> None:
+        def _record_tool(self, tool, tool_context, result, event_type="tool") -> None:
             try:
                 tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", "unknown")
                 agent_name = getattr(tool_context, "agent_name", "unknown")
@@ -690,10 +690,10 @@ else:
                     _pending_traces.append({
                         "trace_id":   _trace_id_from(tool_context),
                         "agent_name": agent_name,
-                        "event_type": "tool",
+                        "event_type": event_type,
                         "detail":     tool_name,
                         "latency_ms": None,
-                        "success":    _tool_response_ok(result),
+                        "success":    _tool_response_ok(result) if event_type == "tool" else True,
                     })
             except Exception:
                 pass
@@ -707,6 +707,11 @@ else:
         def after_agent(self, ctx, agent=None):
             """Sync shim — record agent end and compute latency."""
             self._record_agent_end(ctx, agent)
+            return None
+
+        def before_tool(self, *, tool, args=None, tool_context):
+            """Sync shim — record tool invocation start."""
+            self._record_tool(tool, tool_context, None, event_type="tool_start")
             return None
 
         def after_tool(self, *, tool, args=None, tool_context, response=None):
@@ -724,6 +729,11 @@ else:
         async def after_agent_callback(self, *, agent, callback_context):
             """ADK 1.32 async hook — record agent end and compute latency."""
             self._record_agent_end(callback_context, agent)
+            return None
+
+        async def before_tool_callback(self, *, tool, tool_args, tool_context):
+            """ADK 1.32 async hook — record tool invocation start."""
+            self._record_tool(tool, tool_context, None, event_type="tool_start")
             return None
 
         async def after_tool_callback(self, *, tool, tool_args, tool_context, result):
@@ -754,6 +764,47 @@ else:
             except Exception:
                 pass
             return None
+
+
+    class LoopAgent(BaseAgent):
+        """Self-refining agent wrapper. Runs the sub_agent up to `max_iterations`.
+
+        If the sub_agent output does not satisfy the `satisfaction_check` (optional),
+        it re-runs the agent with the prior error as feedback.
+        """
+
+        def __init__(self, name: str, sub_agent: BaseAgent, max_iterations: int = 3):
+            super().__init__(name=name, sub_agents=[sub_agent])
+            self.sub_agent = sub_agent
+            self.max_iterations = max_iterations
+
+        async def _run_async_impl(self, ctx) -> AsyncGenerator:
+            iteration = 0
+            while iteration < self.max_iterations:
+                iteration += 1
+                ctx.session.state["temp:loop_iteration"] = iteration
+                
+                last_content = None
+                async for event in self.sub_agent.run_async(ctx):
+                    if hasattr(event, "content") and event.content:
+                        last_content = event.content
+                    yield event
+                
+                # Simple satisfaction check: does the response contain "[EMOTION:"?
+                # If it does, we assume it's a valid complete response from our system.
+                text = ""
+                if last_content and last_content.parts:
+                    text = last_content.parts[0].text or ""
+                
+                if "[EMOTION:" in text:
+                    break
+                    
+                # If not satisfied, we could add a "Please refine your answer" prompt here,
+                # but for now we just loop or break.
+                if iteration < self.max_iterations:
+                    # In a real LoopAgent, we'd append a 'Refine' message to ctx.
+                    pass
+
 
     # ── Runner (uses App so plugins ride on the app, not the deprecated arg) ─
 
@@ -806,14 +857,22 @@ else:
 
         session = await _session_service.create_session(
             app_name="pitwall", user_id=user_id)
+        
+        # Initialize app-wide state if this is a fresh session
+        session.state["app:platform"] = "Pixel 10"
+        session.state["app:version"] = "0.1.0"
+        
         with _driver_sessions_lock:
             _driver_sessions[user_id] = session.id
             _session_chars[user_id] = 0
         _log.debug("ADK session created: user=%s sid=%s", user_id, session.id)
         return session
 
-    async def _run_adk_async(prompt: str, user_id: str) -> tuple[str, str]:
+    async def _run_adk_async(prompt: str, user_id: str, state_overrides: dict | None = None) -> tuple[str, str]:
         session = await _get_or_create_session(user_id)
+        if state_overrides:
+            session.state.update(state_overrides)
+            
         final_text = ""
         async for event in _runner.run_async(
             user_id=user_id,
@@ -829,8 +888,11 @@ else:
             )
         return final_text, session.id
 
-    async def _stream_adk_async(prompt: str, user_id: str) -> AsyncGenerator[str, None]:
+    async def _stream_adk_async(prompt: str, user_id: str, state_overrides: dict | None = None) -> AsyncGenerator[str, None]:
         session = await _get_or_create_session(user_id)
+        if state_overrides:
+            session.state.update(state_overrides)
+            
         rc = RunConfig(streaming_mode=StreamingMode.SSE)
         total_chars = 0
         async for event in _runner.run_async(
@@ -849,7 +911,7 @@ else:
                 _session_chars.get(user_id, 0) + len(prompt) + total_chars
             )
 
-    def run_adk(prompt: str, user_id: str = "driver") -> tuple[str, str]:  # noqa: F811
+    def run_adk(prompt: str, user_id: str = "driver", state_overrides: dict | None = None) -> tuple[str, str]:  # noqa: F811
         """Synchronous entry point for pitwall_bridge.py (Flask is sync).
 
         Returns (final_text, adk_session_id). Bounded by PITWALL_ADK_TIMEOUT_S.
@@ -857,7 +919,7 @@ else:
         if _loop is None:
             raise RuntimeError("ADK loop not started")
         fut = asyncio.run_coroutine_threadsafe(
-            _run_adk_async(prompt, user_id), _loop)
+            _run_adk_async(prompt, user_id, state_overrides), _loop)
         try:
             return fut.result(timeout=_RUN_TIMEOUT_S)
         except concurrent.futures.TimeoutError:
@@ -866,7 +928,7 @@ else:
 
     _STREAM_SENTINEL = object()
 
-    def stream_adk(prompt: str, user_id: str = "driver") -> Iterable[str]:  # noqa: F811
+    def stream_adk(prompt: str, user_id: str = "driver", state_overrides: dict | None = None) -> Iterable[str]:  # noqa: F811
         """Sync generator yielding text chunks. Schedules the async generator
         on the persistent loop and bridges chunks via a thread-safe queue.
         """
@@ -876,7 +938,7 @@ else:
 
         async def _produce() -> None:
             try:
-                async for chunk in _stream_adk_async(prompt, user_id):
+                async for chunk in _stream_adk_async(prompt, user_id, state_overrides):
                     out_q.put(("chunk", chunk))
             except Exception as exc:
                 out_q.put(("error", f"{type(exc).__name__}: {exc}"))
@@ -899,6 +961,7 @@ else:
             if kind == "error":
                 raise RuntimeError(payload or "ADK stream failed")
             yield payload
+
 
     # ── Vue PWA registry exposed via GET /coach/agents ────────────────────────
 

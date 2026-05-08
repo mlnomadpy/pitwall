@@ -38,8 +38,8 @@ class GoldCornerPass:
     exit_speed_kmh: float
     min_speed_kmh: float
     peak_brake_bar: float
-    brake_point_m: float          # distance before entry where brake first > 5 bar
-    brake_release_m: float        # distance into corner where brake first < 2 bar
+    brake_point_m: Optional[float]          # distance before entry where brake first > 5 bar
+    brake_release_m: Optional[float]        # distance into corner where brake first < 2 bar
     trail_brake_bar_at_apex: float
     throttle_at_exit_pct: float
     max_g_lat: float
@@ -146,7 +146,7 @@ def _aggregate_corner_pass(frames, corner: CornerDef, lap_distances=None) -> Opt
     combos_in = [frames[i].combo_g for i in in_corner]
 
     # Brake point: first frame in pre-entry where brake > 5 bar
-    brake_point_m = 0.0
+    brake_point_m: Optional[float] = None
     for i in pre_entry:
         if frames[i].brake_pressure > 5:
             d = (lap_distances[i] if lap_distances else frames[i].distance) % 4258
@@ -154,7 +154,7 @@ def _aggregate_corner_pass(frames, corner: CornerDef, lap_distances=None) -> Opt
             break
 
     # Brake release: first frame in-corner where brake < 2 bar
-    brake_release_m = 0.0
+    brake_release_m: Optional[float] = None
     for i in in_corner:
         if frames[i].brake_pressure < 2:
             d = (lap_distances[i] if lap_distances else frames[i].distance) % 4258
@@ -257,14 +257,14 @@ def _aggregate_corner_pass_abs(frames, corner: CornerDef,
     apex_local = min(range(len(in_frames)),
                      key=lambda j: abs((in_frames[j].distance % track_len) - apex_d))
 
-    brake_point_m = 0.0
+    brake_point_m: Optional[float] = None
     for i in pre_idxs:
         if frames[i].brake_pressure > 5:
             d = frames[i].distance % track_len
             brake_point_m = corner.entry_distance - d
             break
 
-    brake_release_m = 0.0
+    brake_release_m: Optional[float] = None
     for f in in_frames:
         if f.brake_pressure < 2:
             d = f.distance % track_len

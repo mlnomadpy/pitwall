@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useMedalStore } from '@/entities/quest/model/medalStore'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
@@ -15,6 +16,7 @@ import MedalGrid from '@/widgets/medal-grid/MedalGrid.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
+const medalStore = useMedalStore()
 
 const tabs = ['ALL', 'BRONZE', 'SILVER', 'GOLD', 'PLATINUM', 'RAINBOW']
 const activeTab = ref(0)
@@ -23,18 +25,14 @@ const detailText = ref<string | null>(null)
 
 const mode = ref<'MEDALS' | 'CODEX'>('MEDALS')
 
-// Dummy medal data based on spec
-const allMedals = Array.from({ length: 40 }).map((_, i) => ({
-  id: `medal_${i}`,
-  tier: i < 5 ? 'BRONZE' : i < 20 ? 'SILVER' : i < 35 ? 'GOLD' : i < 39 ? 'PLATINUM' : 'RAINBOW',
-  name: `Medal ${i}`,
-  desc: `Acquisition criteria for medal ${i}.`,
-  unlocked: Math.random() > 0.6
-}))
+onMounted(() => {
+  medalStore.fetchMedals()
+})
+
+const allMedals = computed(() => medalStore.medals)
 
 const filteredMedals = computed(() => {
-  if (tabs[activeTab.value] === 'ALL') return allMedals
-  return allMedals.filter(m => m.tier === tabs[activeTab.value])
+  return medalStore.byTier(tabs[activeTab.value])
 })
 
 useKeyboard((e: KeyboardEvent) => {
@@ -177,7 +175,7 @@ const switchTab = (i: number) => {
               <CyberPanel variant="glass" border="secondary" class="flex-1 flex flex-col overflow-hidden min-h-0">
                 <div class="flex justify-between items-end mb-2 border-b border-slate pb-1">
                   <h2 class="section-label m-0">MEDAL DATABASE</h2>
-                  <span class="text-ui-good text-sm font-bold">{{ allMedals.filter(m => m.unlocked).length }} / 40 UNLOCKED</span>
+                  <span class="text-ui-good text-sm font-bold">{{ medalStore.unlockedCount }} / {{ medalStore.totalCount }} UNLOCKED</span>
                 </div>
                 
                 <MedalGrid 

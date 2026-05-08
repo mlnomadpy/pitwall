@@ -71,4 +71,9 @@ export interface SaveSettings {
     keyboardLayout: 'wasd' | 'arrows' | 'igdk'
     swapAB: boolean
   }
+  ux: {
+    typewriterSpeed: 'off' | 'fast' | 'normal' | 'slow'
+    hapticFeedback: boolean
+  }
 }
+

@@ -405,8 +405,10 @@ def reset_live_session():
 def ensure_session_row(sid: str, *, driver=None, driver_level=None,
                        track=None, car=None, note=None):
     """Idempotently upsert a sessions row. Called on every ingest path."""
+    state.active_session_id = sid
     if not state.has_duckdb:
         return
+
     with state.db_lock:
         conn = get_db()
         if conn is None:

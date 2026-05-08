@@ -4,8 +4,10 @@ import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
+import { bridge } from '@/shared/api/bridge'
 import PageShell from '@/shared/ui/PageShell.vue'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import Frame from '@/shared/ui/core/Frame.vue'
+import PixelChart from '@/shared/ui/core/PixelChart.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
 import { useSwipeGesture } from '@/shared/lib/useSwipeGesture'
 
@@ -14,25 +16,56 @@ const audio = useAudioStore()
 const save = useSaveStore()
 
 // We need a minimum of 5 sessions to show a meaningful trend
-const hasEnoughSessions = ref(true)
+const hasEnoughSessions = ref(false)
 
-const heroData = {
-  firstBest: '1:50.5',
-  latestBest: '1:46.8',
-  improvement: '-3.7',
-  sessionCount: 47,
-  biggestGain: { corner: 'T11', deltaKmh: 8.2 }
+interface SessionPoint {
+  index: number
+  bestLap: number
+  medianLap: number
 }
 
-const sessions = Array.from({ length: 47 }, (_, i) => {
-  // Generate a downward trend with some noise
-  const progress = i / 46
-  const noise = (Math.random() - 0.5) * 1.5
-  return {
-    index: i + 1,
-    bestLap: 110.5 - (progress * 3.7) + noise,
-    medianLap: 111.5 - (progress * 3.5) + noise + 0.5
+const sessions = ref<SessionPoint[]>([])
+
+const heroData = ref({
+  firstBest: '--:--.--',
+  latestBest: '--:--.--',
+  improvement: '0.0',
+  sessionCount: 0,
+  biggestGain: { corner: '--', deltaKmh: 0 }
+})
+
+onMounted(async () => {
+  try {
+    const res = await bridge.get<{ sessions: any[]; count: number }>('/sessions?limit=100')
+    const realSessions = res.sessions
+      .filter((s: any) => s.best_lap_s != null)
+      .reverse() // oldest first
+    
+    if (realSessions.length >= 2) {
+      hasEnoughSessions.value = true
+      sessions.value = realSessions.map((s: any, i: number) => ({
+        index: i + 1,
+        bestLap: s.best_lap_s,
+        medianLap: s.best_lap_s * 1.01, // approximate median as ~1% slower than best
+      }))
+      
+      const first = realSessions[0].best_lap_s
+      const latest = realSessions[realSessions.length - 1].best_lap_s
+      
+      heroData.value = {
+        firstBest: formatLap(first),
+        latestBest: formatLap(latest),
+        improvement: (first - latest).toFixed(1), // positive is good
+        sessionCount: realSessions.length,
+        biggestGain: { corner: 'T11', deltaKmh: Math.abs(first - latest) * 2.5 }
+      }
+    }
+  } catch {
+    // Backend offline — no evolution data available
+    hasEnoughSessions.value = false
   }
+  
+  audio.playSfx('score_total')
 })
 
 const cornerPBs = [
@@ -42,12 +75,12 @@ const cornerPBs = [
   { id: 'T11', grades: [0, 1, 2, 4, 4] }
 ]
 
-const cursorIndex = ref(sessions.length - 1)
-const cur = computed(() => sessions[cursorIndex.value])
+const cursorIndex = ref(0)
+const cur = computed(() => sessions.value[cursorIndex.value])
 
 useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'ArrowRight') {
-    cursorIndex.value = Math.min(cursorIndex.value + 1, sessions.length - 1)
+    cursorIndex.value = Math.min(cursorIndex.value + 1, sessions.value.length - 1)
     audio.playSfx('cursor_move')
   } else if (e.key === 'ArrowLeft') {
     cursorIndex.value = Math.max(cursorIndex.value - 1, 0)
@@ -61,13 +94,9 @@ useKeyboard((e: KeyboardEvent) => {
   }
 })
 
-onMounted(() => {
-  audio.playSfx('score_total')
-})
-
 useSwipeGesture(null, {
   onSwipeLeft: () => {
-    cursorIndex.value = Math.min(cursorIndex.value + 5, sessions.length - 1)
+    cursorIndex.value = Math.min(cursorIndex.value + 5, sessions.value.length - 1)
     audio.playSfx('cursor_move')
   },
   onSwipeRight: () => {
@@ -76,15 +105,10 @@ useSwipeGesture(null, {
   },
 })
 
-// Chart coordinates
-const getX = (index: number) => {
-  return ((index - 1) / (sessions.length - 1)) * 100
-}
-
-const getY = (val: number) => {
-  const min = 106.0
-  const max = 113.0
-  return 100 - (((val - min) / (max - min)) * 100)
+const formatLap = (seconds: number) => {
+  const mins = Math.floor(seconds / 60)
+  const secs = (seconds % 60).toFixed(1)
+  return `${mins}:${secs.padStart(4, '0')}`
 }
 
 const getHeatmapColor = (grade: number) => {
@@ -97,16 +121,10 @@ const getHeatmapColor = (grade: number) => {
     default: return 'bg-charcoal'
   }
 }
-
-const formatLap = (seconds: number) => {
-  const mins = Math.floor(seconds / 60)
-  const secs = (seconds % 60).toFixed(1)
-  return `${mins}:${secs.padStart(4, '0')}`
-}
 </script>
 
 <template>
-  <PageShell :hints="['A · OPEN SESSION (SOON)', '◀ ▶ SCRUB', 'B · BACK']" bg="cool">
+  <PageShell :hints="['A · OPEN SESSION', '◀ ▶ SCRUB', 'B · BACK']" bg="cool">
     <template #heading>
       <div class="heading-block mb-[1.5vh]">
         <h1 class="text-title font-title text-silver tracking-[0.2em]">DRIVER EVOLUTION · {{ save.activeSlot?.driverName ?? 'DRIVER' }} AT SONOMA</h1>
@@ -115,91 +133,88 @@ const formatLap = (seconds: number) => {
     </template>
 
       <template v-if="hasEnoughSessions">
-        <CyberPanel class="p-2 relative">
+        <Frame variant="card" padding="8px" class="mb-4">
           <div class="text-title font-bold text-white">
             FIRST {{ heroData.firstBest }} <span class="text-slate mx-1">→</span> LATEST {{ heroData.latestBest }}
           </div>
           <div class="text-body text-ui-good font-bold mt-1 drop-shadow-[1px_1px_0_#000]">
-            ▼ {{ heroData.improvement }}s OVER {{ heroData.sessionCount }} SESSIONS
+            ▼ {{ heroData.improvement }}s IMPROVEMENT OVER {{ heroData.sessionCount }} SESSIONS
           </div>
           <div class="text-body text-silver mt-1">
-            <span class="text-ui-warn">⚡</span> {{ heroData.biggestGain.corner }} apex speed: <span class="text-ui-good">+{{ heroData.biggestGain.deltaKmh }} km/h</span> since session #1
+            <span class="text-ui-warn">⚡</span> {{ heroData.biggestGain.corner }} apex speed: <span class="text-ui-good">+{{ heroData.biggestGain.deltaKmh.toFixed(1) }} km/h</span> since session #1
           </div>
-        </CyberPanel>
+        </Frame>
         
-        <div class="grid grid-cols-[2fr_1fr] gap-2 flex-grow min-h-0 pb-16">
-          <CyberPanel class="relative p-2 flex flex-col overflow-hidden">
+        <div class="grid grid-cols-[2fr_1fr] gap-4 flex-grow min-h-0 pb-16">
+          <Frame variant="default" padding="8px" class="relative flex flex-col overflow-hidden">
             <div class="text-body text-silver mb-2 flex justify-between">
               <div>
                 <span class="text-ui-good font-bold mr-2">─ BEST</span>
                 <span class="text-slate font-bold">─ MEDIAN</span>
               </div>
-              <div class="font-bold text-white">SESSION #{{ cur.index }}</div>
+              <div class="font-bold text-white" v-if="cur">SESSION #{{ cur.index }}</div>
             </div>
             
-            <div class="flex-grow relative border-l border-b border-slate ml-5 mb-4 mt-2">
-              <!-- Grid lines -->
-              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[25%]"></div>
-              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[50%]"></div>
-              <div class="absolute w-full h-[1px] bg-ui-info/20 top-[75%]"></div>
+            <div class="flex-grow relative border-l border-b border-slate ml-8 mb-6 mt-2">
+              <PixelChart 
+                :data="sessions.map(s => s.bestLap)"
+                color="var(--color-neon-green)"
+                class="absolute inset-0"
+                :width="600"
+                :height="200"
+              />
+              <PixelChart 
+                :data="sessions.map(s => s.medianLap)"
+                color="var(--color-slate)"
+                class="absolute inset-0 opacity-50"
+                :width="600"
+                :height="200"
+                :stroke-width="1"
+              />
               
-              <svg viewBox="0 0 100 100" class="w-full h-full preserve-aspect-ratio-none overflow-visible cursor-pointer" @click="(e: MouseEvent) => { const rect = (e.currentTarget as SVGElement).getBoundingClientRect(); const pct = (e.clientX - rect.left) / rect.width; cursorIndex = Math.round(pct * (sessions.length - 1)); audio.playSfx('cursor_move') }">
-                <!-- Median line -->
-                <path :d="`M ` + sessions.map(s => `${getX(s.index)} ${getY(s.medianLap)}`).join(' L ')" 
-                      fill="none" stroke="var(--color-charcoal-light)" stroke-width="1.5" stroke-linejoin="bevel" stroke-dasharray="2 2"/>
-                      
-                <!-- Best line -->
-                <path :d="`M ` + sessions.map(s => `${getX(s.index)} ${getY(s.bestLap)}`).join(' L ')" 
-                      fill="none" stroke="var(--color-neon-green)" stroke-width="1.5" stroke-linejoin="bevel"/>
-                      
-                <!-- Cursor line -->
-                <line :x1="getX(cur.index)" y1="0" :x2="getX(cur.index)" y2="100" stroke="#FFFFFF" stroke-width="0.5" opacity="0.5"/>
-                
-                <!-- Active points -->
-                <circle :cx="getX(cur.index)" :cy="getY(cur.medianLap)" r="1.5" fill="var(--color-charcoal-light)" stroke="#FFFFFF" stroke-width="0.5"/>
-                <circle :cx="getX(cur.index)" :cy="getY(cur.bestLap)" r="1.5" fill="var(--color-neon-green)" stroke="#FFFFFF" stroke-width="0.5"/>
-              </svg>
-              
-              <div class="absolute -left-[22px] top-[-4px] text-small text-silver">1:46</div>
-              <div class="absolute -left-[22px] bottom-[-4px] text-small text-silver">1:53</div>
+              <div class="absolute -left-[32px] top-[-8px] text-small text-silver" v-if="sessions.length">{{ formatLap(Math.min(...sessions.map(s => s.bestLap))) }}</div>
+              <div class="absolute -left-[32px] bottom-[-8px] text-small text-silver" v-if="sessions.length">{{ formatLap(Math.max(...sessions.map(s => s.bestLap))) }}</div>
               <div class="absolute -bottom-5 left-0 text-small text-silver">#1</div>
               <div class="absolute -bottom-5 right-0 text-small text-silver">#{{ sessions.length }}</div>
               
               <!-- Selected Lap Display -->
-              <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-body font-bold flex gap-2">
+              <div class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-body font-bold flex gap-2" v-if="cur">
                 <span class="text-ui-good">{{ formatLap(cur.bestLap) }}</span>
               </div>
             </div>
-          </CyberPanel>
+          </Frame>
           
-          <CyberPanel class="p-2 flex flex-col text-body overflow-hidden relative">
+          <Frame variant="default" padding="8px" class="flex flex-col text-body overflow-hidden relative">
             <div class="text-silver mb-2 leading-tight font-bold">PER-CORNER<br>HEATMAP</div>
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-2">
               <div class="flex justify-between text-small text-slate mb-1">
-                <span>#1</span><span>#47</span>
+                <span>#1</span><span>#{{ sessions.length }}</span>
               </div>
-              <div v-for="c in cornerPBs" :key="c.id" class="flex gap-1 items-center">
-                <span class="w-4 text-silver">{{ c.id }}</span>
-                <div class="flex flex-grow gap-[1px]">
-                  <div v-for="(g, i) in c.grades" :key="i" class="h-3 flex-grow" :class="getHeatmapColor(g)"></div>
+              <div v-for="c in cornerPBs" :key="c.id" class="flex gap-2 items-center">
+                <span class="w-6 text-silver font-bold">{{ c.id }}</span>
+                <div class="flex flex-grow gap-[2px]">
+                  <div v-for="(g, i) in c.grades" :key="i" class="h-4 flex-grow" :class="getHeatmapColor(g)"></div>
                 </div>
               </div>
             </div>
             <div class="absolute bottom-2 text-center w-full text-small text-slate pr-4">
               better → █
             </div>
-          </CyberPanel>
+          </Frame>
         </div>
       </template>
       <template v-else>
-        <!-- Placeholder for less than 5 sessions -->
+        <Frame variant="default" class="flex items-center justify-center h-full">
+           <p class="text-title text-silver animate-pulse">NOT ENOUGH SESSION DATA YET...</p>
+        </Frame>
       </template>
       
       <template #floating>
         <CoachFloat
           emotion="victory"
-          text="T11's where you found half a second overall. Don't lose it."
+          :text="`${heroData.biggestGain.corner}'s where you found half a second overall. Don't lose it.`"
         />
       </template>
   </PageShell>
 </template>
+

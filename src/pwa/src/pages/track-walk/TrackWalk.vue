@@ -4,14 +4,21 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
+import { bridge } from '@/shared/api/bridge'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CoachFloat from '@/shared/ui/CoachFloat.vue'
 import TrackMap from '@/shared/ui/core/TrackMap.vue'
+import CornerScorecard from '@/shared/ui/core/CornerScorecard.vue'
+
+import { useNotificationsStore } from '@/shared/api/notificationStore'
 
 const router = useRouter()
 const save = useSaveStore()
 const audio = useAudioStore()
+const sessionStore = useSessionStore()
+const notifications = useNotificationsStore()
 
 const state = ref<'idle' | 'corner-detail'>('idle')
 
@@ -22,28 +29,66 @@ interface Corner {
   cy?: number
   name: string
   tip: string
-  grade: 'A' | 'B' | 'C' | 'D' | 'F'
+  grade: string
+  entry?: number
+  apex?: number
+  exit?: number
+  time?: number
   deltas: { entry: number, apex: number, exit: number, time: number }
   svgTurnId?: number
 }
 
 const corners = ref<Corner[]>([
-  { id: 'T1', progress: 8, name: 'T1', tip: "Keep it pinned, eyes up the hill.", grade: 'A', deltas: { entry: +2, apex: +1, exit: 0, time: -0.1 } },
-  { id: 'T2', progress: 14, name: 'T2', tip: "Brake at the bridge, late apex.", grade: 'D', deltas: { entry: -5, apex: -10, exit: -6, time: +0.8 } },
-  { id: 'T3', progress: 18, name: 'T3', tip: "Crest the hill, don't lift.", grade: 'B', deltas: { entry: -1, apex: -2, exit: 0, time: +0.2 } },
-  { id: 'T4', progress: 24, name: 'T4', tip: "Downhill braking, tricky weight transfer.", grade: 'C', deltas: { entry: +4, apex: -4, exit: -3, time: +0.4 } },
-  { id: 'T5', progress: 30, name: 'T5', tip: "Don't rush the throttle.", grade: 'B', deltas: { entry: 0, apex: 0, exit: -2, time: +0.1 } },
-  { id: 'T6', progress: 45, name: 'The Carousel', tip: "Long constant radius, balance the car.", grade: 'C', deltas: { entry: -2, apex: -2, exit: -2, time: +0.3 } },
-  { id: 'T7', progress: 55, name: 'T7', tip: "Eyes up — late turn-in, late apex; second apex matters more.", grade: 'D', deltas: { entry: -6, apex: -7, exit: -4, time: +0.6 } },
-  { id: 'T8', progress: 65, name: 'T8', tip: "Esses begin here, rhythm is everything.", grade: 'A', deltas: { entry: +2, apex: +2, exit: +3, time: -0.2 } },
-  { id: 'T9', progress: 70, name: 'T9', tip: "Don't hit the inside kerb too hard.", grade: 'A', deltas: { entry: +1, apex: +1, exit: +1, time: -0.1 } },
-  { id: 'T10', progress: 80, name: 'T10', tip: "Fast left sweep.", grade: 'B', deltas: { entry: -1, apex: 0, exit: 0, time: 0 } },
-  { id: 'T11', progress: 90, name: 'T11', tip: "Heavy brake zone, get it stopped.", grade: 'F', deltas: { entry: +15, apex: -15, exit: -10, time: +1.5 } },
+  { id: 'T1', progress: 8, name: 'T1', tip: "Keep it pinned, eyes up the hill.", grade: '--', deltas: { entry: +2, apex: +1, exit: 0, time: -0.1 } },
+  { id: 'T2', progress: 14, name: 'T2', tip: "Brake at the bridge, late apex.", grade: '--', deltas: { entry: -5, apex: -10, exit: -6, time: +0.8 } },
+  { id: 'T3', progress: 18, name: 'T3', tip: "Crest the hill, don't lift.", grade: '--', deltas: { entry: -1, apex: -2, exit: 0, time: +0.2 } },
+  { id: 'T4', progress: 24, name: 'T4', tip: "Downhill braking, tricky weight transfer.", grade: '--', deltas: { entry: +4, apex: -4, exit: -3, time: +0.4 } },
+  { id: 'T5', progress: 30, name: 'T5', tip: "Don't rush the throttle.", grade: '--', deltas: { entry: 0, apex: 0, exit: -2, time: +0.1 } },
+  { id: 'T6', progress: 45, name: 'The Carousel', tip: "Long constant radius, balance the car.", grade: '--', deltas: { entry: -2, apex: -2, exit: -2, time: +0.3 } },
+  { id: 'T7', progress: 55, name: 'T7', tip: "Eyes up — late turn-in, late apex; second apex matters more.", grade: '--', deltas: { entry: -6, apex: -7, exit: -4, time: +0.6 } },
+  { id: 'T8', progress: 65, name: 'T8', tip: "Esses begin here, rhythm is everything.", grade: '--', deltas: { entry: +2, apex: +2, exit: +3, time: -0.2 } },
+  { id: 'T9', progress: 70, name: 'T9', tip: "Don't hit the inside kerb too hard.", grade: '--', deltas: { entry: +1, apex: +1, exit: +1, time: -0.1 } },
+  { id: 'T10', progress: 80, name: 'T10', tip: "Fast left sweep.", grade: '--', deltas: { entry: -1, apex: 0, exit: 0, time: 0 } },
+  { id: 'T11', progress: 90, name: 'T11', tip: "Heavy brake zone, get it stopped.", grade: '--', deltas: { entry: +15, apex: -15, exit: -10, time: +1.5 } },
 ])
 
 const trackMapRef = ref<any>(null)
 
-onMounted(() => {
+onMounted(async () => {
+  // Try to enrich corner grades from real scorecard data
+  const sid = sessionStore.activeSessionId ?? sessionStore.sessions.find(s => s.lap_count > 0)?.session_id
+  if (sid) {
+    try {
+      const res = await bridge.get<{ session_id: string; scorecard: any }>(`/session/${sid}/scorecard`)
+      const sc = res.scorecard
+      if (sc?.corners) {
+        // Build map of scorecard corners
+        const cardMap = new Map<string, any>()
+        for (const c of sc.corners) {
+          cardMap.set(c.corner ?? c.name ?? '', c)
+        }
+        
+        for (const match of corners.value) {
+          const sc_corner = cardMap.get(match.name) ?? cardMap.get(`Turn ${match.id.replace('T', '')}`)
+          if (sc_corner) {
+            match.grade = sc_corner.grade ?? match.grade
+            match.entry = sc_corner.entry_speed_kmh ?? sc_corner.avg_entry_kmh
+            match.apex = sc_corner.apex_speed_kmh ?? sc_corner.min_speed_kmh
+            match.exit = sc_corner.exit_speed_kmh ?? sc_corner.avg_exit_kmh
+            match.time = sc_corner.time_s
+            
+            // Adjust deltas if delta_s is present
+            if (sc_corner.delta_s != null) {
+               match.deltas.time = sc_corner.delta_s
+            }
+          }
+        }
+      }
+    } catch {
+      // Backend offline — keep static grades
+    }
+  }
+
   setTimeout(() => {
     if (trackMapRef.value && trackMapRef.value.trackTurns) {
       corners.value.forEach(c => {
@@ -71,12 +116,11 @@ const cursorIndex = ref(0)
 const selectedCorner = computed(() => corners.value[cursorIndex.value])
 
 const getGradeColor = (grade: string) => {
-  if (grade === 'A' || grade === 'B') return 'text-ui-good'
-  if (grade === 'C') return 'text-ui-warn'
-  return 'text-[#ef4444]'
+  if (grade.startsWith('A') || grade.startsWith('B')) return 'text-ui-good drop-shadow-[1px_1px_0_#000]'
+  if (grade.startsWith('C')) return 'text-ui-warn'
+  if (grade.startsWith('F')) return 'text-ui-bad font-bold drop-shadow-[1px_1px_0_#000]'
+  return 'text-silver'
 }
-
-
 
 useKeyboard((e: KeyboardEvent) => {
   if (state.value === 'corner-detail') {
@@ -85,7 +129,12 @@ useKeyboard((e: KeyboardEvent) => {
       state.value = 'idle'
     } else if (e.key === 'a' || e.key === 'Enter') {
       audio.playSfx('goal_complete')
-      // Goal added toast logic
+      notifications.add({
+        kind: 'track-unlock',
+        title: `GOAL ADDED: ${selectedCorner.value.name}`,
+        subText: 'Focused added to next session',
+        timestamp: new Date().toISOString()
+      })
       state.value = 'idle'
     }
     return
@@ -105,7 +154,6 @@ useKeyboard((e: KeyboardEvent) => {
     router.back()
   }
 })
-
 
 </script>
 
@@ -134,64 +182,11 @@ useKeyboard((e: KeyboardEvent) => {
       <div v-if="state === 'corner-detail'" class="absolute inset-0 bg-ink/80 z-20 backdrop-blur-sm" @click="state = 'idle'"></div>
     </Transition>
     <Transition name="slide-up">
-      <div v-if="state === 'corner-detail'" class="absolute inset-x-2 bottom-[6vh] top-[6vh] z-30 flex flex-col pointer-events-none">
-        <CyberPanel class="flex-grow flex flex-col bg-ink shadow-2xl p-2 border-slate pointer-events-auto">
-          <div class="flex justify-between border-b border-slate pb-1 mb-2">
-            <span class="text-white font-bold text-body">{{ selectedCorner.id }} · "{{ selectedCorner.name }}"</span>
-            <span class="text-body font-bold" :class="getGradeColor(selectedCorner.grade)">Grade: {{ selectedCorner.grade }}</span>
-          </div>
-
-          <div class="flex flex-col gap-2 flex-grow text-body">
-            <CyberPanel class="bg-charcoal p-2 border-slate">
-              <span class="text-slate">COACH SAYS</span>
-              <div class="mt-1 flex gap-2">
-                <span class="text-ui-good font-bold text-body shrink-0">{{ (save.activeSlot?.preferredCoach ?? 'TROD').toUpperCase() }}:</span>
-                <div class="text-silver">
-                  "{{ selectedCorner.tip }}"
-                </div>
-              </div>
-            </CyberPanel>
-
-            <div class="text-slate mb-1">YOUR BEST AT {{ selectedCorner.id }}</div>
-            <CyberPanel class="flex flex-col gap-1 p-2 border-slate">
-              <div class="flex justify-between">
-                <span class="w-[clamp(24px,6vw,48px)] text-silver">ENTRY</span>
-                <span class="font-bold">96 km/h</span>
-                <span class="text-slate">── gold 102 km/h</span>
-                <span class="w-[clamp(16px,4vw,32px)] text-right font-bold" :class="selectedCorner.deltas.entry < 0 ? 'text-[#ef4444]' : 'text-ui-good'">
-                  {{ selectedCorner.deltas.entry < 0 ? '▼' : '▲' }}{{ Math.abs(selectedCorner.deltas.entry) }}
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="w-[clamp(24px,6vw,48px)] text-silver">APEX</span>
-                <span class="font-bold">78 km/h</span>
-                <span class="text-slate">── gold 85 km/h</span>
-                <span class="w-[clamp(16px,4vw,32px)] text-right font-bold" :class="selectedCorner.deltas.apex < 0 ? 'text-[#ef4444]' : 'text-ui-good'">
-                  {{ selectedCorner.deltas.apex < 0 ? '▼' : '▲' }}{{ Math.abs(selectedCorner.deltas.apex) }}
-                </span>
-              </div>
-              <div class="flex justify-between">
-                <span class="w-[clamp(24px,6vw,48px)] text-silver">EXIT</span>
-                <span class="font-bold">94 km/h</span>
-                <span class="text-slate">── gold 98 km/h</span>
-                <span class="w-[clamp(16px,4vw,32px)] text-right font-bold" :class="selectedCorner.deltas.exit < 0 ? 'text-[#ef4444]' : 'text-ui-good'">
-                  {{ selectedCorner.deltas.exit < 0 ? '▼' : '▲' }}{{ Math.abs(selectedCorner.deltas.exit) }}
-                </span>
-              </div>
-              <div class="w-full h-[1px] bg-slate/50 my-1"></div>
-              <div class="flex justify-between text-white">
-                <span class="w-[clamp(24px,6vw,48px)]">TIME</span>
-                <span class="font-bold">4.6 s</span>
-                <span class="text-slate">── gold 4.0 s</span>
-                <span class="w-[clamp(16px,4vw,32px)] text-right font-bold" :class="selectedCorner.deltas.time > 0 ? 'text-[#ef4444]' : 'text-ui-good'">
-                  {{ selectedCorner.deltas.time > 0 ? '▼' : '▲' }}{{ Math.abs(selectedCorner.deltas.time) }}
-                </span>
-              </div>
-            </CyberPanel>
-          </div>
-
-        </CyberPanel>
-      </div>
+      <CornerScorecard 
+        v-if="state === 'corner-detail'" 
+        :corner="selectedCorner" 
+        :coach-id="save.activeSlot?.preferredCoach ?? 'TROD'"
+      />
     </Transition>
     
     <template #floating>

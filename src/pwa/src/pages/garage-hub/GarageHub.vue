@@ -25,6 +25,7 @@ const tiles: TileData[] = [
 ]
 
 const cursorIndex = ref(0)
+const isGridView = ref(false)
 const greetingActive = ref(true)
 const greetingText = "Welcome to the Garage! Ready to hit the track?"
 const hints = ['▲ ▼ SWIPE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE']
@@ -35,12 +36,36 @@ const moveCursor = (dir: number) => {
 }
 
 useKeyboard((e: KeyboardEvent) => {
+  if (e.key === 'g' || e.key === 'G') {
+    isGridView.value = !isGridView.value
+    audio.playSfx('cursor_select')
+    return
+  }
+  
+  if (isGridView.value) {
+    if (e.key === 'ArrowRight') moveCursor(1)
+    else if (e.key === 'ArrowLeft') moveCursor(-1)
+    else if (e.key === 'ArrowDown') moveCursor(4)
+    else if (e.key === 'ArrowUp') moveCursor(-4)
+    else if (e.key === 'Enter') onSelect(tiles[cursorIndex.value].id)
+    else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
+      audio.playSfx('cancel')
+      save.activeSlotId = null
+      router.push('/')
+    }
+    return
+  }
+
   if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
     moveCursor(1)
   } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
     moveCursor(-1)
   } else if (e.key === 'Enter') {
-    if (greetingActive.value) return
+    if (greetingActive.value) {
+      greetingActive.value = false
+      audio.playSfx('cursor_select')
+      return
+    }
     audio.playSfx('cursor_select')
     onSelect(tiles[cursorIndex.value].id)
   } else if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
@@ -71,19 +96,16 @@ const menuRef = ref<HTMLDivElement | null>(null)
 let touchStartY = 0
 let touchStartX = 0
 let touchStartTime = 0
-let hasMoved = false
 
 const onTouchStart = (e: TouchEvent) => {
   touchStartY = e.touches[0].clientY
   touchStartX = e.touches[0].clientX
   touchStartTime = Date.now()
-  hasMoved = false
 }
 
 const onTouchMove = (e: TouchEvent) => {
   const dy = e.touches[0].clientY - touchStartY
   const dx = e.touches[0].clientX - touchStartX
-  // Prevent page scroll when dragging vertically on the menu
   if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
     e.preventDefault()
   }
@@ -96,24 +118,16 @@ const onTouchEnd = (e: TouchEvent) => {
   const absDy = Math.abs(dy)
   const absDx = Math.abs(dx)
 
-  // Must be a deliberate gesture (>30px within 500ms)
   if (dt > 500) return
 
   if (absDy > 30 && absDy > absDx) {
-    // Vertical swipe — scroll through tiles
-    if (dy < 0) {
-      moveCursor(1) // Swipe up → next
-    } else {
-      moveCursor(-1) // Swipe down → prev
-    }
-    hasMoved = true
+    if (dy < 0) moveCursor(1)
+    else moveCursor(-1)
   } else if (absDx > 50 && absDx > absDy && dx > 0) {
-    // Swipe right → enter focused tile
     if (!greetingActive.value) {
       audio.playSfx('cursor_select')
       onSelect(tiles[cursorIndex.value].id)
     }
-    hasMoved = true
   }
 }
 
@@ -137,15 +151,14 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <PageShell title="GARAGE" :hints="hints" bg="neutral" :show-heading="false">
+  <PageShell title="GARAGE" :hints="[...hints, isGridView ? 'G · SPATIAL' : 'G · GRID']" bg="neutral" :show-heading="false">
 
-    <div class="content flex flex-col items-center justify-center relative z-10 w-full flex-grow">
-      <!-- Section heading -->
-      <div class="section-heading mb-[2vmin]">
-        <span class="text-title text-slate tracking-[0.3em] font-title">GARAGE</span>
+    <div class="content flex flex-col items-center justify-center relative z-10 w-full flex-grow overflow-hidden">
+      <div class="section-heading mb-[4vmin]">
+        <span class="text-title text-slate tracking-[0.4em] font-title uppercase">Garage</span>
       </div>
       
-      <div ref="menuRef" class="spatial-menu-container">
+      <div v-if="!isGridView" ref="menuRef" class="spatial-menu-container">
         <div 
           v-for="(t, i) in tiles" 
           :key="t.id"
@@ -165,6 +178,19 @@ onUnmounted(() => {
             @select="onSelect(t.id)"
             @hover="cursorIndex = i"
           />
+        </div>
+      </div>
+
+      <div v-else class="grid-menu-container grid grid-cols-4 gap-6 p-8">
+        <div 
+          v-for="(t, i) in tiles" 
+          :key="t.id"
+          class="grid-item transition-all duration-150"
+          :class="{ 'grid-focused': cursorIndex === i }"
+          @click="cursorIndex = i; onSelect(t.id)"
+          @mouseover="cursorIndex = i"
+        >
+          <Tile :tile="t" :focused="cursorIndex === i" compact />
         </div>
       </div>
     </div>
@@ -191,38 +217,37 @@ onUnmounted(() => {
 .section-heading::after {
   content: '';
   display: block;
-  width: clamp(60px, 18vw, 160px);
-  height: clamp(4px, 0.8vmin, 8px);
-  margin: clamp(4px, 1vmin, 10px) auto 0;
+  width: clamp(80px, 20vw, 200px);
+  height: clamp(4px, 1vmin, 8px);
+  margin: var(--space-sm) auto 0;
   background: repeating-linear-gradient(
     90deg,
-    #c93838 0,
-    #c93838 clamp(4px, 1vmin, 8px),
-    #f5f5e8 clamp(4px, 1vmin, 8px),
-    #f5f5e8 clamp(8px, 2vmin, 16px)
+    var(--color-curb-red) 0,
+    var(--color-curb-red) clamp(4px, 1vmin, 8px),
+    var(--color-curb-white) clamp(4px, 1vmin, 8px),
+    var(--color-curb-white) clamp(8px, 2vmin, 16px)
   );
 }
 
-/* 3D Spatial Menu */
 .spatial-menu-container {
   position: relative;
   width: 100%;
-  height: 60vh;
-  perspective: 1200px;
+  height: 50vh;
+  perspective: 1500px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   z-index: 10;
-  touch-action: none; /* We handle swipe ourselves */
+  touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .spatial-item {
   position: absolute;
-  width: clamp(240px, 60vw, 400px);
-  transition: transform 0.15s steps(4), opacity 0.15s steps(4);
+  width: clamp(280px, 50vw, 480px);
+  transition: transform 0.2s var(--ease-smooth), opacity 0.2s var(--ease-smooth);
   transform-origin: center center;
   opacity: 0;
   pointer-events: none;
@@ -230,43 +255,63 @@ onUnmounted(() => {
 }
 
 .spatial-item.focused {
-  transform: translateZ(100px) translateY(0);
+  transform: translateZ(200px) translateY(0);
   opacity: 1;
   z-index: 10;
   pointer-events: auto;
-  filter: drop-shadow(8px 8px 0 rgba(0, 0, 0, 0.8));
+  filter: drop-shadow(0 20px 40px rgba(0, 0, 0, 0.9));
 }
 
 .spatial-item.prev {
-  transform: translateZ(-150px) translateY(-60px) rotateX(5deg);
-  opacity: 0.6;
+  transform: translateZ(0) translateY(-80px) rotateX(15deg);
+  opacity: 0.5;
   z-index: 5;
   pointer-events: auto;
 }
 
 .spatial-item.prev-2 {
-  transform: translateZ(-300px) translateY(-120px) rotateX(10deg);
-  opacity: 0.2;
+  transform: translateZ(-200px) translateY(-160px) rotateX(30deg);
+  opacity: 0.15;
   z-index: 4;
   pointer-events: auto;
 }
 
 .spatial-item.next {
-  transform: translateZ(-150px) translateY(60px) rotateX(-5deg);
-  opacity: 0.6;
+  transform: translateZ(0) translateY(80px) rotateX(-15deg);
+  opacity: 0.5;
   z-index: 5;
   pointer-events: auto;
 }
 
 .spatial-item.next-2 {
-  transform: translateZ(-300px) translateY(120px) rotateX(-10deg);
-  opacity: 0.2;
+  transform: translateZ(-200px) translateY(160px) rotateX(-30deg);
+  opacity: 0.15;
   z-index: 4;
   pointer-events: auto;
+}
+
+.grid-menu-container {
+  width: 100%;
+  max-width: 1200px;
+  animation: fade-in 0.3s steps(4);
+}
+
+.grid-item {
+  cursor: pointer;
+}
+
+.grid-focused {
+  transform: scale(1.08);
+  filter: drop-shadow(0 0 15px var(--color-ui-good));
+  z-index: 20;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .hidden-item {
   opacity: 0;
 }
 </style>
-

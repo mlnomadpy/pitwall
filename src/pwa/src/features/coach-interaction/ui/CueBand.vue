@@ -36,40 +36,61 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="cue-band">
-    <div v-if="cue" class="cue-text text-body text-ui-info ">
-      {{ displayedText }}
+  <Transition name="slide-up">
+    <div v-if="cue" class="cue-band-container">
+      <div class="cue-band pixelated">
+        <span class="cue-text">{{ displayedText }}</span>
+      </div>
     </div>
-    <div v-else class="cue-idle text-body text-silver/40">
-      NO CUES YET...
-    </div>
-  </div>
+  </Transition>
 </template>
 
 <style scoped>
-.cue-band {
+.cue-band-container {
   position: absolute;
-  bottom: 0;
+  bottom: calc(var(--safe-bottom) + 24px);
   left: 0;
   width: 100%;
-  height: clamp(40px, 8vh, 64px);
-  background: linear-gradient(180deg, rgba(42, 47, 66, 0.9) 0%, rgba(26, 29, 46, 0.95) 100%);
-  border-top: 2px solid var(--color-slate);
+  display: flex;
+  justify-content: center;
+  z-index: 150;
+  pointer-events: none;
+}
+
+.cue-band {
+  background: rgba(11, 12, 16, 0.95);
+  border: 4px solid var(--color-ui-good);
+  padding: clamp(8px, 2vmin, 16px) clamp(24px, 5vw, 48px);
+  box-shadow: 
+    0 10px 30px rgba(0, 0, 0, 0.8), 
+    0 0 20px rgba(78, 205, 196, 0.4),
+    inset 0 0 10px rgba(78, 205, 196, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 clamp(10px, 3vw, 28px);
-  font-family: var(--font-ui);
-  z-index: 50;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+  text-align: center;
+  max-width: 90%;
 }
 
 .cue-text {
-  font-weight: bold;
-  letter-spacing: 0.05em;
+  font-family: var(--font-title);
+  font-size: clamp(16px, 4vmin, 32px);
+  font-weight: 900;
+  color: var(--color-ui-good);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0 #000, 0 0 10px rgba(78, 205, 196, 0.6);
 }
 
-.cue-idle {
-  font-style: italic;
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: transform 0.3s var(--ease-bounce), opacity 0.3s ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
 }
 </style>
+

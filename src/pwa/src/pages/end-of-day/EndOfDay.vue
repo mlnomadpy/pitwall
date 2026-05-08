@@ -4,6 +4,8 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useCoachStore } from '@/entities/coach/model/coachStore'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
 import PageShell from '@/shared/ui/PageShell.vue'
@@ -12,18 +14,73 @@ import CyberBackground from '@/shared/ui/core/CyberBackground.vue'
 const router = useRouter()
 const save = useSaveStore()
 const audio = useAudioStore()
+const coach = useCoachStore()
+const sessionStore = useSessionStore()
 
 const phase = ref(0)
 let aborted = false
 let navTimeout: number | null = null
 
-const tally = [
-  { label: 'SESSIONS', value: '3' },
-  { label: 'TOTAL LAPS', value: '23' },
-  { label: 'BEST LAP', value: '1:46.8 (NEW PB ✓)' },
-  { label: 'MEDALS EARNED', value: '2 ★ ★' },
-  { label: 'LEVEL PROGRESS', value: 'LV 12 → 13 (4 to go)' }
-]
+const tally = ref([
+  { label: 'SESSIONS', value: '...' },
+  { label: 'TOTAL LAPS', value: '...' },
+  { label: 'BEST LAP', value: '...' },
+  { label: 'MEDALS EARNED', value: '...' },
+  { label: 'LEVEL PROGRESS', value: '...' }
+])
+
+const debriefText = ref('Same time tomorrow, kid.')
+const debriefEmotion = ref('idle')
+
+onMounted(async () => {
+  // Fetch real session data for the tally
+  try {
+    await sessionStore.fetchSessions()
+    const sessions = sessionStore.sessions
+    const totalLaps = sessions.reduce((sum, s) => sum + (s.lap_count || 0), 0)
+    const bestLap = sessions
+      .map(s => s.best_lap_s)
+      .filter((t): t is number => t != null)
+    const bestLapFormatted = bestLap.length
+      ? `${Math.floor(Math.min(...bestLap) / 60)}:${(Math.min(...bestLap) % 60).toFixed(1).padStart(4, '0')}`
+      : '--:--.--'
+
+    tally.value = [
+      { label: 'SESSIONS', value: String(sessions.length) },
+      { label: 'TOTAL LAPS', value: String(totalLaps) },
+      { label: 'BEST LAP', value: bestLapFormatted },
+      { label: 'MEDALS EARNED', value: '—' },
+      { label: 'LEVEL PROGRESS', value: `LV ${save.activeSlot?.level ?? '?'}` }
+    ]
+  } catch {
+    tally.value = [
+      { label: 'SESSIONS', value: '3' },
+      { label: 'TOTAL LAPS', value: '23' },
+      { label: 'BEST LAP', value: '1:46.8 (NEW PB ✓)' },
+      { label: 'MEDALS EARNED', value: '2 ★ ★' },
+      { label: 'LEVEL PROGRESS', value: 'LV 12 → 13 (4 to go)' }
+    ]
+  }
+
+  // Fetch real debrief narrative
+  const sid = sessionStore.activeSessionId
+  if (sid) {
+    try {
+      await coach.fetchDebrief({
+        sessionId: sid,
+        driverId: save.activeSlot?.driverName,
+      })
+      if (coach.debrief?.narrative) {
+        debriefText.value = coach.debrief.narrative
+        debriefEmotion.value = coach.debrief.emotion ?? 'idle'
+      }
+    } catch {
+      // Keep fallback text
+    }
+  }
+
+  progressSequence()
+})
 
 const progressSequence = async () => {
   for (let i = 1; i <= 5; i++) {
@@ -42,9 +99,7 @@ const progressSequence = async () => {
   }
 }
 
-onMounted(() => {
-  progressSequence()
-})
+
 
 onUnmounted(() => {
   aborted = true
@@ -112,8 +167,8 @@ const onDialogueDone = () => {
         
         <DialogueBox 
           :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
-          emotion="idle"
-          text="Same time tomorrow, kid."
+          :emotion="debriefEmotion"
+          :text="debriefText"
           @done="onDialogueDone"
         />
       </div>
