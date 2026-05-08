@@ -37,7 +37,7 @@ cd ~/pitwall
 # uv is installed via pkg earlier
 uv venv --python python .venv
 source .venv/bin/activate
-uv pip install -e .[all]
+uv pip install -e .[can]
 
 echo "========================================="
 echo "✅ Setup Complete!"
