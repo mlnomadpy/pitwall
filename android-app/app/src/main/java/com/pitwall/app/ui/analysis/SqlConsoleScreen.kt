@@ -4,6 +4,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -34,6 +36,13 @@ import com.pitwall.app.data.remote.prettyJson
 import com.pitwall.app.di.SessionHolder
 import kotlinx.coroutines.launch
 
+private enum class SqlConsoleTab(
+    val label: String,
+) {
+    BRIDGE_PROBES("Bridge probes"),
+    DUCKDB_WASM("DuckDB Wasm"),
+}
+
 private enum class ProbeMode(
     val label: String,
 ) {
@@ -48,6 +57,7 @@ private enum class ProbeMode(
 fun SqlConsoleScreen(navController: NavController) {
     val sid = SessionHolder.activeSessionId
     val scope = rememberCoroutineScope()
+    var consoleTab by remember { mutableStateOf(SqlConsoleTab.BRIDGE_PROBES) }
     var mode by remember { mutableStateOf(ProbeMode.SIGNALS) }
     var names by remember { mutableStateOf("throttle_pct,brake_bar") }
     var result by remember { mutableStateOf<String?>(null) }
@@ -61,7 +71,7 @@ fun SqlConsoleScreen(navController: NavController) {
                     Column {
                         Text("SQL / signals / laps")
                         Text(
-                            "PWA: DuckDB-Wasm + Parquet · Native: bridge-backed probes",
+                            "PWA parity: DuckDB-Wasm tab · Bridge REST probes",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -78,192 +88,234 @@ fun SqlConsoleScreen(navController: NavController) {
         Column(
             modifier =
                 Modifier
-                    .verticalScroll(rememberScrollState())
+                    .fillMaxSize()
                     .padding(padding)
                     .padding(16.dp),
         ) {
-            Text(
-                "Full ad-hoc SQL runs in the Vue PWA after Parquet registration. On Android, pull aligned signals, DuckDB lap rows, or per-session capabilities — or export Parquet from Session detail for offline analysis.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 12.dp),
-            )
-            Text(
-                "Session: ${sid ?: "none"}",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ProbeMode.entries.forEach { m ->
+                SqlConsoleTab.entries.forEach { tab ->
                     FilterChip(
-                        selected = mode == m,
+                        selected = consoleTab == tab,
                         onClick = {
-                            mode = m
+                            consoleTab = tab
                             result = null
                             error = null
                         },
-                        label = { Text(m.label) },
+                        label = { Text(tab.label) },
                     )
                 }
             }
-            when (mode) {
-                ProbeMode.SIGNALS -> {
-                    OutlinedTextField(
-                        value = names,
-                        onValueChange = { names = it },
-                        label = { Text("Comma-separated signal names") },
-                        modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                        singleLine = false,
-                        minLines = 2,
-                    )
-                }
-                ProbeMode.LAPS -> {
+            Text(
+                "Session: ${sid ?: "none"}",
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+            )
+            when (consoleTab) {
+                SqlConsoleTab.DUCKDB_WASM -> {
                     Text(
-                        "Uses GET /laps — optional filter when a session is active.",
+                        "DuckDB-Wasm loads `@duckdb/duckdb-wasm` from jsDelivr (same stacks as the Vue PWA). Mixed HTTP(S) is enabled so the page can fetch Parquet from your bridge URL.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    DuckDbWasmConsole(
+                        sessionId = sid,
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
                     )
                 }
-                ProbeMode.CAPABILITIES -> {
+                SqlConsoleTab.BRIDGE_PROBES -> {
                     Text(
-                        "Uses GET /session/{id}/capabilities — requires active session.",
+                        "Bridge-backed probes — aligned signals, lap rows, capabilities, or the full ADR-015 registry.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                        modifier = Modifier.padding(bottom = 12.dp),
                     )
-                }
-                ProbeMode.REGISTRY -> {
-                    Text(
-                        "Uses GET /signals/registry — full catalog (can be large).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
-                    )
-                }
-            }
-            Button(
-                onClick = {
-                    when (mode) {
-                        ProbeMode.SIGNALS -> {
-                            if (sid.isNullOrBlank()) {
-                                error = "Select a session first."
-                                return@Button
-                            }
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    val json =
-                                        NetworkModule.pitwallApi.sessionSignalsGet(
-                                            sessionId = sid,
-                                            names = names.trim(),
-                                            axis = "time",
-                                            interp = "hold",
-                                            rateHz = 5.0,
-                                            tFrom = null,
-                                            tTo = null,
-                                        )
-                                    result = json.prettyJson()
-                                } catch (e: Exception) {
-                                    error = e.message ?: e.toString()
-                                    result = null
-                                } finally {
-                                    loading = false
-                                }
+                    Column(
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState()),
+                    ) {
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            ProbeMode.entries.forEach { m ->
+                                FilterChip(
+                                    selected = mode == m,
+                                    onClick = {
+                                        mode = m
+                                        result = null
+                                        error = null
+                                    },
+                                    label = { Text(m.label) },
+                                )
                             }
                         }
-                        ProbeMode.LAPS -> {
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    val json =
-                                        NetworkModule.pitwallApi.laps(
-                                            sessionId = sid,
-                                            limit = 40,
-                                        )
-                                    result = json.prettyJson()
-                                } catch (e: Exception) {
-                                    error = e.message ?: e.toString()
-                                    result = null
-                                } finally {
-                                    loading = false
-                                }
+                        when (mode) {
+                            ProbeMode.SIGNALS -> {
+                                OutlinedTextField(
+                                    value = names,
+                                    onValueChange = { names = it },
+                                    label = { Text("Comma-separated signal names") },
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                                    singleLine = false,
+                                    minLines = 2,
+                                )
+                            }
+                            ProbeMode.LAPS -> {
+                                Text(
+                                    "Uses GET /laps — optional filter when a session is active.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                                )
+                            }
+                            ProbeMode.CAPABILITIES -> {
+                                Text(
+                                    "Uses GET /session/{id}/capabilities — requires active session.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                                )
+                            }
+                            ProbeMode.REGISTRY -> {
+                                Text(
+                                    "Uses GET /signals/registry — full catalog (can be large).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+                                )
                             }
                         }
-                        ProbeMode.CAPABILITIES -> {
-                            if (sid.isNullOrBlank()) {
-                                error = "Select a session first."
-                                return@Button
-                            }
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    val json =
-                                        NetworkModule.pitwallApi.sessionCapabilities(sid)
-                                    result = json.prettyJson()
-                                } catch (e: Exception) {
-                                    error = e.message ?: e.toString()
-                                    result = null
-                                } finally {
-                                    loading = false
+                        Button(
+                            onClick = {
+                                when (mode) {
+                                    ProbeMode.SIGNALS -> {
+                                        if (sid.isNullOrBlank()) {
+                                            error = "Select a session first."
+                                            return@Button
+                                        }
+                                        scope.launch {
+                                            loading = true
+                                            error = null
+                                            try {
+                                                val json =
+                                                    NetworkModule.pitwallApi.sessionSignalsGet(
+                                                        sessionId = sid,
+                                                        names = names.trim(),
+                                                        axis = "time",
+                                                        interp = "hold",
+                                                        rateHz = 5.0,
+                                                        tFrom = null,
+                                                        tTo = null,
+                                                    )
+                                                result = json.prettyJson()
+                                            } catch (e: Exception) {
+                                                error = e.message ?: e.toString()
+                                                result = null
+                                            } finally {
+                                                loading = false
+                                            }
+                                        }
+                                    }
+                                    ProbeMode.LAPS -> {
+                                        scope.launch {
+                                            loading = true
+                                            error = null
+                                            try {
+                                                val json =
+                                                    NetworkModule.pitwallApi.laps(
+                                                        sessionId = sid,
+                                                        limit = 40,
+                                                    )
+                                                result = json.prettyJson()
+                                            } catch (e: Exception) {
+                                                error = e.message ?: e.toString()
+                                                result = null
+                                            } finally {
+                                                loading = false
+                                            }
+                                        }
+                                    }
+                                    ProbeMode.CAPABILITIES -> {
+                                        if (sid.isNullOrBlank()) {
+                                            error = "Select a session first."
+                                            return@Button
+                                        }
+                                        scope.launch {
+                                            loading = true
+                                            error = null
+                                            try {
+                                                val json =
+                                                    NetworkModule.pitwallApi.sessionCapabilities(sid)
+                                                result = json.prettyJson()
+                                            } catch (e: Exception) {
+                                                error = e.message ?: e.toString()
+                                                result = null
+                                            } finally {
+                                                loading = false
+                                            }
+                                        }
+                                    }
+                                    ProbeMode.REGISTRY -> {
+                                        scope.launch {
+                                            loading = true
+                                            error = null
+                                            try {
+                                                val json = NetworkModule.pitwallApi.signalsRegistry()
+                                                result = json.prettyJson()
+                                            } catch (e: Exception) {
+                                                error = e.message ?: e.toString()
+                                                result = null
+                                            } finally {
+                                                loading = false
+                                            }
+                                        }
+                                    }
                                 }
-                            }
+                            },
+                            enabled = !loading &&
+                                when (mode) {
+                                    ProbeMode.SIGNALS -> !sid.isNullOrBlank()
+                                    ProbeMode.LAPS -> true
+                                    ProbeMode.CAPABILITIES -> !sid.isNullOrBlank()
+                                    ProbeMode.REGISTRY -> true
+                                },
+                        ) {
+                            Text(
+                                when (mode) {
+                                    ProbeMode.SIGNALS -> "Fetch aligned samples"
+                                    ProbeMode.LAPS -> "Fetch lap rows"
+                                    ProbeMode.CAPABILITIES -> "Fetch capabilities"
+                                    ProbeMode.REGISTRY -> "Fetch signal registry"
+                                },
+                            )
                         }
-                        ProbeMode.REGISTRY -> {
-                            scope.launch {
-                                loading = true
-                                error = null
-                                try {
-                                    val json = NetworkModule.pitwallApi.signalsRegistry()
-                                    result = json.prettyJson()
-                                } catch (e: Exception) {
-                                    error = e.message ?: e.toString()
-                                    result = null
-                                } finally {
-                                    loading = false
-                                }
-                            }
+                        when {
+                            loading ->
+                                CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                            error != null ->
+                                Text(
+                                    error!!,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.padding(top = 12.dp),
+                                )
+                            result != null ->
+                                Text(
+                                    result!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(top = 12.dp),
+                                )
                         }
                     }
-                },
-                enabled = !loading &&
-                    when (mode) {
-                        ProbeMode.SIGNALS -> !sid.isNullOrBlank()
-                        ProbeMode.LAPS -> true
-                        ProbeMode.CAPABILITIES -> !sid.isNullOrBlank()
-                        ProbeMode.REGISTRY -> true
-                    },
-            ) {
-                Text(
-                    when (mode) {
-                        ProbeMode.SIGNALS -> "Fetch aligned samples"
-                        ProbeMode.LAPS -> "Fetch lap rows"
-                        ProbeMode.CAPABILITIES -> "Fetch capabilities"
-                        ProbeMode.REGISTRY -> "Fetch signal registry"
-                    },
-                )
-            }
-            when {
-                loading ->
-                    CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
-                error != null ->
-                    Text(
-                        error!!,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
-                result != null ->
-                    Text(
-                        result!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 12.dp),
-                    )
+                }
             }
         }
     }

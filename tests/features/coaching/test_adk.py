@@ -297,8 +297,12 @@ def bridge_app(monkeypatch, tmp_path):
             pitwall.state.stream_adk = value
             
     mock_bridge = MockBridge()
-    # Mocking the HAS_ADK flag that tests mutate
-    mock_bridge.HAS_ADK = pitwall.features.coaching.adk_agents.HAS_ADK
+    # Sync initial HAS_ADK with adk_agents when importable (needs duckdb, google-adk, …).
+    try:
+        _adk = importlib.import_module("pitwall.features.coaching.adk_agents")
+        mock_bridge.HAS_ADK = _adk.HAS_ADK
+    except Exception:
+        mock_bridge.HAS_ADK = False
     return mock_bridge
 
 

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Pitwall DuckDB</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; background: #0f1419; color: #e6edf3; }
+    body { margin: 0; padding: 12px; }
+    #status { font-size: 13px; color: #8b949e; margin-bottom: 8px; min-height: 1.2em; }
+    textarea#sql {
+      width: 100%; min-height: 120px; box-sizing: border-box;
+      background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;
+      padding: 10px; font-family: ui-monospace, monospace; font-size: 13px;
+    }
+    button {
+      margin: 8px 8px 8px 0; padding: 8px 14px;
+      background: #238636; color: #fff; border: none; border-radius: 6px; font-weight: 600;
+    }
+    button.secondary { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+    #out {
+      white-space: pre-wrap; word-break: break-word;
+      font-family: ui-monospace, monospace; font-size: 12px;
+      background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+      padding: 10px; margin-top: 8px; max-height: 55vh; overflow: auto;
+    }
+    .hint { font-size: 12px; color: #8b949e; margin-bottom: 8px; line-height: 1.4; }
+  </style>
+</head>
+<body>
+  <p id="status">Initializing DuckDB-Wasm…</p>
+  <p class="hint">Loads telemetry Parquet from the bridge (same path as the Vue PWA), registers <code>telemetry</code>, then runs read-only SQL.</p>
+  <textarea id="sql">-- Top 10 speeds
+SELECT distance_m, speed_ms * 3.6 AS speed_kmh, brake_bar, throttle_pct
+FROM telemetry
+ORDER BY speed_ms DESC LIMIT 10;</textarea>
+  <div>
+    <button type="button" id="load" class="secondary">Load Parquet</button>
+    <button type="button" id="run">Run SQL</button>
+  </div>
+  <pre id="out"></pre>
+  <script type="module">
+    const WRITE_BLOCK = /^\s*(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|ATTACH|COPY)\b/im;
+
+    const params = new URLSearchParams(location.search);
+    const apiBaseRaw = params.get('base');
+    const sessionIdRaw = params.get('sid');
+    const apiBase = apiBaseRaw ? decodeURIComponent(apiBaseRaw) : 'http://127.0.0.1:8765/';
+    const sessionId = sessionIdRaw ? decodeURIComponent(sessionIdRaw) : '';
+
+    const statusEl = document.getElementById('status');
+    const outEl = document.getElementById('out');
+
+    function status(msg) { statusEl.textContent = msg; }
+    function setOut(text) { outEl.textContent = text; }
+
+    let db = null;
+    let readyChain = null;
+
+    async function initDb() {
+      const duckdb = await import('https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser.mjs');
+      const bundles = duckdb.getJsDelivrBundles();
+      const bundle = await duckdb.selectBundle(bundles);
+      const workerSrc = `importScripts("${bundle.mainWorker}");`;
+      const workerUrl = URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' }));
+      const worker = new Worker(workerUrl);
+      const logger = new duckdb.ConsoleLogger();
+      db = new duckdb.AsyncDuckDB(logger, worker);
+      await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+      URL.revokeObjectURL(workerUrl);
+      status('DuckDB-Wasm ready — tap Load Parquet (needs bridge + session).');
+    }
+
+    readyChain = initDb().catch((e) => {
+      status('DuckDB init failed');
+      setOut(String(e));
+    });
+
+    async function loadParquet() {
+      await readyChain;
+      if (!sessionId) {
+        setOut('No session id in URL — pick an active session in the app and reopen this tab.');
+        return;
+      }
+      if (!db) {
+        setOut('DuckDB did not initialize.');
+        return;
+      }
+      status('Fetching Parquet…');
+      const root = apiBase.endsWith('/') ? apiBase : apiBase + '/';
+      const url = new URL(`session/${encodeURIComponent(sessionId)}/export.parquet`, root);
+      url.searchParams.set('table', 'telemetry');
+      const res = await fetch(url.href);
+      if (!res.ok) {
+        const t = await res.text();
+        setOut('HTTP ' + res.status + '\n' + t);
+        status('Parquet fetch failed');
+        return;
+      }
+      const buf = new Uint8Array(await res.arrayBuffer());
+      const fname = sessionId + '.parquet';
+      await db.registerFileBuffer(fname, buf);
+      const conn = await db.connect();
+      await conn.query(`CREATE OR REPLACE VIEW telemetry AS SELECT * FROM '` + fname.replace(/'/g, "''") + `'`);
+      await conn.close();
+      status('Loaded ' + fname + ' — ready to query.');
+      setOut('OK — view `telemetry` is ready.');
+    }
+
+    async function runSql() {
+      await readyChain;
+      const sql = document.getElementById('sql').value.trim();
+      if (!sql) {
+        setOut('Enter SQL first.');
+        return;
+      }
+      if (WRITE_BLOCK.test(sql)) {
+        setOut('Write operations are blocked. Use SELECT or WITH only.');
+        return;
+      }
+      if (!db) {
+        setOut('DuckDB not ready.');
+        return;
+      }
+      try {
+        const conn = await db.connect();
+        const result = await conn.query(sql);
+        await conn.close();
+        const rows = result.toArray().map((r) => r.toJSON());
+        setOut(JSON.stringify(rows, null, 2));
+        status(rows.length + ' row(s)');
+      } catch (e) {
+        setOut(String(e));
+        status('Query error');
+      }
+    }
+
+    document.getElementById('load').addEventListener('click', () => {
+      loadParquet().catch((e) => { setOut(String(e)); status('Error'); });
+    });
+    document.getElementById('run').addEventListener('click', () => {
+      runSql().catch((e) => setOut(String(e)));
+    });
+  </script>
+</body>
+</html>

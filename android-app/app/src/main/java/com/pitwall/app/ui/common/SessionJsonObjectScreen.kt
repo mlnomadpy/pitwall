@@ -13,6 +13,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -25,12 +26,15 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pitwall.app.data.remote.NetworkModule
 import com.pitwall.app.data.remote.PitwallApi
+import com.pitwall.app.data.remote.compactSummary
 import com.pitwall.app.data.remote.prettyJson
+import com.pitwall.app.data.remote.topLevelNumericFractions
 import com.pitwall.app.di.SessionHolder
+import com.pitwall.app.ui.components.pitwall.PitwallHorizontalBar
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Loads [fetch] for [SessionHolder.activeSessionId] and shows pretty-printed JSON.
+ * Loads [fetch] for [SessionHolder.activeSessionId] — numeric bars, compact summary, optional raw JSON.
  * Use after POST /coach/debrief when bundle sections exist.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -42,28 +46,29 @@ fun SessionJsonObjectScreen(
     fetch: suspend PitwallApi.(String) -> JsonObject,
 ) {
     val sid = SessionHolder.activeSessionId
-    var text by remember { mutableStateOf<String?>(null) }
+    var payload by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var showRaw by remember { mutableStateOf(false) }
 
     LaunchedEffect(sid, title) {
         if (sid.isNullOrBlank()) {
-            text = null
+            payload = null
             error = null
             loading = false
             return@LaunchedEffect
         }
         loading = true
         error = null
+        showRaw = false
         try {
-            val json =
+            payload =
                 NetworkModule.pitwallApi.run {
                     fetch(sid)
                 }
-            text = json.prettyJson()
         } catch (e: Exception) {
             error = e.message ?: e.toString()
-            text = null
+            payload = null
         } finally {
             loading = false
         }
@@ -105,8 +110,42 @@ fun SessionJsonObjectScreen(
                 loading -> CircularProgressIndicator()
                 error != null ->
                     Text(error ?: "", color = MaterialTheme.colorScheme.error)
-                text != null ->
-                    Text(text!!, style = MaterialTheme.typography.bodySmall)
+                payload != null -> {
+                    val json = payload!!
+                    val bars = json.topLevelNumericFractions().take(14)
+                    Column {
+                        if (bars.isNotEmpty()) {
+                            Text(
+                                "Numeric snapshot",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                            bars.forEach { (k, frac) ->
+                                PitwallHorizontalBar(
+                                    label = k,
+                                    fraction = frac,
+                                    caption = "${(frac * 100).toInt()}%",
+                                )
+                            }
+                        }
+                        Text(
+                            json.compactSummary(maxKeys = 80),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = if (bars.isNotEmpty()) 12.dp else 0.dp),
+                        )
+                        TextButton(onClick = { showRaw = !showRaw }) {
+                            Text(if (showRaw) "Hide raw JSON" else "Show full JSON")
+                        }
+                        if (showRaw) {
+                            Text(
+                                json.prettyJson(),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
+                }
             }
         }
     }

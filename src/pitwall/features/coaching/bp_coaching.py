@@ -349,7 +349,15 @@ def coach_ask_stream():
             yield "data: " + json.dumps({"done":True,"answer":answer,"emotion":emotion,"qa_key":qa_key}) + "\n\n"
         except Exception as exc:
             yield "event: error\ndata: " + json.dumps({"error":f"{type(exc).__name__}: {exc}"}) + "\n\n"
-    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream; charset=utf-8",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 @bp.route("/coach/agents", methods=["GET"])
 def coach_agents():

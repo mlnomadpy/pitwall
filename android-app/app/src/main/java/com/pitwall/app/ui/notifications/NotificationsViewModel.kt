@@ -3,6 +3,7 @@ package com.pitwall.app.ui.notifications
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pitwall.app.data.remote.NetworkModule
+import com.pitwall.app.data.remote.compactSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +21,8 @@ import okhttp3.Request
 data class NotificationRow(
     /** Already formatted for display */
     val label: String,
+    /** Short structured preview from [compactSummary]. */
+    val summary: String,
     val rawJson: String,
 )
 
@@ -66,6 +69,7 @@ class NotificationsViewModel : ViewModel() {
                                     val row =
                                         NotificationRow(
                                             label = label,
+                                            summary = obj.compactSummary(maxKeys = 24),
                                             rawJson =
                                                 NetworkModule.serializationJson.encodeToString(
                                                     JsonObject.serializer(),
@@ -77,6 +81,7 @@ class NotificationsViewModel : ViewModel() {
                                     val row =
                                         NotificationRow(
                                             label = payload.take(120),
+                                            summary = "",
                                             rawJson = payload,
                                         )
                                     _rows.value = (_rows.value + row).takeLast(300)

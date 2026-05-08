@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
@@ -32,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.pitwall.app.data.remote.NetworkModule
 import com.pitwall.app.di.SessionHolder
+import com.pitwall.app.ui.components.pitwall.MiniSparkline
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -115,7 +118,20 @@ fun TelemetryReplayScreen(navController: NavController) {
             )
         },
     ) { padding ->
-        Column(Modifier.padding(padding).padding(16.dp)) {
+        val speedSeries =
+            remember(rows) {
+                rows.mapNotNull { r -> r["speed_ms"]?.jsonPrimitive?.doubleOrNull }
+            }
+        val throttleSeries =
+            remember(rows) {
+                rows.mapNotNull { r -> r["throttle_pct"]?.jsonPrimitive?.doubleOrNull }
+            }
+        Column(
+            Modifier
+                .padding(padding)
+                .padding(16.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
             when {
                 sid.isNullOrBlank() ->
                     Text(
@@ -140,6 +156,22 @@ fun TelemetryReplayScreen(navController: NavController) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+            }
+
+            if (speedSeries.size >= 2 || throttleSeries.size >= 2) {
+                Text(
+                    "Series overview (full pull)",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                if (speedSeries.size >= 2) {
+                    Text("Speed (m/s)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    MiniSparkline(values = speedSeries, usePrimary = true, modifier = Modifier.padding(bottom = 12.dp))
+                }
+                if (throttleSeries.size >= 2) {
+                    Text("Throttle %", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    MiniSparkline(values = throttleSeries, modifier = Modifier.padding(bottom = 12.dp))
+                }
             }
 
             Row(

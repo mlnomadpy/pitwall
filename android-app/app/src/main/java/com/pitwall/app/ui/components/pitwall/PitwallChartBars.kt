@@ -110,8 +110,15 @@ fun MiniSparkline(
         Modifier
             .fillMaxWidth()
             .height(48.dp),
+    /** When true, uses [MaterialTheme.colorScheme.primary] instead of tertiary. */
+    usePrimary: Boolean = false,
 ) {
-    val lineColor = MaterialTheme.colorScheme.tertiary
+    val lineColor =
+        if (usePrimary) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.tertiary
+        }
     if (values.size < 2) return
     val minV = values.minOrNull() ?: return
     val maxV = values.maxOrNull() ?: return
