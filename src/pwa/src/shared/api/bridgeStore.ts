@@ -5,7 +5,9 @@ export interface HealthResponse {
   status: string
   version: string
   can_bridge: boolean
+  active_session_id: string | null
 }
+
 
 export const useBridgeStore = defineStore('bridge', {
   state: () => ({

@@ -6,13 +6,16 @@ import { useNotificationsStore } from '@/shared/api/notificationStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { usePauseStore } from '@/shared/lib/pauseStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
+import { useLoadingStore } from '@/shared/api/loadingStore'
 import CyberBadge from '@/shared/ui/core/CyberBadge.vue'
 
 const saveStore = useSaveStore()
 const notificationStore = useNotificationsStore()
 const audio = useAudioStore()
 const pauseStore = usePauseStore()
+const loadingStore = useLoadingStore()
 const router = useRouter()
+
 const route = useRoute()
 
 const activeSlot = computed(() => saveStore.activeSlot)
@@ -143,14 +146,24 @@ onUnmounted(() => {
       <span class="text-silver/50">NO DRIVER</span>
     </div>
 
-    <!-- Center: Pause button -->
-    <button 
-      class="bar-center bar-btn" 
-      aria-label="Pause menu"
-      @click="openPause"
-    >
-      <span class="pause-icon" aria-hidden="true">▮▮</span>
-    </button>
+    <!-- Center: Pause button OR Loading indicator -->
+    <div class="bar-center">
+      <div v-if="loadingStore.isLoading" class="loading-status">
+        <span class="loading-label">
+          [{{ loadingStore.source === 'adk' ? 'PADDOCK AI THINKING' : 
+             loadingStore.source === 'duckdb' ? 'SQL ENGINE BUSY' : 'SYSTEM LOADING' }}]
+        </span>
+      </div>
+      <button 
+        v-else
+        class="bar-btn" 
+        aria-label="Pause menu"
+        @click="openPause"
+      >
+        <span class="pause-icon" aria-hidden="true">▮▮</span>
+      </button>
+    </div>
+
 
     <!-- Right: Notifications + Clock -->
     <button 
@@ -172,37 +185,26 @@ onUnmounted(() => {
 .status-bar {
   position: absolute;
   top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: clamp(280px, 80%, 600px);
-  height: clamp(32px, 6vh, 52px);
+  left: 0;
+  width: 100%;
+  height: calc(var(--safe-top) + 32px);
   background: linear-gradient(180deg, var(--color-ink) 0%, rgba(11, 12, 16, 0.8) 100%);
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 0 clamp(16px, 4vw, 40px);
+  align-items: flex-end; /* Align to bottom of bar, safe area handles top */
+  padding: 0 calc(var(--safe-right) + var(--space-md)) 4px calc(var(--safe-left) + var(--space-md));
   font-family: var(--font-ui);
-  font-size: clamp(10px, 2.5vmin, 22px);
-  z-index: var(--z-sticky, 10);
-  clip-path: polygon(
-    0 0,
-    100% 0,
-    calc(100% - 20px) 100%,
-    20px 100%
-  );
+  font-size: clamp(10px, calc(2vmin * var(--app-scale)), 20px);
+  z-index: var(--z-sticky);
+  clip-path: none; /* Removed restrictive clip path to fill width */
+  border-bottom: 2px solid var(--color-ui-good);
+  box-shadow: 0 0 10px var(--color-ui-good);
 }
 
 .status-bar::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 20px;
-  right: 20px;
-  height: 2px;
-  background: var(--color-ui-good);
-  box-shadow: 0 0 10px var(--color-ui-good);
-  opacity: 0.8;
+  display: none; /* Removed the old decorative rule since we use border-bottom */
 }
+
 
 /* Shared button reset for all tappable zones */
 .bar-btn {
@@ -250,6 +252,28 @@ onUnmounted(() => {
   opacity: 0.7;
   transition: opacity var(--duration-fast, 150ms) ease;
 }
+
+.loading-status {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.loading-label {
+  color: var(--color-ui-info);
+  font-weight: 900;
+  font-size: clamp(8px, 1.5vmin, 14px);
+  letter-spacing: 0.1em;
+  text-shadow: 0 0 8px var(--color-ui-info);
+  animation: pulse-loading 0.8s steps(2) infinite;
+}
+
+@keyframes pulse-loading {
+  0% { opacity: 0.7; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
 
 .bar-btn:active .pause-icon {
   opacity: 1;

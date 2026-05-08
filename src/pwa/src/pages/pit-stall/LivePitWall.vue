@@ -1,23 +1,62 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useTelemetryStore } from '@/entities/session/model/telemetryStore'
+import { useLapTimeStore } from '@/entities/lap-time/model/lapTimeStore'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import TrackMap from '@/shared/ui/core/TrackMap.vue'
 
 const router = useRouter()
 const audio = useAudioStore()
+const telemetry = useTelemetryStore()
+const lapTimes = useLapTimeStore()
+const session = useSessionStore()
 
 const timer = ref(0)
 let intervalId: number | null = null
 
-const sectorTimes = ref([
-  { id: 1, lap: 12, s1: '28.4', s2: '32.1', s3: '24.5', total: '1:25.0', state: 'purple' },
-  { id: 2, lap: 13, s1: '28.5', s2: '32.0', s3: '24.6', total: '1:25.1', state: 'green' },
-  { id: 3, lap: 14, s1: '28.8', s2: '32.4', s3: '24.8', total: '1:26.0', state: 'yellow' },
-])
+interface SectorRow {
+  id: number
+  lap: number
+  s1: string
+  s2: string
+  s3: string
+  total: string
+  state: string   // 'purple' = personal best, 'green' = good, 'yellow' = slow
+}
+
+/** Build sector time rows from real lap data */
+const sectorTimes = computed<SectorRow[]>(() => {
+  if (lapTimes.laps.length === 0) return []
+  
+  const bestTime = lapTimes.bestLapS ?? Infinity
+  
+  return lapTimes.laps.map((lap, i) => {
+    const sectors = lap.sectors ?? []
+    const total = lap.lap_time_s
+    const mins = Math.floor(total / 60)
+    const secs = (total % 60).toFixed(1)
+    
+    // Determine state: purple if PB, green if within 2s of PB, yellow otherwise
+    let state = 'yellow'
+    if (lap.is_best) state = 'purple'
+    else if (total - bestTime < 2) state = 'green'
+    
+    return {
+      id: i,
+      lap: lap.lap_number,
+      s1: sectors[0]?.time_s?.toFixed(1) ?? '--.-',
+      s2: sectors[1]?.time_s?.toFixed(1) ?? '--.-',
+      s3: sectors[2]?.time_s?.toFixed(1) ?? '--.-',
+      total: `${mins}:${secs.padStart(4, '0')}`,
+      state,
+    }
+  }).reverse()  // newest lap first
+})
 
 const carPos = ref(0)
 const trackMapRef = ref<any>(null)
@@ -25,7 +64,14 @@ const activeTurnId = ref<number | null>(null)
 
 const tick = () => {
   timer.value++
-  carPos.value = (carPos.value + 1) % 100
+  
+  // Use real telemetry distance if available, otherwise simulate
+  if (telemetry.frame) {
+    // Track length ~4258m for Sonoma — normalize to 0-100%
+    carPos.value = (telemetry.frame.distance / 4258) * 100 % 100
+  } else {
+    carPos.value = (carPos.value + 1) % 100
+  }
   
   if (trackMapRef.value && trackMapRef.value.trackTurns) {
     const pt = trackMapRef.value.getPointAtProgress(carPos.value)
@@ -45,24 +91,13 @@ const tick = () => {
       activeTurnId.value = null
     }
   }
-  
-  if (timer.value % 20 === 0) {
-    // simulate new lap
-    const newLap = {
-      id: timer.value,
-      lap: sectorTimes.value[0].lap + 1,
-      s1: (28 + Math.random()).toFixed(1),
-      s2: (32 + Math.random()).toFixed(1),
-      s3: (24 + Math.random()).toFixed(1),
-      total: '1:25.x',
-      state: Math.random() > 0.8 ? 'purple' : (Math.random() > 0.4 ? 'green' : 'yellow')
-    }
-    sectorTimes.value.unshift(newLap)
-    if (sectorTimes.value.length > 8) sectorTimes.value.pop()
-  }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  // Fetch real lap data
+  const sid = session.activeSessionId ?? session.sessions.find(s => s.lap_count > 0)?.session_id
+  if (sid) await lapTimes.fetchLapTimes(sid)
+  
   intervalId = window.setInterval(tick, 200)
 })
 

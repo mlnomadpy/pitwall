@@ -80,8 +80,10 @@ const commitSave = async () => {
     settings: {
       audio: { masterVolume: 80, musicVolume: 50, sfxVolume: 100, voiceVolume: 100, coachMute: false },
       display: { nightMode: false, reducedMotion: false, showFps: false },
-      controls: { keyboardLayout: 'arrows', swapAB: false }
+      controls: { keyboardLayout: 'arrows', swapAB: false },
+      ux: { typewriterSpeed: 'normal', hapticFeedback: true }
     }
+
   }
   
   await save.save()

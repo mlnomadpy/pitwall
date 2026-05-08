@@ -49,7 +49,9 @@ onMounted(updateCarPos)
 </script>
 
 <template>
-  <svg viewBox="0 0 3000 1440" class="w-full h-full fill-current" :class="strokeClass || 'text-slate'">
+  <svg viewBox="0 0 3000 1440" class="w-full h-full fill-current" :class="strokeClass || 'text-slate'" role="img" aria-label="Track map of Sonoma Raceway">
+    <title>Sonoma Raceway Track Map</title>
+
     <!-- Alternate Routes and Missing Segments -->
     <path v-for="(path, index) in activeAlternates" :key="'alt-'+index" class="opacity-50" :d="path" />
 
@@ -78,8 +80,12 @@ onMounted(updateCarPos)
          class="transition-all duration-300 cursor-pointer"
          :class="activeTurnId === t.id ? 'scale-150 drop-shadow-[0_0_20px_#fff] opacity-100 z-10' : 'opacity-60'"
          @click="$emit('turn-click', t.id)"
+         role="button"
+         :aria-label="`Turn ${t.id}`"
+         :aria-current="activeTurnId === t.id"
          style="transform-origin: center; transform-box: fill-box;"
       >
+
         <circle class="cls-7 transition-colors duration-300" :cx="t.cx" :cy="t.cy" r="41.2" 
                 :class="[
                   activeTurnId === t.id ? 'fill-slate text-ink border-ink' : '',

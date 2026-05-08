@@ -34,13 +34,15 @@ const onClick = (e: Event) => {
 
 <template>
   <button 
-    class="cyber-button"
+    class="pitwall-button"
     :class="[size, variant, { fluid, active, disabled: disabled || loading, complex, loading }]"
     :disabled="disabled || loading"
     :aria-label="ariaLabel"
     :aria-busy="loading"
+    :role="complex ? 'link' : 'button'"
     @click="onClick"
   >
+
     <!-- Background scanline effect layer -->
     <div class="bg-scanline" aria-hidden="true"></div>
     
@@ -74,7 +76,7 @@ const onClick = (e: Event) => {
 </template>
 
 <style scoped>
-.cyber-button {
+.pitwall-button {
   position: relative;
   display: inline-flex;
   align-items: center;
@@ -85,9 +87,9 @@ const onClick = (e: Event) => {
   cursor: pointer;
   outline: none;
   border: 2px solid var(--theme-color, var(--color-ui-good));
-  transition: transform var(--duration-instant, 50ms) var(--ease-snap, steps(2)),
-              box-shadow var(--duration-instant, 50ms) var(--ease-snap, steps(2)),
-              background-color var(--duration-instant, 50ms) var(--ease-snap, steps(2));
+  transition: transform var(--duration-instant) var(--ease-snap),
+              box-shadow var(--duration-instant) var(--ease-snap),
+              background-color var(--duration-instant) var(--ease-snap);
   clip-path: polygon(
     clamp(6px, 1vmin, 12px) 0,
     100% 0,
@@ -97,22 +99,23 @@ const onClick = (e: Event) => {
     0 clamp(6px, 1vmin, 12px)
   );
   overflow: hidden;
-  z-index: var(--z-content, 1);
-  box-shadow: var(--shadow-hard, 4px 4px 0 rgba(0,0,0,0.8));
+  z-index: var(--z-content);
+  box-shadow: var(--shadow-hard);
+  touch-action: manipulation;
 }
 
-.cyber-button.fluid {
+.pitwall-button.fluid {
   display: flex;
   width: 100%;
 }
 
-.cyber-button.disabled {
+.pitwall-button.disabled {
   opacity: 0.5;
   cursor: not-allowed;
   filter: grayscale(1);
 }
 
-.cyber-button.loading {
+.pitwall-button.loading {
   cursor: wait;
 }
 
@@ -121,11 +124,11 @@ const onClick = (e: Event) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-sm);
   width: 100%;
   height: 100%;
   z-index: 3;
-  padding: 0 16px;
+  padding: 0 var(--space-md);
 }
 
 .complex-content {
@@ -141,69 +144,43 @@ const onClick = (e: Event) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  line-height: 1;
+  line-height: 1.1;
 }
 
 .main-text {
   text-transform: uppercase;
-  letter-spacing: 2px;
+  letter-spacing: 0.1em;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.8);
+  font-size: clamp(12px, calc(2.2vmin * var(--app-scale)), 24px);
 }
 
 .sub-text {
   font-family: var(--font-ui);
   opacity: 0.7;
-  margin-top: 4px;
-  letter-spacing: 1px;
+  margin-top: 2px;
+  letter-spacing: 0.05em;
+  font-size: clamp(9px, calc(1.6vmin * var(--app-scale)), 18px);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Loading indicator */
-.loading-indicator {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.loading-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--theme-color, var(--color-ui-good));
-  animation: dot-pulse 1s ease-in-out infinite;
-}
-
-.loading-dot:nth-child(2) { animation-delay: 150ms; }
-.loading-dot:nth-child(3) { animation-delay: 300ms; }
-
-@keyframes dot-pulse {
-  0%, 100% { opacity: 0.3; transform: scale(0.8); }
-  50% { opacity: 1; transform: scale(1.2); }
-}
-
 /* Sizing */
-.cyber-button.lg {
-  min-height: clamp(56px, 10vmin, 80px);
-  min-width: clamp(200px, 30vw, 320px);
+.pitwall-button.lg {
+  min-height: clamp(48px, calc(10vmin * var(--app-scale)), 80px);
+  min-width: clamp(160px, calc(30vw * var(--app-scale)), 320px);
 }
-.cyber-button.lg .main-text { font-size: clamp(14px, 2.5vmin, 20px); }
-.cyber-button.lg .sub-text { font-size: clamp(10px, 1.5vmin, 14px); }
 
-.cyber-button.md {
-  min-height: clamp(40px, 7vmin, 56px);
-  min-width: clamp(120px, 20vw, 200px);
+.pitwall-button.md {
+  min-height: clamp(40px, calc(8vmin * var(--app-scale)), 64px);
+  min-width: clamp(120px, calc(20vw * var(--app-scale)), 240px);
 }
-.cyber-button.md .main-text { font-size: clamp(12px, 2vmin, 16px); }
-.cyber-button.md .sub-text { font-size: clamp(9px, 1.2vmin, 12px); }
 
-.cyber-button.sm {
-  min-height: clamp(32px, 5vmin, 40px);
-  min-width: clamp(80px, 15vw, 120px);
+.pitwall-button.sm {
+  min-height: clamp(32px, calc(6vmin * var(--app-scale)), 48px);
+  min-width: clamp(80px, calc(15vw * var(--app-scale)), 160px);
 }
-.cyber-button.sm .main-text { font-size: clamp(10px, 1.5vmin, 12px); }
-.cyber-button.sm .sub-text { font-size: clamp(8px, 1vmin, 10px); }
 
 /* Neon Border */
 .neon-border {
@@ -224,45 +201,45 @@ const onClick = (e: Event) => {
 }
 
 /* Hover and Active States */
-.cyber-button:hover:not(.disabled),
-.cyber-button.active:not(.disabled) {
+.pitwall-button:hover:not(.disabled),
+.pitwall-button.active:not(.disabled) {
   background-color: var(--theme-bg-hover, rgba(78, 205, 196, 0.2));
   transform: translate(-2px, -2px);
   box-shadow: var(--shadow-hard-hover, 6px 6px 0 rgba(0,0,0,0.8));
 }
 
-.cyber-button:active:not(.disabled) {
+.pitwall-button:active:not(.disabled) {
   transform: translate(2px, 2px);
   box-shadow: var(--shadow-hard-active, 2px 2px 0 rgba(0,0,0,0.8));
 }
 
-.cyber-button:focus-visible {
+.pitwall-button:focus-visible {
   outline: 2px solid var(--theme-color, var(--color-ui-good));
   outline-offset: 4px;
 }
 
 /* Variants */
-.cyber-button.primary {
+.pitwall-button.primary {
   --theme-color: var(--color-ui-bad);
   --theme-bg-hover: rgba(255, 71, 87, 0.2);
 }
 
-.cyber-button.secondary {
+.pitwall-button.secondary {
   --theme-color: var(--color-ui-good);
   --theme-bg-hover: rgba(78, 205, 196, 0.2);
 }
 
-.cyber-button.info {
+.pitwall-button.info {
   --theme-color: var(--color-ui-warn);
   --theme-bg-hover: rgba(254, 202, 87, 0.2);
 }
 
-.cyber-button.dark {
+.pitwall-button.dark {
   --theme-color: var(--color-asphalt-light);
   --theme-bg-hover: rgba(44, 62, 80, 0.4);
 }
 
-.cyber-button.danger {
+.pitwall-button.danger {
   --theme-color: var(--color-ui-bad);
   --theme-bg-hover: rgba(255, 71, 87, 0.3);
   border-width: 2px;

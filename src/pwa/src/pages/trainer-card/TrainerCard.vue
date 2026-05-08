@@ -4,6 +4,7 @@ import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useDuckDBStore } from '@/shared/lib/duckdb/duckdbStore'
+import { useMedalStore } from '@/entities/quest/model/medalStore'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
@@ -14,14 +15,7 @@ import CyberRadarChart from '@/shared/ui/core/CyberRadarChart.vue'
 import CyberSkeleton from '@/shared/ui/core/CyberSkeleton.vue'
 import { useSwipeGesture } from '@/shared/lib/useSwipeGesture'
 
-// Dummy medal data
-const allMedals = Array.from({ length: 40 }).map((_, i) => ({
-  id: `medal_${i}`,
-  tier: i < 5 ? 'BRONZE' : i < 20 ? 'SILVER' : i < 35 ? 'GOLD' : i < 39 ? 'PLATINUM' : 'RAINBOW',
-  name: `Medal ${i}`,
-  desc: `Acquisition criteria for medal ${i}.`,
-  unlocked: Math.random() > 0.6
-}))
+const medalStore = useMedalStore()
 
 // Radar stats
 const driverStats = ref([
@@ -51,6 +45,7 @@ const bestLapS = ref<number | null>(null)
 const loading = ref(true)
 
 onMounted(async () => {
+  medalStore.fetchMedals()
   if (!duckDB.db) {
     try {
       await duckDB.init()
@@ -154,10 +149,10 @@ useSwipeGesture(null, {
                 <div v-if="activeTab === 1" class="w-full h-full flex flex-col min-h-0">
                   <div class="text-small text-silver mb-2 border-b border-slate pb-1 flex justify-between flex-shrink-0">
                     <span>MEDAL DATABASE</span>
-                    <span class="text-ui-good font-bold">{{ allMedals.filter(m => m.unlocked).length }} / 40</span>
+                    <span class="text-ui-good font-bold">{{ medalStore.unlockedCount }} / {{ medalStore.totalCount }}</span>
                   </div>
                   <MedalGrid 
-                    :medals="allMedals" 
+                    :medals="medalStore.medals" 
                     :cursorIndex="-1" 
                     @select="() => {}" 
                     class="flex-grow"

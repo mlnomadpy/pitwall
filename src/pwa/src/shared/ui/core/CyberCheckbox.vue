@@ -13,7 +13,8 @@ const emit = defineEmits<{
 
 <template>
   <div 
-    class="cyber-checkbox-row flex flex-col mt-1 mb-1"
+    class="pitwall-checkbox-row flex flex-col mt-1 mb-1"
+
     role="checkbox"
     :aria-checked="checked"
     :aria-label="label"
@@ -54,54 +55,55 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.cyber-checkbox-row {
+.pitwall-checkbox-row {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
   -webkit-tap-highlight-color: transparent;
+  outline: none;
 }
 
-.cyber-checkbox-row:focus-visible {
-  outline: 2px solid var(--color-ui-good);
-  outline-offset: 2px;
+.pitwall-checkbox-row:focus-visible {
+  box-shadow: var(--shadow-focus);
 }
 
 .focus-marker {
-  width: clamp(14px, 3vmin, 20px);
+  width: clamp(14px, calc(3vmin * var(--app-scale)), 20px);
   flex-shrink: 0;
-  transition: opacity var(--duration-fast, 150ms) ease;
+  transition: opacity var(--duration-fast) ease;
 }
 
 .checkbox-box {
-  width: clamp(16px, 3.5vmin, 24px);
-  height: clamp(16px, 3.5vmin, 24px);
+  width: clamp(16px, calc(3.5vmin * var(--app-scale)), 24px);
+  height: clamp(16px, calc(3.5vmin * var(--app-scale)), 24px);
   flex-shrink: 0;
-  transition: border-color var(--duration-fast, 150ms) ease,
-              box-shadow var(--duration-fast, 150ms) ease,
-              transform 0.15s var(--ease-bounce, cubic-bezier(0.175, 0.885, 0.32, 1.275));
+  transition: border-color var(--duration-fast) ease,
+              box-shadow var(--duration-fast) ease,
+              transform 0.15s var(--ease-bounce);
 }
 
 /* Snap animation on toggle */
-.cyber-checkbox-row:active .checkbox-box {
+.pitwall-checkbox-row:active .checkbox-box {
   transform: scale(0.85);
 }
 
 .check-icon {
-  width: clamp(12px, 2.5vmin, 18px);
-  height: clamp(12px, 2.5vmin, 18px);
-  animation: check-snap 0.35s var(--ease-bounce, cubic-bezier(0.175, 0.885, 0.32, 1.275)) both;
+  width: clamp(12px, calc(2.5vmin * var(--app-scale)), 18px);
+  height: clamp(12px, calc(2.5vmin * var(--app-scale)), 18px);
+  animation: check-snap 0.35s var(--ease-bounce) both;
   filter: drop-shadow(0 0 4px rgba(78, 205, 196, 0.6));
 }
 
 .label-text {
-  font-size: clamp(11px, 2.5vmin, 20px);
-  transition: color var(--duration-fast, 150ms) ease;
+  font-size: clamp(11px, calc(2.2vmin * var(--app-scale)), 20px);
+  transition: color var(--duration-fast) ease;
 }
 
 .sub-label {
-  font-size: clamp(9px, 1.8vmin, 14px);
+  font-size: clamp(9px, calc(1.8vmin * var(--app-scale)), 16px);
   color: var(--color-slate);
 }
+
 
 @keyframes check-snap {
   0% { transform: scale(0) rotate(-15deg); opacity: 0; }

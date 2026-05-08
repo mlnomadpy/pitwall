@@ -36,8 +36,8 @@ class CornerPass:
     exit_speed_kmh: float
     min_speed_kmh: float
     peak_brake_bar: float
-    brake_point_m: float
-    brake_release_m: float
+    brake_point_m: Optional[float]
+    brake_release_m: Optional[float]
     trail_brake_bar_at_apex: float
     throttle_at_exit_pct: float
     max_g_lat: float
@@ -68,7 +68,7 @@ class CornerGrade:
     entry_delta_kmh: float
     apex_delta_kmh: float
     exit_delta_kmh: float
-    brake_point_delta_m: float  # actual - gold (positive = braked too early)
+    brake_point_delta_m: Optional[float]  # actual - gold (positive = braked too early)
     trail_brake_quality: float  # 0..1 — closer to 1 = matches gold release
     time_loss_attribution: list[TimeLossAttribution]
     trod_voice: str             # the canonical T-Rod phrase that applies
@@ -102,7 +102,17 @@ def _grade_letter(score: float) -> str:
 def _trod_voice_for(corner: str, attribution: list[TimeLossAttribution]) -> str:
     """Pick the most relevant canonical T-Rod phrase for this corner's biggest issue."""
     if not attribution:
+        # Per-corner positive voice lines for graded-A passes
+        if corner == "Turn 11":
+            return "Perfect line at 11 — you were right on the stacks."
+        if corner == "Turn 10":
+            return "Beautiful lift at T10. Momentum is king."
+        if corner == "Turn 6":
+            return "Clean rotation through the Carousel. Textbook."
+        if corner == "Turn 7":
+            return "Crushed T7 — that single-apex line worked."
         return "Nice — keep that line."
+
     biggest = max(attribution, key=lambda a: a.seconds_lost)
     cause = biggest.cause
     if corner == "Turn 11":
@@ -139,23 +149,24 @@ def _decompose_time_loss(p: CornerPass, g: GoldCornerPass) -> list[TimeLossAttri
     attribs: list[TimeLossAttribution] = []
 
     # Late brake (positive when driver braked closer to entry than gold did)
-    bp_delta = g.brake_point_m - p.brake_point_m
-    if bp_delta < -3:           # gold's brake point was further back than yours
-        seconds = min(0.05 * abs(bp_delta) / 5, delta * 0.4)
-        attribs.append(TimeLossAttribution(
-            cause="late_brake",
-            seconds_lost=round(seconds, 3),
-            detail=f"braked {abs(bp_delta):.0f} m later than gold (gold @ {g.brake_point_m:.0f} m)",
-        ))
+    if p.brake_point_m is not None and g.brake_point_m is not None:
+        bp_delta = g.brake_point_m - p.brake_point_m
+        if bp_delta < -3:           # gold's brake point was further back than yours
+            seconds = min(0.05 * abs(bp_delta) / 5, delta * 0.4)
+            attribs.append(TimeLossAttribution(
+                cause="late_brake",
+                seconds_lost=round(seconds, 3),
+                detail=f"braked {abs(bp_delta):.0f} m later than gold (gold @ {g.brake_point_m:.0f} m)",
+            ))
 
-    # Early brake — ironically also a time loser on Sonoma corners that reward late entry
-    if bp_delta > 5:
-        seconds = min(0.04 * bp_delta / 5, delta * 0.3)
-        attribs.append(TimeLossAttribution(
-            cause="early_brake",
-            seconds_lost=round(seconds, 3),
-            detail=f"braked {bp_delta:.0f} m earlier than gold (gold @ {g.brake_point_m:.0f} m)",
-        ))
+        # Early brake — ironically also a time loser on Sonoma corners that reward late entry
+        if bp_delta > 5:
+            seconds = min(0.04 * bp_delta / 5, delta * 0.3)
+            attribs.append(TimeLossAttribution(
+                cause="early_brake",
+                seconds_lost=round(seconds, 3),
+                detail=f"braked {bp_delta:.0f} m earlier than gold (gold @ {g.brake_point_m:.0f} m)",
+            ))
 
     # Low apex speed — the biggest single attribution on most corners
     apex_delta = g.apex_speed_kmh - p.apex_speed_kmh
@@ -280,6 +291,10 @@ def grade_corner_pass(p: CornerPass, g: GoldCornerPass) -> CornerGrade:
     attribution = _decompose_time_loss(p, g)
     voice = _trod_voice_for(p.corner, attribution)
 
+    bp_delta = None
+    if p.brake_point_m is not None and g.brake_point_m is not None:
+        bp_delta = round(p.brake_point_m - g.brake_point_m, 1)
+
     return CornerGrade(
         corner=p.corner,
         lap=p.lap,
@@ -290,7 +305,7 @@ def grade_corner_pass(p: CornerPass, g: GoldCornerPass) -> CornerGrade:
         entry_delta_kmh=round(p.entry_speed_kmh - g.entry_speed_kmh, 2),
         apex_delta_kmh=round(p.apex_speed_kmh - g.apex_speed_kmh, 2),
         exit_delta_kmh=round(p.exit_speed_kmh - g.exit_speed_kmh, 2),
-        brake_point_delta_m=round(p.brake_point_m - g.brake_point_m, 1),
+        brake_point_delta_m=bp_delta,
         trail_brake_quality=round(s_trail, 3),
         time_loss_attribution=attribution,
         trod_voice=voice,
@@ -395,13 +410,13 @@ def _build_corner_pass(frames, corner: CornerDef, lap: int,
     # Pre-entry window for brake-point detection
     pre_entry = [f for f in frames
                  if (corner.entry_distance - 200) < (f.distance % track_len) < corner.entry_distance]
-    brake_point_m = 0.0
+    brake_point_m: Optional[float] = None
     for f in pre_entry:
         if f.brake_pressure > 5:
             brake_point_m = corner.entry_distance - (f.distance % track_len)
             break
 
-    brake_release_m = 0.0
+    brake_release_m: Optional[float] = None
     for f in in_frames:
         if f.brake_pressure < 2:
             brake_release_m = (f.distance % track_len) - corner.entry_distance

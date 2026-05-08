@@ -52,9 +52,11 @@ const emit = defineEmits<{ (e: 'select'): void; (e: 'delete'): void }>()
           <div class="time-col shrink-0 text-right pr-4 flex flex-col items-end justify-center">
             <span class="last-played text-small text-white/60 font-mono">{{ new Date(slotData.lastPlayedAt).toLocaleDateString() }}</span>
             
-            <div v-if="deleteProgress !== undefined && deleteProgress > 0" class="mt-1 w-16 h-2 bg-charcoal border border-slate overflow-hidden">
-              <div class="h-full bg-ui-warn transition-all duration-75" :style="{ width: `${deleteProgress}%` }"></div>
+            <div v-if="deleteProgress !== undefined && deleteProgress > 0" class="mt-1 w-20 h-3 bg-charcoal border border-slate overflow-hidden relative">
+              <div class="h-full bg-ui-bad transition-all duration-75" :style="{ width: `${deleteProgress}%` }"></div>
+              <span class="absolute inset-0 text-[8px] font-black text-white text-center leading-3 drop-shadow-[1px_1px_0_#000]">HOLD TO DELETE</span>
             </div>
+
           </div>
         </div>
       </template>

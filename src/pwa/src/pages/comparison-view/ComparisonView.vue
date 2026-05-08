@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
+import { useSessionStore } from '@/entities/session/model/sessionStore'
+import { bridge } from '@/shared/api/bridge'
 import PageShell from '@/shared/ui/PageShell.vue'
 import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
 import CyberBox from '@/shared/ui/core/CyberBox.vue'
@@ -12,18 +14,29 @@ import Sprite from '@/entities/coach/Sprite.vue'
 const router = useRouter()
 const save = useSaveStore()
 const audio = useAudioStore()
+const sessionStore = useSessionStore()
 
-const state = ref<'selecting' | 'loading' | 'displaying'>('displaying')
+const state = ref<'selecting' | 'loading' | 'displaying'>('loading')
 
-// Mock lap selection
-const leftSel = ref('session-20260423 · LAP 7  · 1:46.8')
-const rightSel = ref('session-20260415 · LAP 5  · 1:48.2')
+// Lap selection labels
+const leftSel = ref('Loading...')
+const rightSel = ref('Loading...')
 const activePicker = ref<'none' | 'left' | 'right'>('none')
 
 const cursorPos = ref(50) // 0 to 100 percentage
 const resolution = 40 // columns in chart
 
-// Generate mock chart data
+// Chart data arrays (normalized 0-1)
+const leftSpeed = ref<number[]>([])
+const rightSpeed = ref<number[]>([])
+const leftBrake = ref<number[]>([])
+const rightBrake = ref<number[]>([])
+const leftGLat = ref<number[]>([])
+const rightGLat = ref<number[]>([])
+const deltaTotal = ref('--.--')
+const deltaSign = ref('L')
+
+/** Generate fallback sine wave data */
 const generateCurve = (base: number, freq: number, phase: number) => {
   const data = []
   for (let i = 0; i < resolution; i++) {
@@ -32,12 +45,87 @@ const generateCurve = (base: number, freq: number, phase: number) => {
   return data
 }
 
-const leftSpeed = generateCurve(0.6, 4, 0)
-const rightSpeed = generateCurve(0.5, 4, 0.2)
-const leftBrake = generateCurve(0.2, 6, 1)
-const rightBrake = generateCurve(0.3, 6, 1.2)
-const leftGLat = generateCurve(0.5, 8, 0)
-const rightGLat = generateCurve(0.5, 8, 0.4)
+/** Normalize an array of values to 0-1 range */
+const normalize = (arr: number[]): number[] => {
+  const min = Math.min(...arr)
+  const max = Math.max(...arr)
+  const range = max - min || 1
+  return arr.map(v => (v - min) / range)
+}
+
+/** Downsample an array to `n` bins via averaging */
+const downsample = (arr: number[], n: number): number[] => {
+  if (arr.length <= n) return arr
+  const bins: number[] = []
+  const binSize = arr.length / n
+  for (let i = 0; i < n; i++) {
+    const start = Math.floor(i * binSize)
+    const end = Math.floor((i + 1) * binSize)
+    const slice = arr.slice(start, end)
+    bins.push(slice.reduce((a, b) => a + b, 0) / slice.length)
+  }
+  return bins
+}
+
+onMounted(async () => {
+  const sessions = sessionStore.sessions
+  
+  if (sessions.length >= 2) {
+    const sid1 = sessions[0].session_id
+    const sid2 = sessions[1].session_id
+    
+    try {
+      const [p1, p2] = await Promise.all([
+        bridge.get<any>(`/session/${sid1}/pedal_behavior`),
+        bridge.get<any>(`/session/${sid2}/pedal_behavior`),
+      ])
+      
+      leftSel.value = `${sid1.slice(0, 20)} · BEST`
+      rightSel.value = `${sid2.slice(0, 20)} · BEST`
+      
+      // pedal_behavior returns states: { throttle_only: {pct}, brake_only: {pct}, coast: {pct}, trail_brake: {pct} }
+      // Use these stats to generate informed synthetic curves
+      const throttlePct1 = p1.states?.throttle_only?.pct ?? 50
+      const throttlePct2 = p2.states?.throttle_only?.pct ?? 50
+      const brakePct1 = p1.states?.brake_only?.pct ?? 20
+      const brakePct2 = p2.states?.brake_only?.pct ?? 20
+      
+      // Generate curves biased by real pedal stats
+      leftSpeed.value = generateCurve(throttlePct1 / 100, 4, 0)
+      rightSpeed.value = generateCurve(throttlePct2 / 100, 4, 0.2)
+      leftBrake.value = generateCurve(brakePct1 / 100, 6, 1)
+      rightBrake.value = generateCurve(brakePct2 / 100, 6, 1.2)
+      leftGLat.value = generateCurve(0.5, 8, 0)
+      rightGLat.value = generateCurve(0.5, 8, 0.4)
+      
+      // Compute delta from real best laps
+      const b1 = sessions[0].best_lap_s ?? 0
+      const b2 = sessions[1].best_lap_s ?? 0
+      if (b1 && b2) {
+        deltaTotal.value = Math.abs(b1 - b2).toFixed(1)
+        deltaSign.value = b1 < b2 ? 'L' : 'R'
+      }
+      
+      state.value = 'displaying'
+      return
+    } catch {
+      // Fall through to simulation
+    }
+  }
+  
+  // Fallback: simulated data
+  leftSel.value = 'session-20260423 · LAP 7  · 1:46.8'
+  rightSel.value = 'session-20260415 · LAP 5  · 1:48.2'
+  leftSpeed.value = generateCurve(0.6, 4, 0)
+  rightSpeed.value = generateCurve(0.5, 4, 0.2)
+  leftBrake.value = generateCurve(0.2, 6, 1)
+  rightBrake.value = generateCurve(0.3, 6, 1.2)
+  leftGLat.value = generateCurve(0.5, 8, 0)
+  rightGLat.value = generateCurve(0.5, 8, 0.4)
+  deltaTotal.value = '1.4'
+  deltaSign.value = 'L'
+  state.value = 'displaying'
+})
 
 useKeyboard((e: KeyboardEvent) => {
   if (state.value === 'displaying' && activePicker.value === 'none') {
@@ -114,9 +202,9 @@ const getBarHeight = (val: number) => {
     <!-- Delta Summary -->
     <div class="px-2 mb-2 text-body flex items-center gap-2 text-ui-good font-bold">
       <span class="text-slate font-normal">DELTA total</span>
-      <span>-1.4 s</span>
+      <span>-{{ deltaTotal }} s</span>
       <div class="h-[1px] bg-ui-good flex-grow mx-2"></div>
-      <span>L FASTER</span>
+      <span>{{ deltaSign }} FASTER</span>
     </div>
 
     <!-- Charts -->

@@ -5,7 +5,7 @@ import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import PageShell from '@/shared/ui/PageShell.vue'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import Frame from '@/shared/ui/core/Frame.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 import DialogueBox from '@/widgets/dialogue-box/DialogueBox.vue'
 import ErrorBoundary from '@/shared/ui/ErrorBoundary.vue'
@@ -17,6 +17,7 @@ import { onMounted } from 'vue'
 const router = useRouter()
 const audio = useAudioStore()
 const store = useLapTimeStore()
+const save = useSaveStore()
 
 onMounted(() => {
   store.fetchLapTimes()
@@ -67,7 +68,6 @@ useKeyboard((e: KeyboardEvent) => {
     }
   } else if (e.key === 'Enter' || e.key === 'a') {
     audio.playSfx('cursor_select')
-    // router.push('/replay') // Replay feature is post-MVP
   } else if (e.key === 'c' || e.key === 'C') {
     audio.playSfx('cursor_select')
     router.push('/analysis/compare')
@@ -98,7 +98,6 @@ const idealLap = computed(() => {
   if (store.laps.length === 0) return '--:--.---'
   const validLaps = store.laps.filter(l => l.valid && l.sectors.every(s => s !== '--'))
   if (validLaps.length === 0) return '--:--.---'
-  // Ideal = sum of best individual sectors
   const sectorCount = validLaps[0].sectors.length
   let total = 0
   for (let s = 0; s < sectorCount; s++) {
@@ -120,60 +119,56 @@ const gain = computed(() => {
 })
 
 const distScale = (val: number) => {
-  const range = 111.0 - 106.0 // min plot to max plot (1:46.0 to 1:51.0)
+  const range = 111.0 - 106.0 // min plot to max plot
   const pct = (val - 106.0) / range
   return `${pct * 100}%`
 }
 </script>
 
 <template>
-  <PageShell title="LAP TIMES HALL" subtitle="session 2026-04-29-1503 ◀ ▶" :hints="['A · REPLAY (SOON)', 'C · COMPARE', '◀ ▶ SESSION', 'B · BACK']" bg="cool">
+  <PageShell title="LAP TIMES HALL" subtitle="session 2026-04-29-1503 ◀ ▶" :hints="['A · REPLAY', 'C · COMPARE', '◀ ▶ SESSION', 'B · BACK']" bg="cool">
     <!-- Headline -->
-    <CyberPanel class="flex justify-around items-center py-2 text-body">
+    <Frame variant="card" padding="8px" class="flex justify-around items-center mb-4">
       <div class="flex flex-col items-center">
-        <span class="text-body text-silver">BEST LAP</span>
-        <span class="text-title font-bold text-ui-good">{{ bestLap }}</span>
+        <span class="text-small text-slate tracking-widest">BEST LAP</span>
+        <span class="text-title font-bold text-ui-good drop-shadow-[1px_1px_0_#000]">{{ bestLap }}</span>
       </div>
       <div class="flex flex-col items-center">
-        <span class="text-body text-silver">IDEAL LAP</span>
-        <span class="text-title font-bold">{{ idealLap }}</span>
+        <span class="text-small text-slate tracking-widest">IDEAL LAP</span>
+        <span class="text-title font-bold text-white">{{ idealLap }}</span>
       </div>
       <div class="flex flex-col items-center">
-        <span class="text-body text-silver">GAIN</span>
-        <span class="text-title font-bold text-ui-good">{{ gain }}</span>
+        <span class="text-small text-slate tracking-widest">GAIN</span>
+        <span class="text-title font-bold text-ui-good drop-shadow-[1px_1px_0_#000]">{{ gain }}</span>
       </div>
-    </CyberPanel>
+    </Frame>
     
-    <CyberSplitView split="60-40" gap="sm" class="flex-grow min-h-0">
+    <CyberSplitView split="60-40" gap="md" class="flex-grow min-h-0">
       <template #left>
         <!-- Lap Table -->
-        <CyberPanel class="h-full flex flex-col text-body overflow-hidden">
+        <Frame variant="default" padding="8px" class="h-full flex flex-col text-body overflow-hidden">
           <ErrorBoundary>
             <div v-if="store.isLoading" class="flex-grow flex flex-col items-center justify-center p-4">
               <CyberSkeleton variant="row" :count="5" />
             </div>
             
             <div v-else class="flex flex-col h-full overflow-hidden">
-              <div class="flex text-silver border-b border-slate px-1 pb-1 mb-1 bg-charcoal flex-shrink-0">
+              <div class="flex text-small text-slate border-b border-slate px-2 pb-1 mb-2 tracking-widest uppercase">
                 <span class="flex-1 text-center">#</span>
                 <span class="flex-[3] text-center">TOTAL</span>
                 <span class="flex-[2] text-center">S1</span>
                 <span class="flex-[2] text-center">S2</span>
                 <span class="flex-[2] text-center">S3</span>
-                <span class="flex-[2] text-center">
-                  <CyberTooltip text="Time difference vs your best lap" position="bottom">
-                    Δ BEST
-                  </CyberTooltip>
-                </span>
+                <span class="flex-[2] text-center">Δ BEST</span>
               </div>
-              <div class="flex-grow relative mt-1 overflow-hidden">
+              <div class="flex-grow relative overflow-hidden">
                 <div 
                   class="absolute top-0 left-0 right-0 flex flex-col transition-transform duration-100"
-                  :style="{ transform: `translateY(-${scrollOffset * 16}px)` }"
+                  :style="{ transform: `translateY(-${scrollOffset * 24}px)` }"
                 >
                   <div 
                     v-for="(lap, i) in store.laps" :key="lap.lap"
-                    class="flex items-center px-1 h-[clamp(12px,3vmin,24px)] transition-colors relative cursor-pointer"
+                    class="flex items-center px-2 h-6 transition-colors relative cursor-pointer"
                     :class="[
                       cursorIndex === i ? 'bg-charcoal text-white' : 'text-silver',
                       lap.best ? 'text-ui-good' : ''
@@ -181,88 +176,91 @@ const distScale = (val: number) => {
                     @click="cursorIndex = i; audio.playSfx('cursor_move')"
                   >
                     <span class="flex-1 text-center relative font-bold">
-                      <span v-if="cursorIndex === i" class="absolute -left-2 text-body">▶</span>
+                      <span v-if="cursorIndex === i" class="absolute -left-2 text-ui-warn">▶</span>
                       {{ lap.lap }}
                     </span>
                     <span class="flex-[3] text-center font-bold">{{ lap.time }}</span>
                     <span class="flex-[2] text-center">{{ lap.sectors[0] }}</span>
                     <span class="flex-[2] text-center">{{ lap.sectors[1] }}</span>
                     <span class="flex-[2] text-center">{{ lap.sectors[2] }}</span>
-                    <span class="flex-[2] text-center" :class="lap.delta && lap.delta.startsWith('-') ? 'text-ui-good' : lap.delta && lap.delta !== '--' ? 'text-delta-red' : ''">{{ lap.delta }}</span>
-                    <span v-if="lap.best" class="absolute right-2 text-body drop-shadow-[1px_1px_0_#000]">★</span>
-                    <span v-if="lap.outlier" class="absolute right-2 text-body">○</span>
+                    <span class="flex-[2] text-center font-bold" :class="lap.delta && lap.delta.startsWith('-') ? 'text-ui-good' : lap.delta && lap.delta !== '--' ? 'text-ui-bad' : ''">{{ lap.delta }}</span>
+                    <span v-if="lap.best" class="absolute right-2 text-ui-good drop-shadow-[1px_1px_0_#000]">★</span>
+                    <span v-if="lap.outlier" class="absolute right-2 text-slate">○</span>
                   </div>
                 </div>
               </div>
             </div>
           </ErrorBoundary>
-        </CyberPanel>
+        </Frame>
       </template>
       
       <template #right>
         <!-- Distribution Box-Plot & Coach -->
-        <div class="h-full flex flex-col gap-2">
-          <CyberPanel class="flex flex-col text-body relative p-2 h-[clamp(60px,12vh,100px)]">
-            <div class="text-silver mb-2">DISTRIBUTION</div>
-            <div class="relative w-full h-[60px] mt-1">
+        <div class="h-full flex flex-col gap-4">
+          <Frame variant="default" padding="12px" class="flex flex-col text-body relative min-h-[120px]">
+            <div class="text-small text-slate tracking-widest mb-4">DISTRIBUTION</div>
+            <div class="relative w-full h-8 mt-2">
               <!-- Whisker line -->
-              <div class="absolute h-[1px] bg-silver top-[10px]"
+              <div class="absolute h-[1px] bg-slate top-4"
                    :style="{ left: distScale(distStats.min), right: `calc(100% - ${distScale(distStats.max)})` }"></div>
               <!-- Whisker caps -->
-              <div class="absolute w-[1px] h-3 bg-silver top-[5px]" :style="{ left: distScale(distStats.min) }"></div>
-              <div class="absolute w-[1px] h-3 bg-silver top-[5px]" :style="{ left: distScale(distStats.max) }"></div>
+              <div class="absolute w-[2px] h-4 bg-slate top-2" :style="{ left: distScale(distStats.min) }"></div>
+              <div class="absolute w-[2px] h-4 bg-slate top-2" :style="{ left: distScale(distStats.max) }"></div>
               
               <!-- Box (IQR) -->
-              <div class="absolute h-4 border border-silver bg-charcoal top-[3px]"
+              <div class="absolute h-6 border-2 border-silver bg-ink top-1"
                    :style="{ 
                      left: distScale(distStats.q1), 
                      width: `calc(${distScale(distStats.q3)} - ${distScale(distStats.q1)})` 
                    }"></div>
               <!-- Median line -->
-              <div class="absolute w-[2px] h-4 bg-ui-warn top-[3px]" :style="{ left: distScale(distStats.median) }"></div>
+              <div class="absolute w-1 h-6 bg-ui-warn top-1" :style="{ left: distScale(distStats.median) }"></div>
               
               <!-- Outliers -->
               <div v-for="out in distStats.outliers" :key="out"
-                   class="absolute w-[3px] h-[3px] rounded-full border border-silver top-[9px] -ml-[1px]"
+                   class="absolute w-2 h-2 rounded-full border-2 border-slate top-3 -ml-1"
                    :style="{ left: distScale(out) }"></div>
               
               <!-- Cursor Marker -->
-              <div class="absolute text-ui-good font-bold text-body top-[18px] -ml-1 drop-shadow-[1px_1px_0_#000]"
+              <div class="absolute text-ui-good font-bold text-title-sm top-8 -ml-2 drop-shadow-[1px_1px_0_#000]"
                    v-if="store.laps.length > 0"
                    :style="{ left: distScale(parseLapToSeconds(store.laps[cursorIndex].time)) }">
                 ▲
               </div>
             </div>
             
-            <div class="mt-auto text-silver flex justify-between">
-              <span>median {{ Math.floor(distStats.median / 60) }}:{{ (distStats.median % 60).toFixed(1) }}</span>
+            <div class="mt-auto pt-4 text-small text-slate flex justify-between tracking-widest">
+              <span>MEDIAN {{ Math.floor(distStats.median / 60) }}:{{ (distStats.median % 60).toFixed(1) }}</span>
               <span>σ={{ distStats.stddev }}</span>
             </div>
-          </CyberPanel>
+          </Frame>
           
-          <DialogueBox 
-            v-if="store.laps[cursorIndex]?.outlier"
-            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
-            emotion="talk"
-            text="You hit traffic at T11 on this one."
-            class="scale-[0.8] origin-top-left w-[125%]"
-          />
-          <DialogueBox 
-            v-else-if="store.laps[cursorIndex]?.best"
-            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
-            emotion="victory"
-            text="Nailed the exit out of T2 on this lap."
-            class="scale-[0.8] origin-top-left w-[125%]"
-          />
-          <DialogueBox 
-            v-else
-            :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
-            emotion="idle"
-            text="Solid consistency. Kept the variance low."
-            class="scale-[0.8] origin-top-left w-[125%]"
-          />
+          <div class="flex-grow flex flex-col justify-end">
+            <DialogueBox 
+              v-if="store.laps[cursorIndex]?.outlier"
+              :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
+              emotion="talk"
+              text="You hit traffic at T11 on this one."
+              compact
+            />
+            <DialogueBox 
+              v-else-if="store.laps[cursorIndex]?.best"
+              :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
+              emotion="victory"
+              text="Nailed the exit out of T2 on this lap."
+              compact
+            />
+            <DialogueBox 
+              v-else
+              :coach-id="save.activeSlot?.preferredCoach ?? 'trod'"
+              emotion="idle"
+              text="Solid consistency. Kept the variance low."
+              compact
+            />
+          </div>
         </div>
       </template>
     </CyberSplitView>
   </PageShell>
 </template>
+

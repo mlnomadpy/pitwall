@@ -44,7 +44,10 @@ def _q(sql: str, params: list | None = None) -> list[dict[str, Any]]:
         return []
     conn = _db()
     try:
-        return conn.execute(sql, params or []).fetchdf().to_dict("records")
+        res = conn.execute(sql, params or [])
+        cols = [desc[0] for desc in res.description]
+        rows = res.fetchall()
+        return [dict(zip(cols, row)) for row in rows]
     finally:
         conn.close()
 

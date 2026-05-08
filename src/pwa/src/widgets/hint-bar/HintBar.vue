@@ -4,7 +4,9 @@ export interface HintAction {
   label: string
   /** The keyboard key this originally mapped to (for dispatching) */
   key?: string
-  /** Optional icon character (e.g., "◀", "▶", "◆") */
+  /** Display text for the key (e.g., "A", "B", "◆") */
+  keyLabel?: string
+  /** Optional icon character (e.g., "◀", "▶") */
   icon?: string
   /** Visual style */
   variant?: 'default' | 'primary' | 'warn' | 'subtle'
@@ -61,6 +63,7 @@ const parsedActions = (): HintAction[] => {
       return {
         label: labelPart,
         key: isDirectional ? undefined : mappedKey,
+        keyLabel: keyPart,
         icon: isDirectional ? keyPart : undefined,
         variant,
       }
@@ -97,8 +100,9 @@ const handleTap = (action: HintAction) => {
         :disabled="!action.key"
         @click="handleTap(action)"
       >
+        <span v-if="action.keyLabel && !action.icon" class="keycap" aria-hidden="true">{{ action.keyLabel }}</span>
         <span v-if="action.icon" class="hint-icon" aria-hidden="true">{{ action.icon }}</span>
-        <span class="hint-label">{{ action.label }}</span>
+        <span class="hint-label font-bold">{{ action.label }}</span>
       </button>
     </div>
   </div>
@@ -110,24 +114,25 @@ const handleTap = (action: HintAction) => {
   bottom: 0;
   left: 0;
   width: 100%;
-  height: clamp(28px, 5.5vh, 48px);
+  height: calc(var(--safe-bottom) + 38px);
   background: linear-gradient(180deg, rgba(26, 29, 46, 0.85) 0%, rgba(26, 29, 46, 0.95) 100%);
   display: flex;
-  align-items: center;
+  align-items: flex-start; /* Align to top of bar, safe area handles bottom */
   justify-content: center;
-  padding: 0 clamp(4px, 1vw, 12px);
+  padding: 4px calc(var(--safe-right) + var(--space-sm)) 0 calc(var(--safe-left) + var(--space-sm));
   font-family: var(--font-ui);
-  font-size: clamp(8px, 1.8vmin, 15px);
+  font-size: clamp(10px, calc(2vmin * var(--app-scale)), 18px);
   border-top: 1px solid var(--color-slate);
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.3);
-  z-index: var(--z-sticky, 10);
+  z-index: var(--z-sticky);
   color: var(--color-silver);
 }
+
 
 .hints-inner {
   display: flex;
   align-items: center;
-  gap: clamp(2px, 0.5vw, 6px);
+  gap: clamp(4px, 1vw, 12px);
   width: 100%;
   overflow: hidden;
   flex-wrap: nowrap;
@@ -137,7 +142,7 @@ const handleTap = (action: HintAction) => {
 .hint-btn {
   display: flex;
   align-items: center;
-  gap: clamp(2px, 0.4vw, 4px);
+  gap: clamp(4px, 0.6vw, 8px);
   white-space: nowrap;
   flex-shrink: 1;
   min-width: 0;
@@ -147,7 +152,7 @@ const handleTap = (action: HintAction) => {
   cursor: default;
   font: inherit;
   color: inherit;
-  padding: clamp(2px, 0.4vh, 4px) clamp(4px, 1vw, 8px);
+  padding: clamp(3px, 0.6vh, 6px) clamp(6px, 1.5vw, 12px);
   transition: all var(--duration-fast, 150ms) ease;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
@@ -160,13 +165,42 @@ const handleTap = (action: HintAction) => {
 .hint-btn.tappable {
   cursor: pointer;
   border-color: color-mix(in srgb, var(--color-slate) 40%, transparent);
-  border-radius: 2px;
+  border-radius: 4px;
   flex-shrink: 0; /* Tappable buttons should stay visible */
+  background: color-mix(in srgb, var(--color-charcoal) 50%, transparent);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
 }
 
 .hint-btn.tappable:active {
   transform: scale(0.95);
-  opacity: 0.7;
+  box-shadow: none;
+}
+
+.hint-btn.tappable:focus-visible {
+  box-shadow: var(--shadow-focus);
+}
+
+/* Keycap Styling */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6em;
+  height: 1.6em;
+  padding: 0 4px;
+  background: var(--color-charcoal);
+  border: 1px solid currentColor;
+  border-bottom-width: 2px;
+  border-radius: 50%;
+  font-weight: 900;
+  font-size: 0.9em;
+  box-shadow: inset 0 2px 0 rgba(255,255,255,0.1);
+  text-shadow: none;
+}
+
+.hint-btn:active .keycap {
+  border-bottom-width: 1px;
+  transform: translateY(1px);
 }
 
 /* Variants */
@@ -175,15 +209,15 @@ const handleTap = (action: HintAction) => {
 }
 .variant-primary.tappable {
   border-color: color-mix(in srgb, var(--color-ui-good) 40%, transparent);
-  background: color-mix(in srgb, var(--color-ui-good) 8%, transparent);
+  background: color-mix(in srgb, var(--color-ui-good) 10%, transparent);
 }
 
 .variant-warn {
   color: var(--color-ui-warn);
 }
 .variant-warn.tappable {
-  border-color: color-mix(in srgb, var(--color-ui-warn) 30%, transparent);
-  background: color-mix(in srgb, var(--color-ui-warn) 5%, transparent);
+  border-color: color-mix(in srgb, var(--color-ui-warn) 40%, transparent);
+  background: color-mix(in srgb, var(--color-ui-warn) 10%, transparent);
 }
 
 .variant-default {
@@ -192,19 +226,28 @@ const handleTap = (action: HintAction) => {
 
 .variant-subtle {
   color: var(--color-slate);
-  opacity: 0.5;
-  font-size: 0.85em;
+  opacity: 0.7;
+  font-size: 0.9em;
   flex-shrink: 1; /* Subtle hints shrink first */
 }
 
+.variant-subtle .keycap {
+  border-radius: 4px;
+  border: 1px solid var(--color-slate);
+  background: transparent;
+  color: var(--color-slate);
+  box-shadow: none;
+}
+
 .hint-icon {
-  opacity: 0.5;
-  font-size: 0.85em;
+  opacity: 0.7;
+  font-size: 0.9em;
 }
 
 .hint-label {
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 </style>
+

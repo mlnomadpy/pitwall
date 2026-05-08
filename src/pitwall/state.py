@@ -59,6 +59,8 @@ class BridgeState:
 
         # ── CAN reader ─────────────────────────────────────────────────────
         self.can_reader = None
+        self.active_session_id: Optional[str] = None
+
 
         # ── ADK Q&A ───────────────────────────────────────────────────────
         self.qa_histories: dict = {}
@@ -158,7 +160,7 @@ class BridgeState:
 
         # ── ADK multi-agent backend ────────────────────────────────────────
         try:
-            from pitwall.adk_agents import (
+            from pitwall.features.coaching.adk_agents import (
                 coach_orchestrator,
                 HAS_ADK as _adk_loaded,
                 AGENT_REGISTRY,

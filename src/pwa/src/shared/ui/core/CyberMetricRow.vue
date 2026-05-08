@@ -29,8 +29,9 @@ const trendColor: Record<string, string> = {
 
 <template>
   <div 
-    class="cyber-metric-row" 
+    class="pitwall-metric-row" 
     :class="{ highlighted }"
+    role="listitem"
   >
     <div class="metric-label">
       <slot name="icon"></slot>
@@ -42,7 +43,7 @@ const trendColor: Record<string, string> = {
         v-if="trend" 
         class="metric-trend"
         :class="trendColor[trend]"
-        aria-hidden="true"
+        :aria-label="trend === 'up' ? 'Improved' : trend === 'down' ? 'Regressed' : 'Stable'"
       >{{ trendIcon[trend] }}</span>
       <span v-if="subText" :class="subClass">{{ subText }}</span>
     </div>
@@ -50,21 +51,22 @@ const trendColor: Record<string, string> = {
 </template>
 
 <style scoped>
-.cyber-metric-row {
+.pitwall-metric-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: var(--space-sm, clamp(4px, 1vmin, 8px));
-  padding: var(--space-xs, clamp(2px, 0.5vmin, 4px)) 0;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 0;
   border-bottom: 1px solid color-mix(in srgb, var(--color-slate) 20%, transparent);
-  font-size: clamp(10px, 2.3vmin, 20px);
-  transition: background-color var(--duration-fast, 150ms) ease;
+  font-size: clamp(11px, calc(2.3vmin * var(--app-scale)), 22px);
+  transition: background-color var(--duration-fast) ease;
 }
 
-.cyber-metric-row.highlighted {
+.pitwall-metric-row.highlighted {
   background: linear-gradient(90deg, rgba(78, 205, 196, 0.08) 0%, transparent 100%);
   border-bottom-color: color-mix(in srgb, var(--color-ui-good) 30%, transparent);
 }
+
 
 .metric-label {
   display: flex;

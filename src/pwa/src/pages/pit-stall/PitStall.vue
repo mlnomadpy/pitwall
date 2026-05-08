@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, onMounted } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
 import { useSequence } from '@/shared/lib/useSequence'
 import PageShell from '@/shared/ui/PageShell.vue'
-import CyberPanel from '@/shared/ui/core/CyberPanel.vue'
+import Frame from '@/shared/ui/core/Frame.vue'
 import CyberSplitView from '@/shared/ui/core/CyberSplitView.vue'
 import CyberButton from '@/shared/ui/core/CyberButton.vue'
 import ConnRow from './ui/ConnRow.vue'
 import LiveCarState from './ui/LiveCarState.vue'
 import { useBridgeStore } from '@/shared/api/bridgeStore'
+import { useTelemetryStore } from '@/entities/session/model/telemetryStore'
 
 const router = useRouter()
 const audio = useAudioStore()
 const bridgeStore = useBridgeStore()
+const telemetry = useTelemetryStore()
 
 const bridgeState = ref<'checking' | 'ok' | 'error' | 'pending'>('checking')
 const usbCanState = ref<'checking' | 'ok' | 'error' | 'pending'>('pending')
@@ -99,20 +101,28 @@ const runSequence = () => {
             addLog('IGNITION DETECTED.', 'good')
             addLog('LINK STABLE. STREAMING TELEMETRY.', 'good')
             audio.playSfx('level_up')
+            
+            // Open telemetry SSE stream
+            telemetry.open(bridgeStore.health?.active_session_id || 'SIM')
+
+            
             liveInterval = window.setInterval(() => {
-              liveState.value = {
-                rpm: Math.floor(800 + Math.random() * 200).toString(),
-                gear: '1',
-                speed: '0',
-                oil: '94',
-                coolant: '88',
-                fuel: '62',
-                throttle: Math.floor(Math.random() * 10).toString(),
-                brake: '0',
-                steer: (Math.random() * 2 - 1).toFixed(1),
-                glat: '0.0',
-                glong: '0.0',
-                gcombo: '0.0'
+              const f = telemetry.frame
+              if (f) {
+                liveState.value = {
+                  rpm: Math.floor(f.rpm).toString(),
+                  gear: f.speed < 10 ? '1' : f.speed < 60 ? '2' : f.speed < 100 ? '3' : f.speed < 140 ? '4' : '5',
+                  speed: Math.floor(f.speed * 3.6).toString(),
+                  oil: '94',
+                  coolant: '88',
+                  fuel: '62',
+                  throttle: Math.floor(f.throttle).toString(),
+                  brake: Math.floor(f.brake_pressure).toString(),
+                  steer: f.steering.toFixed(1),
+                  glat: f.g_lat.toFixed(1),
+                  glong: f.g_long.toFixed(1),
+                  gcombo: f.combo_g.toFixed(1)
+                }
               }
             }, 100)
           }, 1500)
@@ -131,81 +141,115 @@ const runSequence = () => {
   setTimeout(checkBridge, 1000)
 }
 
-// (Sequence functions replaced with nested timeouts above)
-
-// Initial Run
-runSequence()
+onMounted(() => {
+  runSequence()
+})
 
 onUnmounted(() => {
   skip()
   if (liveInterval) clearInterval(liveInterval)
+  telemetry.close()
 })
 
 useKeyboard((e: KeyboardEvent) => {
   if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'b') {
     audio.playSfx('cancel')
     router.push('/garage')
+  } else if (e.key === 'r' || e.key === 'R') {
+    audio.playSfx('cursor_select')
+    runSequence()
+  } else if (e.key === 'Enter') {
+    if (carState.value === 'ok') {
+      audio.playSfx('cursor_select')
+      router.push('/pit-stall/live')
+    } else {
+      audio.playSfx('error_quiet')
+    }
   }
 })
+
 </script>
 
 <template>
-  <PageShell title="PIT STALL" :hints="['A · BACK', 'B · BACK', '◆ HARDWARE INFO']" bg="neutral">
+  <PageShell 
+    title="PIT STALL" 
+    :actions="[
+      { label: 'LIVE WALL', key: 'Enter', keyLabel: 'A', variant: 'primary' },
+      { label: 'REBOOT', key: 'r', keyLabel: 'R' },
+      { label: 'BACK', key: 'Escape', keyLabel: 'B', variant: 'warn' }
+    ]" 
+    bg="neutral"
+  >
+
     <template #heading>
       <div class="heading-block mb-[1.5vh] text-center">
-        <h1 class="text-title font-title text-silver tracking-[0.3em]">PIT STALL</h1>
+        <h1 class="text-title font-title text-silver tracking-[0.3em]">PIT STALL DIAGNOSTICS</h1>
         <div class="heading-rule"></div>
       </div>
     </template>
     
-    <div class="content flex flex-col relative z-10 h-full pb-[6vh] w-full">
-      <CyberSplitView split="40-60" gap="md" class="h-full">
-        <!-- Left Pane: Connection Chain -->
-        <template #left>
-          <CyberPanel class="h-full flex flex-col min-h-0">
-            <div class="text-body text-silver mb-[1.5vh] border-b border-slate pb-[1vh] tracking-[0.1em] px-[1.5vmin] pt-[1.5vmin] flex justify-between items-center">
-              <span>CONNECTION CHAIN</span>
+    <div class="content flex flex-col relative z-10 h-full w-full">
+      <div class="grid grid-cols-[1fr_1.4fr] gap-[4vmin] flex-grow min-h-0 pb-16">
+        
+        <!-- Left: Connection & Logs -->
+        <div class="flex flex-col gap-4">
+          <Frame variant="default" padding="0" class="flex flex-col flex-grow bg-ink/40 overflow-hidden">
+            <div class="text-small text-slate tracking-[0.2em] font-black uppercase border-b border-slate/20 p-3 flex justify-between items-center bg-ink/60">
+              <span>Connection Chain</span>
               <div class="flex gap-2">
-                <CyberButton size="sm" variant="primary" @click="$router.push('/pit-stall/live')" v-if="carState === 'ok'" style="font-size: 10px; padding: 2px 6px;">LIVE WALL</CyberButton>
-                <CyberButton size="sm" variant="secondary" @click="runSequence" style="font-size: 10px; padding: 2px 6px;">RETRY / REBOOT</CyberButton>
+                <CyberButton size="sm" variant="secondary" @click="runSequence">REBOOT</CyberButton>
               </div>
             </div>
-            <div class="flex flex-col gap-2 px-[1.5vmin] pb-[1.5vmin] flex-grow no-scrollbar min-h-0">
-              <ConnRow title="BRIDGE" :state="bridgeState" status-text="ONLINE" :details="['127.0.0.1:8765', 'ENGINE sonic_model + LiteRT-LM', 'DUCKDB enabled · 47 sessions']" />
-              <ConnRow title="USB-CAN" :state="usbCanState" status-text="STREAM" :details="['/dev/ttyACM0 CANable Pro', 'INTERFACE slcan @ 500 kbps', 'FRAMES/s 422']" />
-              <ConnRow title="DBC" :state="dbcState" status-text="" :details="['pitwall.dbc + bmw_e46_m3.dbc', 'SIGNALS 29 + 64 = 93 known', 'UNKNOWN IDS 3 (logged, not decoded)']" />
-              <ConnRow title="CAR" :state="carState" status-text="READY" :details="['BMW M3 (E46)', 'IGNITION ON']" />
-              
-              <!-- Logs Console -->
-              <div class="mt-4 flex-grow border-2 border-slate bg-ink p-2 flex flex-col h-32 relative shadow-[inset_0_0_10px_rgba(0,0,0,0.8)]">
-                <div class="text-ui-info text-[clamp(8px,1.5vmin,12px)] mb-1 font-bold tracking-widest border-b border-slate pb-1">TERMINAL OUTPUT</div>
-                <div class="flex-grow overflow-y-auto no-scrollbar font-mono text-[clamp(8px,1.8vmin,14px)] leading-tight whitespace-pre-line break-words pr-1" id="boot-logs-container">
-                  <div v-for="(log, i) in bootLogs" :key="i" :class="log.type === 'good' ? 'text-ui-good' : log.type === 'bad' ? 'text-ui-bad' : log.type === 'warn' ? 'text-ui-warn' : 'text-silver'">
-                    > {{ log.msg }}
-                  </div>
+            
+            <div class="p-4 flex flex-col gap-3 overflow-y-auto no-scrollbar">
+              <ConnRow title="BRIDGE" :state="bridgeState" status-text="ONLINE" :details="['127.0.0.1:8765', 'LITERT-LM ENGINE']" />
+              <ConnRow title="USB-CAN" :state="usbCanState" status-text="STREAM" :details="['CANable slcan @ 500k']" />
+              <ConnRow title="DBC" :state="dbcState" status-text="LOADED" :details="['93 SIGNALS MAPPED']" />
+              <ConnRow title="CAR" :state="carState" status-text="READY" :details="['IGNITION ON']" />
+            </div>
+
+            <!-- Terminal Output -->
+            <div class="mt-auto border-t border-slate/20 bg-ink/80 p-3 flex flex-col h-40">
+              <div class="text-ui-info text-[10px] mb-2 font-black tracking-widest uppercase opacity-70">Terminal Output</div>
+              <div class="flex-grow overflow-y-auto no-scrollbar font-nums text-small leading-tight whitespace-pre-line pr-1" id="boot-logs-container">
+                <div v-for="(log, i) in bootLogs" :key="i" :class="log.type === 'good' ? 'text-ui-good' : log.type === 'bad' ? 'text-ui-bad' : log.type === 'warn' ? 'text-ui-warn' : 'text-silver/60'">
+                  > {{ log.msg }}
                 </div>
               </div>
             </div>
-          </CyberPanel>
-        </template>
-        
-        <!-- Right Pane: Live Car State -->
-        <template #right>
-          <CyberPanel class="h-full flex flex-col min-h-0">
-            <div class="text-body text-silver mb-[1.5vh] border-b border-slate pb-[1vh] tracking-[0.1em] px-[1.5vmin] pt-[1.5vmin]">
-              LIVE CAR STATE
+          </Frame>
+        </div>
+
+        <!-- Right: Live Data Dashboard -->
+        <div class="flex flex-col gap-4">
+          <Frame variant="default" padding="0" class="flex flex-col flex-grow bg-ink/40 overflow-hidden">
+            <div class="text-small text-slate tracking-[0.2em] font-black uppercase border-b border-slate/20 p-3 bg-ink/60 flex justify-between items-center">
+              <span>Telemetry Monitor</span>
+              <span v-if="carState === 'ok'" class="text-ui-good animate-pulse">● LIVE</span>
             </div>
-            <div class="flex-grow overflow-y-auto px-[1.5vmin] pb-[1.5vmin] no-scrollbar min-h-0 h-full">
+            
+            <div class="p-4 flex-grow overflow-y-auto no-scrollbar">
               <LiveCarState :state="liveState" />
             </div>
-          </CyberPanel>
-        </template>
-      </CyberSplitView>
+
+            <div class="p-4 border-t border-slate/20 flex gap-4">
+               <CyberButton fluid variant="primary" size="lg" @click="router.push('/pit-stall/live')" :disabled="carState !== 'ok'">
+                  OPEN LIVE PIT WALL
+               </CyberButton>
+            </div>
+          </Frame>
+        </div>
+
+      </div>
     </div>
   </PageShell>
 </template>
 
 <style scoped>
-.heading-block { text-align: center; }
+.hud-layout {
+  padding: calc(max(var(--safe-top), var(--space-md))) 
+           calc(max(var(--safe-right), var(--space-md))) 
+           calc(max(var(--safe-bottom), var(--space-md))) 
+           calc(max(var(--safe-left), var(--space-md)));
+}
 </style>
-
