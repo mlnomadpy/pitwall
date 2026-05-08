@@ -211,7 +211,7 @@ fun PaddockAppContent() {
             composable("trainer_card") { TrainerCardScreen(state.activeSlot) }
             composable("quest_log") { QuestLogScreen() }
             composable("coach_select") { CoachSelectScreen() }
-            composable("car_setup") { CarSetupScreen() }
+            composable("car_setup") { CarSetupScreen(isBridgeOnline = state.bridgeOnline) }
             
             // ── Phase 7: Analysis Hub & Screens ───────────────────────────────
             composable("analysis_hub") {

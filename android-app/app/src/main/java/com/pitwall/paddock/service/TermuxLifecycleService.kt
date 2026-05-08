@@ -25,6 +25,9 @@ class TermuxLifecycleService : Service() {
         // App is being closed by the user, send the kill command to Termux
         TermuxLauncher.shutdownServer(this)
 
+        // Stop the USB Proxy Service if it's running
+        stopService(Intent(this, UsbProxyService::class.java))
+
         // Stop the service itself since the app is dying
         stopSelf()
     }
