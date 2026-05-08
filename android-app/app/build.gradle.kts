@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.chaquopy)
 }
 
 val localProperties = Properties().apply {
@@ -28,6 +29,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         buildConfigField("String", "PITWALL_API_BASE_URL", "\"${pitwallBaseUrl.replace("\\", "\\\\")}\"")
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -75,4 +79,21 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.webkit)
     debugImplementation(libs.androidx.ui.tooling.preview)
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.12"
+        pip {
+            install("Flask>=3.0")
+            install("flask-cors>=4.0")
+            install("duckdb>=1.0")
+            install("numpy>=1.26")
+        }
+    }
+    sourceSets {
+        getByName("main") {
+            srcDir("../../src")
+        }
+    }
 }

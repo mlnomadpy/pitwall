@@ -14,21 +14,22 @@ const save = useSaveStore()
 const audio = useAudioStore()
 
 const tiles: TileData[] = [
-  { id: 'track', title: 'TRACK', subText: 'GO RACING', route: '/briefing' },
+  { id: 'track', title: 'TRACK', subText: 'GO RACING · PRE-BRIEF', route: '/briefing' },
   { id: 'pit-stall', title: 'PIT STALL', subText: 'CONNECT · TUNE', route: '/garage/pit-stall' },
   { id: 'trainer-card', title: 'TRAINER CARD', subText: 'STATS · MEDALS', route: '/garage/trainer' },
   { id: 'analysis', title: 'ANALYSIS', subText: 'LAPS · CORNERS', route: '/garage/analysis' },
-  { id: 'coaches', title: 'COACHES', subText: '+1 AVAILABLE', route: '/garage/coach' },
+  { id: 'session-grade', title: 'SESSION GRADE', subText: 'POST /score · GEMINI', route: '/analysis/session-score' },
+  { id: 'coaches', title: 'COACHES', subText: 'ROSTER · AFFINITY', route: '/garage/coach' },
   { id: 'leaderboard', title: 'HIGH SCORES', subText: 'GLOBAL RANKING', route: '/leaderboard' },
-  { id: 'quests', title: 'QUEST LOG', subText: '0 ACTIVE GOALS', route: '/garage/quests' },
-  { id: 'setup', title: 'CAR SETUP', subText: 'AERO · BRAKES', route: '/garage/setup' }
+  { id: 'quests', title: 'QUEST LOG', subText: 'GOALS · CONTRACTS', route: '/garage/quests' },
+  { id: 'setup', title: 'CAR SETUP', subText: 'AERO · BRAKES · DIFF', route: '/garage/setup' },
 ]
 
 const cursorIndex = ref(0)
 const isGridView = ref(false)
 const greetingActive = ref(true)
 const greetingText = "Welcome to the Garage! Ready to hit the track?"
-const hints = ['▲ ▼ SWIPE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE']
+const hints = ['▲ ▼ SWIPE', 'A · ENTER', 'S · SETTINGS', 'B · TITLE', 'U · BRIDGE', 'N · INBOX', 'Q · COACH', 'E · END DAY', 'O · HUD']
 
 const moveCursor = (dir: number) => {
   cursorIndex.value = (cursorIndex.value + dir + tiles.length) % tiles.length
@@ -81,6 +82,21 @@ useKeyboard((e: KeyboardEvent) => {
   } else if (e.key === 's' || e.key === 'S' || e.key === ' ') {
     audio.playSfx('cursor_select')
     router.push('/settings')
+  } else if (e.key === 'u' || e.key === 'U') {
+    audio.playSfx('cursor_select')
+    router.push('/bridge/sessions')
+  } else if (e.key === 'n' || e.key === 'N') {
+    audio.playSfx('cursor_select')
+    router.push('/notifications')
+  } else if (e.key === 'q' || e.key === 'Q') {
+    audio.playSfx('cursor_select')
+    router.push('/coach/ask')
+  } else if (e.key === 'e' || e.key === 'E') {
+    audio.playSfx('cursor_select')
+    router.push('/end-of-day')
+  } else if (e.key === 'o' || e.key === 'O') {
+    audio.playSfx('cursor_select')
+    router.push('/hud')
   }
 })
 

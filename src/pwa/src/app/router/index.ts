@@ -41,7 +41,26 @@ const routes = [
   { path: '/settings', name: 'settings', component: () => import('@/pages/settings/Settings.vue'), meta: { wipe: 'down', requiresSave: true } },
   { path: '/end-of-day', name: 'end-of-day', component: () => import('@/pages/end-of-day/EndOfDay.vue'), meta: { wipe: 'down', requiresSave: true } },
   { path: '/leaderboard', name: 'leaderboard', component: () => import('@/pages/leaderboard/GlobalLeaderboard.vue'), meta: { wipe: 'left', requiresSave: true } },
-  
+
+  // Bridge session picker + detail (Android [Routes.BRIDGE_SESSIONS], [Routes.SESSION_DETAIL])
+  { path: '/bridge/sessions', name: 'bridge-sessions', component: () => import('@/pages/bridge/BridgeSessionsList.vue'), meta: { wipe: 'right', requiresSave: true } },
+  { path: '/session/:sid', name: 'session-detail', component: () => import('@/pages/bridge/SessionDetail.vue'), meta: { wipe: 'right', requiresSave: true } },
+
+  // Analysis modules — JSON shells share [BridgeJsonFetch.vue] where Android uses typed screens
+  { path: '/analysis/insights', name: 'analysis-insights', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Insights', analysisSubtitle: 'GET /insights', bridgeGet: '/insights' } },
+  { path: '/analysis/lap-distribution', name: 'lap-distribution', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Lap distribution', analysisSubtitle: 'GET /session/<sid>/lap_time_distribution', bridgeSessionSuffix: 'lap_time_distribution' } },
+  { path: '/analysis/sector-times', name: 'sector-times', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Sector times', analysisSubtitle: 'GET /session/<sid>/sector_times', bridgeSessionSuffix: 'sector_times' } },
+  { path: '/analysis/clips', name: 'session-clips', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Session clips', analysisSubtitle: 'GET /session/<sid>/clips', bridgeSessionSuffix: 'clips' } },
+  { path: '/analysis/brake-acceleration', name: 'brake-acceleration', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Brake / exit accel', analysisSubtitle: 'GET /session/<sid>/brake_acceleration', bridgeSessionSuffix: 'brake_acceleration' } },
+  { path: '/analysis/throttle-corner-box', name: 'throttle-corner-box', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Throttle corner box', analysisSubtitle: 'GET /session/<sid>/throttle_corner_box', bridgeSessionSuffix: 'throttle_corner_box' } },
+  { path: '/analysis/corner-classification', name: 'corner-classification', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'up', requiresSave: true, analysisTitle: 'Corner classification', analysisSubtitle: 'GET /session/<sid>/corner_classification', bridgeSessionSuffix: 'corner_classification' } },
+  { path: '/analysis/track-reference', name: 'track-reference', component: () => import('@/pages/analysis-hub/TrackReference.vue'), meta: { wipe: 'up', requiresSave: true } },
+  { path: '/analysis/bundle', name: 'analysis-bundle', component: () => import('@/pages/analysis-hub/AnalysisBundle.vue'), meta: { wipe: 'up', requiresSave: true } },
+  { path: '/analysis/session-score', name: 'session-score', component: () => import('@/pages/analysis-hub/SessionScore.vue'), meta: { wipe: 'up', requiresSave: true } },
+
+  { path: '/coach/ask', name: 'coach-ask', component: () => import('@/pages/coach/CoachAsk.vue'), meta: { wipe: 'left', requiresSave: true } },
+  { path: '/coach/concepts', name: 'coach-concepts', component: () => import('@/pages/bridge/BridgeJsonFetch.vue'), meta: { wipe: 'down', requiresSave: true, analysisTitle: 'Coach concepts', analysisSubtitle: 'GET /coach/concepts', bridgeGet: '/coach/concepts' } },
+
   // Catch-all route to redirect back to title
   { path: '/:pathMatch(.*)*', redirect: '/' }
 ]

@@ -22,8 +22,20 @@ SIM_DIR = os.path.abspath(
 if SIM_DIR not in sys.path:
     sys.path.insert(0, SIM_DIR)
 
+def _project_root() -> str:
+    """Writable project root for data/ (DuckDB, registry seeds).
+
+    When running embedded on Android (Chaquopy), Kotlin sets ``PITWALL_ANDROID_HOME``
+    to the app sandbox *before* importing ``pitwall`` — see ``pitwall_android_launcher``.
+    """
+    override = os.environ.get("PITWALL_ANDROID_HOME")
+    if override:
+        return os.path.abspath(override)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
 # Project root for resolving data/ paths
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+PROJECT_ROOT = _project_root()
 
 # DuckDB lives in data/
 DB_PATH = os.path.join(PROJECT_ROOT, "data", "pitwall_sessions.duckdb")

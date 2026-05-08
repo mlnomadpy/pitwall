@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useRouter } from 'vue-router'
 import { useCueStore } from '@/features/coach-interaction/model/cueStore'
 import { useSessionStore } from '@/entities/session/model/sessionStore'
 import { useTelemetryStore } from '@/entities/session/model/telemetryStore'
+import { useSaveStore } from '@/entities/save/model/saveStore'
+import { resolveSessionId } from '@/entities/session/model/sessionContext'
+import { useCuesStreamLogStore } from '@/features/hud/model/cuesStreamLogStore'
+import { cuesStreamUrl } from '@/shared/api/bridge'
 import GripBar from '@/widgets/hud/GripBar.vue'
 import HudTrackMap from '@/widgets/hud/HudTrackMap.vue'
 import CueBand from '@/features/coach-interaction/ui/CueBand.vue'
@@ -15,8 +19,14 @@ const router = useRouter()
 const cueStore = useCueStore()
 const session = useSessionStore()
 const telemetry = useTelemetryStore()
+const save = useSaveStore()
+const cuesLog = useCuesStreamLogStore()
 
-const sid = session.activeSessionId ?? 'demo-session'
+/** Prefer sessionStorage active session / save slot sessions — aligns with Android SessionHolder + bridge. */
+const hudSessionId = computed(() => resolveSessionId(save.activeSlot) ?? session.activeSessionId ?? null)
+const sidForCue = computed(() => hudSessionId.value ?? 'demo-session')
+const cuesStreamUrlLabel = computed(() => cuesStreamUrl(hudSessionId.value ?? undefined))
+
 const paused = ref(false)
 
 const distanceM = computed(() => telemetry.frame?.distance ?? 0)
@@ -38,8 +48,10 @@ onMounted(async () => {
     console.warn('Fullscreen rejected', e)
   }
 
-  cueStore.open(sid)
-  telemetry.open(sid)
+  await save.hydrate()
+  cuesLog.start(hudSessionId.value)
+  cueStore.open(sidForCue.value)
+  telemetry.open(sidForCue.value)
   
   simInterval = window.setInterval(() => {
     if (paused.value) return
@@ -50,7 +62,16 @@ onMounted(async () => {
   }, 100)
 })
 
+watch(hudSessionId, (id) => {
+  cuesLog.start(id)
+  cueStore.close()
+  cueStore.open(sidForCue.value)
+  telemetry.close()
+  telemetry.open(sidForCue.value)
+})
+
 onUnmounted(() => {
+  cuesLog.stop()
   cueStore.close()
   telemetry.close()
   clearInterval(simInterval)
@@ -163,6 +184,27 @@ useKeyboard((e: KeyboardEvent) => {
 
     
     <CueBand :cue="cueStore.activeCue" />
+
+    <!-- Bridge cues SSE log — parity with Android [HudScreen] raw line feed (+ reconnect). -->
+    <div
+      class="fixed bottom-0 left-0 right-0 z-[90] flex max-h-[min(28vh,280px)] flex-col border-t border-slate/40 bg-[#050508]/95 font-mono text-[clamp(9px,1.6vmin,11px)] backdrop-blur-md"
+    >
+      <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate/30 px-2 py-1 text-slate">
+        <span class="min-w-0 flex-1 truncate" :title="cuesStreamUrlLabel">{{ cuesStreamUrlLabel }}</span>
+        <span v-if="cuesLog.reconnectAttempt > 0" class="text-ui-warn shrink-0">retry {{ cuesLog.reconnectAttempt }}</span>
+        <button
+          type="button"
+          class="shrink-0 rounded border border-slate/50 px-2 py-0.5 text-silver hover:border-ui-info/60"
+          @click="cuesLog.clearLog()"
+        >
+          Clear log
+        </button>
+      </div>
+      <div v-if="cuesLog.connectionError" class="shrink-0 px-2 py-0.5 text-ui-bad">{{ cuesLog.connectionError }}</div>
+      <pre
+        class="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap px-2 py-1 leading-snug text-silver"
+      >{{ cuesLog.rawLines.join('\n') }}</pre>
+    </div>
     
     <!-- HIGH CONTRAST PAUSE MODAL -->
     <div v-if="paused" class="pause-overlay">

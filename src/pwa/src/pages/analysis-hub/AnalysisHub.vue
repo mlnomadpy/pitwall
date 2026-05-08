@@ -24,15 +24,31 @@ const lapCount = computed(() => save.activeSlot?.sessions?.reduce((acc, s) => ac
 const sessionCount = computed(() => save.activeSlot?.sessions?.length ?? 0)
 const bestLapTime = computed(() => save.activeSlot?.bestLapBySession?.['sonoma'] ?? 107.284) // fallback to static if none
 
+/** Mirrors Android [AnalysisHubScreen] core + extended modules (route IDs aligned with [Routes.kt]). */
 const tiles = computed(() => [
-  { id: 'lap-times', title: 'LAP TIMES HALL', desc: `${lapCount.value} LAPS THIS SEASON`, route: '/analysis/lap-times' },
-  { id: 'corners', title: 'CORNER MASTERY', desc: '11 CORNERS GRADED A-F', route: '/analysis/corners' },
-  { id: 'straights', title: 'STRAIGHTS & SPEED', desc: '3 STRAIGHTS', route: '/analysis/straights' },
-  { id: 'track', title: 'TRACK ATLAS', desc: 'ELEVATION · MARKERS', route: '/analysis/track' },
+  { id: 'lap-times', title: 'LAP TIMES HALL', desc: `${lapCount.value} LAPS (SAVE)`, route: '/analysis/lap-times' },
+  { id: 'corners', title: 'CORNER MASTERY', desc: 'SCORECARD A–F', route: '/analysis/corners' },
+  { id: 'straights', title: 'STRAIGHTS & SPEED', desc: 'TOP SPEED / STRAIGHT', route: '/analysis/straights' },
+  { id: 'track-map', title: 'TRACK MAP', desc: 'GPS · MARKERS', route: '/analysis/track' },
+  { id: 'track-ref', title: 'TRACK REFERENCE', desc: 'MARKERS · WEATHER', route: '/analysis/track-reference' },
   { id: 'evolution', title: 'DRIVER EVOLUTION', desc: `${sessionCount.value} SESSIONS`, route: '/analysis/evolution' },
   { id: 'pedals', title: 'PEDAL PROFILE', desc: 'THROTTLE · BRAKE', route: '/analysis/pedals' },
-  { id: 'ghosts', title: 'GHOST DATA', desc: 'TELEMETRY OVERLAYS', route: '/analysis/ghosts' },
-  { id: 'replay', title: 'VCR REPLAY', desc: 'LAP PLAYBACK', route: '/analysis/replay' }
+  { id: 'ghosts', title: 'GHOST DATA', desc: 'PICK SESSION · OVERLAY', route: '/analysis/ghosts' },
+  { id: 'replay', title: 'VCR REPLAY', desc: 'SIGNAL TIMELINE', route: '/analysis/replay' },
+  { id: 'bundle', title: 'DEBRIEF BUNDLE', desc: 'POST COACH/DEBRIEF', route: '/analysis/bundle' },
+  { id: 'insights', title: 'INSIGHTS', desc: 'COACHING GAPS', route: '/analysis/insights' },
+  { id: 'session-score', title: 'SESSION GRADE', desc: 'POST /score · GEMINI', route: '/analysis/session-score' },
+  { id: 'lap-dist', title: 'LAP DISTRIBUTION', desc: 'BOX PLOT', route: '/analysis/lap-distribution' },
+  { id: 'sectors', title: 'SECTOR TIMES', desc: 'S1 · S2 · S3', route: '/analysis/sector-times' },
+  { id: 'clips', title: 'SESSION CLIPS', desc: 'VIDEO CUTS', route: '/analysis/clips' },
+  { id: 'brake-accel', title: 'BRAKE / EXIT ACCEL', desc: 'SCATTER', route: '/analysis/brake-acceleration' },
+  { id: 'tbox', title: 'THROTTLE CORNER BOX', desc: 'PER CORNER', route: '/analysis/throttle-corner-box' },
+  { id: 'corner-class', title: 'CORNER CLASSIFICATION', desc: 'SPEED BANDS', route: '/analysis/corner-classification' },
+  { id: 'atlas', title: 'SESSION CORNERS', desc: 'AGGREGATES', route: '/analysis/atlas' },
+  { id: 'compare', title: 'COMPARE PEDALS', desc: 'TWO SESSIONS', route: '/analysis/compare' },
+  { id: 'coach-ask', title: 'ASK COACH', desc: 'Q&A', route: '/coach/ask' },
+  { id: 'concepts', title: 'CONCEPTS', desc: 'BENTLEY CATALOG', route: '/coach/concepts' },
+  { id: 'notifications', title: 'NOTIFICATIONS', desc: 'SSE INBOX', route: '/notifications' },
 ])
 
 const cursorIndex = ref(0)
@@ -52,9 +68,10 @@ useKeyboard((e: KeyboardEvent) => {
     cursorIndex.value = (cursorIndex.value - 2 + tiles.value.length) % tiles.value.length
     audio.playSfx('cursor_move')
   } else if (e.key === 'Enter') {
-    if (hasSessions.value && tiles.value[cursorIndex.value].route) {
+    const route = tiles.value[cursorIndex.value]?.route
+    if (route) {
       audio.playSfx('cursor_select')
-      router.push(tiles.value[cursorIndex.value].route as string)
+      router.push(route as string)
     } else {
       audio.playSfx('cancel')
     }
@@ -128,10 +145,9 @@ useKeyboard((e: KeyboardEvent) => {
                 :title="tile.title"
                 :subText="tile.desc"
                 :focused="cursorIndex === i"
-                :locked="!hasSessions"
                 :showKerb="true"
                 variant="ink"
-                @click="() => { cursorIndex = i; if (hasSessions) $router.push(tile.route as string); }"
+                @click="() => { cursorIndex = i; $router.push(tile.route as string); }"
                 @hover="cursorIndex = i"
               />
             </div>

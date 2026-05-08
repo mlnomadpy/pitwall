@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { API_BASE } from '@/shared/config/api'
+import { cuesStreamUrl } from '@/shared/api/bridge'
 
 export interface Cue {
   id: string
@@ -38,7 +38,7 @@ export const useCueStore = defineStore('cue', {
     },
     
     _connect(sid: string) {
-      this._es = new EventSource(`${API_BASE}/cues/stream?session_id=${sid}`)
+      this._es = new EventSource(cuesStreamUrl(sid))
       
       this._es.onmessage = (e) => {
         const cue = JSON.parse(e.data) as Cue

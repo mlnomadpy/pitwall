@@ -41,6 +41,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -53,9 +55,10 @@ import com.pitwall.app.ui.theme.PitwallPalette
 @Composable
 fun TitleScreen(
     navController: NavController,
-    vm: BridgeStatusViewModel = viewModel(),
     sessionVm: SessionActionsViewModel = viewModel(),
 ) {
+    val vm: BridgeStatusViewModel =
+        viewModel(viewModelStoreOwner = LocalContext.current as ComponentActivity)
     val health by vm.health.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()

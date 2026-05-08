@@ -1,7 +1,15 @@
 package com.pitwall.app.ui.navigation
 
+import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -53,6 +61,8 @@ import com.pitwall.app.ui.save.SaveSelectScreen
 import com.pitwall.app.ui.settings.AppSettingsScreen
 import com.pitwall.app.ui.sessions.SessionDetailScreen
 import com.pitwall.app.ui.sessions.SessionsListScreen
+import com.pitwall.app.ui.bridge.BridgeOfflineBanner
+import com.pitwall.app.ui.bridge.BridgeStatusViewModel
 import com.pitwall.app.ui.stage.StageClearScreen
 import com.pitwall.app.ui.title.TitleScreen
 
@@ -61,11 +71,25 @@ fun PitwallNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
 ) {
-    NavHost(
-        navController = navController,
-        startDestination = Routes.TITLE,
-        modifier = modifier,
-    ) {
+    val activity = LocalContext.current as ComponentActivity
+    val bridgeVm: BridgeStatusViewModel = viewModel(viewModelStoreOwner = activity)
+
+    LaunchedEffect(Unit) {
+        bridgeVm.startPolling()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            bridgeVm.stopPolling()
+        }
+    }
+
+    Box(modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = Routes.TITLE,
+            modifier = Modifier.fillMaxSize(),
+        ) {
         composable(Routes.TITLE) { TitleScreen(navController) }
 
         composable(Routes.SAVE) {
@@ -226,5 +250,11 @@ fun PitwallNavHost(
         composable(Routes.LEADERBOARD) {
             GlobalLeaderboardScreen(navController)
         }
+        }
+
+        BridgeOfflineBanner(
+            viewModel = bridgeVm,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
     }
 }

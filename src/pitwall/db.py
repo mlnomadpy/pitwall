@@ -9,14 +9,14 @@ import json
 import os
 import threading
 
-from pitwall.state import state, SIM_DIR
+from pitwall.state import PROJECT_ROOT, state, SIM_DIR
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-REGISTRY_SEED_PATH = os.path.abspath(os.path.join(
-    os.path.dirname(__file__), "..", "..", "data", "registry", "obd2_pids.json",
-))
+REGISTRY_SEED_PATH = os.path.abspath(
+    os.path.join(PROJECT_ROOT, "data", "registry", "obd2_pids.json"),
+)
 
 # Wide-table columns that double as registry signals — used by capability
 # computation to advertise canonical fields without round-tripping through
