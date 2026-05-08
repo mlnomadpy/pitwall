@@ -25,6 +25,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.pitwall.app.R
 import com.pitwall.app.ui.theme.PitwallColors
 
 @Composable
@@ -59,17 +61,17 @@ fun SetupScreen(
             Text(
                 text = buildAnnotatedString {
                     withStyle(SpanStyle(color = PitwallColors.GripGreen, fontWeight = FontWeight.Black)) {
-                        append("PIT")
+                        append(stringResource(R.string.logo_pit))
                     }
                     withStyle(SpanStyle(color = PitwallColors.TextPrimary, fontWeight = FontWeight.Black)) {
-                        append("WALL")
+                        append(stringResource(R.string.logo_wall))
                     }
                 },
                 fontSize = 44.sp,
                 letterSpacing = (-2).sp,
             )
             Text(
-                "AI Racing Coach — Sonoma Raceway",
+                stringResource(R.string.app_subtitle),
                 color = PitwallColors.TextDim,
                 fontSize = 11.sp,
                 letterSpacing = 1.sp,
@@ -78,17 +80,22 @@ fun SetupScreen(
             Spacer(Modifier.height(36.dp))
 
             // ── Driver Level ──────────────────────────────────────────────────
-            SectionLabel("DRIVER LEVEL")
+            SectionLabel(stringResource(R.string.section_driver_level))
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("beginner", "intermediate", "pro").forEach { level ->
                     val selected = uiState.driverLevel == level
+                    val labelRes = when (level) {
+                        "beginner" -> R.string.level_beginner
+                        "intermediate" -> R.string.level_intermediate
+                        else -> R.string.level_pro
+                    }
                     FilterChip(
                         selected = selected,
                         onClick = { onLevelChange(level) },
                         label = {
                             Text(
-                                level.uppercase(),
+                                stringResource(labelRes),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
@@ -113,17 +120,17 @@ fun SetupScreen(
             Spacer(Modifier.height(28.dp))
 
             // ── Units ─────────────────────────────────────────────────────────
-            SectionLabel("UNITS")
+            SectionLabel(stringResource(R.string.section_units))
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(false to "km/h", true to "mph").forEach { (isMph, label) ->
+                listOf(false to R.string.unit_kmh, true to R.string.unit_mph).forEach { (isMph, labelRes) ->
                     val selected = uiState.useMph == isMph
                     FilterChip(
                         selected = selected,
                         onClick = { onUseMphChange(isMph) },
                         label = {
                             Text(
-                                label.uppercase(),
+                                stringResource(labelRes),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.sp,
@@ -148,13 +155,13 @@ fun SetupScreen(
             Spacer(Modifier.height(28.dp))
 
             // ── Hardware Status ────────────────────────────────────────────────
-            SectionLabel("HARDWARE")
+            SectionLabel(stringResource(R.string.section_hardware))
             Spacer(Modifier.height(8.dp))
 
             if (uiState.hardwareStatus.isEmpty()) {
                 // Not yet probed (very brief window on startup)
                 Text(
-                    "Scanning…",
+                    stringResource(R.string.status_scanning),
                     color = PitwallColors.TextDim,
                     fontSize = 12.sp,
                 )
@@ -187,8 +194,7 @@ fun SetupScreen(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            "One or more devices not paired. " +
-                                "You can still start — missing streams will be absent.",
+                            stringResource(R.string.warning_devices_not_paired),
                             color = Color(0xFFFFAA00),
                             fontSize = 11.sp,
                             lineHeight = 16.sp,
@@ -205,14 +211,14 @@ fun SetupScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 PrimaryButton(
-                    label = "START SESSION",
+                    label = stringResource(R.string.btn_start_session),
                     icon = Icons.Default.Flag,
                     loading = uiState.isStarting,
                     modifier = Modifier.weight(1f),
                     onClick = { onStartSession(null, uiState.driverLevel) },
                 )
                 SecondaryButton(
-                    label = "REPLAY VBO",
+                    label = stringResource(R.string.btn_replay_vbo),
                     icon = Icons.Default.Replay,
                     onClick = { filePicker.launch(arrayOf("*/*")) },
                 )
