@@ -8,7 +8,7 @@ echo "========================================="
 echo "[1/4] Updating packages and installing dependencies..."
 pkg update -y
 pkg upgrade -y
-pkg install -y git python python-pip binutils make clang pkg-config openssl libffi uv
+pkg install -y git python python-pip binutils make clang pkg-config openssl libffi
 
 # 2. Allow External Apps to send Intents
 echo "[2/4] Enabling external intents..."
@@ -33,7 +33,8 @@ fi
 
 # 4. Setup Python Environment
 echo "[4/4] Setting up Python Environment..."
-# uv is installed via pkg earlier
+# Install uv for fast package management
+pip install uv
 uv venv .venv
 source .venv/bin/activate
 uv pip install -e .[all]
