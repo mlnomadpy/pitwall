@@ -9,6 +9,9 @@ echo "[1/4] Updating packages and installing dependencies..."
 pkg update -y
 pkg upgrade -y
 pkg install -y git python python-pip binutils make clang pkg-config openssl libffi uv
+pkg install -y tur-repo
+pkg update -y
+pkg install -y python-torch openblas
 
 # 2. Allow External Apps to send Intents
 echo "[2/4] Enabling external intents..."
@@ -35,9 +38,9 @@ fi
 echo "[4/4] Setting up Python Environment..."
 cd ~/pitwall
 # uv is installed via pkg earlier
-uv venv --python python .venv
+uv venv --system-site-packages --python python .venv
 source .venv/bin/activate
-uv pip install -e .[can]
+uv pip install -e .[all]
 
 echo "========================================="
 echo "✅ Setup Complete!"
