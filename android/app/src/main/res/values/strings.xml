@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pitwall</string>
+    <string name="logo_pit">PIT</string>
+    <string name="logo_wall">WALL</string>
+    <string name="app_subtitle">AI Racing Coach — Sonoma Raceway</string>
+    <string name="section_driver_level">DRIVER LEVEL</string>
+    <string name="level_beginner">BEGINNER</string>
+    <string name="level_intermediate">INTERMEDIATE</string>
+    <string name="level_pro">PRO</string>
+    <string name="section_units">UNITS</string>
+    <string name="unit_kmh">KM/H</string>
+    <string name="unit_mph">MPH</string>
+    <string name="section_hardware">HARDWARE</string>
+    <string name="status_scanning">Scanning…</string>
+    <string name="warning_devices_not_paired">One or more devices not paired. You can still start — missing streams will be absent.</string>
+    <string name="btn_start_session">START SESSION</string>
+    <string name="btn_replay_vbo">REPLAY VBO</string>
+</resources>

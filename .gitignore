@@ -32,15 +32,28 @@ kaggle_data/
 Thumbs.db
 
 # ── Android ───────────────────────────────────────────────────────────────────
-flutter/android/local.properties
 local.properties
 *.keystore
 *.jks
-android/app/build/
-build/
 .gradle/
+
+# Legacy / Flutter
+flutter/android/local.properties
+android/app/build/
 android/.idea/caches/
 android/.idea/workspace.xml
+
+# Native Paddock App
+android-app/build/
+android-app/app/build/
+android-app/.idea/
+android-app/.gradle/
+
+# Native LLM Sidecar Service
+android-llm-service/build/
+android-llm-service/app/build/
+android-llm-service/.idea/
+android-llm-service/.gradle/
 
 # ── ML models (large files) ──────────────────────────────────────────────────
 models/gemma-4-E2B-it.task
@@ -53,6 +66,8 @@ models/gemma-4-E2B-it.task
 # ── Logs ──────────────────────────────────────────────────────────────────────
 bridge.log
 scratch/
+*.hprof
+
 
 # ── Build artifacts ───────────────────────────────────────────────────────────
 site/

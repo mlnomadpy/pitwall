@@ -87,8 +87,34 @@ _WIDE_FIELDS = (
     "brake_bar", "throttle_pct", "steering_deg", "rpm", "lat", "lon",
 )
 
+# AIM MXP V3.0 Canonical Mappings
+_CANONICAL_MAPPING = {
+    "speed_mph": "speed_ms",          # mph -> m/s
+    "lateral_accel_g": "g_lat",       # g -> g
+    "inline_accel_g": "g_long",       # g -> g
+    "brake_press_psi": "brake_bar",   # psi -> bar
+    "throttle_pos_pct": "throttle_pct", # % -> %
+    "steer_angle_deg": "steering_deg", # deg -> deg
+    "gps_lat": "lat",                 # deg -> deg
+    "gps_lon": "lon"                  # deg -> deg
+}
+
+# Values from these channels need specific scaling/conversion before hitting the wide table
+_CONVERSIONS = {
+    "speed_mph": lambda v: v * 0.44704,           # mph to m/s
+    "brake_press_psi": lambda v: v * 0.0689476,   # psi to bar
+}
+
+# Bidirectional channels mapped to unsigned slots that require signed recovery
+_SIGNED_RECOVERY = {
+    "roll_rate_degs", "pitch_rate_degs", "yaw_rate_degs", 
+    "lateral_accel_g", "inline_accel_g", "vertical_accel_g", 
+    "steer_angle_deg"
+}
 
 class CanReader:
+
+
     """Consumes a CAN bus, decodes via DBC, sinks into pitwall stores.
 
     Args:
@@ -310,13 +336,7 @@ class CanReader:
             self._consume(msg.timestamp, decoded)
 
     def _consume(self, t: float, decoded: dict):
-        """Route a decoded frame's signals to wide buffer and/or tall sink.
-
-        When dead-reckoning is enabled (default), CAN speed and IMU g_long
-        feed the Kalman filter, raw GPS distance updates land as a fusion
-        measurement, and the wide-row distance_m is overwritten with the
-        filtered output. The raw GPS distance is preserved in the tall
-        store as `gps_distance_m` so we retain a debugging reference."""
+        """Route a decoded frame's signals to wide buffer and/or tall sink."""
         wide_updates = {}
         tall_signals = []
         for name, value in decoded.items():
@@ -324,17 +344,38 @@ class CanReader:
                 fvalue = float(value)
             except (TypeError, ValueError):
                 continue
-            if name in _WIDE_FIELDS:
-                wide_updates[name] = fvalue
-            else:
-                tall_signals.append((name, t, fvalue))
+                
+            # Apply AIM MXP signed recovery for unsigned slots
+            if name in _SIGNED_RECOVERY and fvalue > 32767:
+                # The raw value was scaled (e.g. * 10 or 100) before transmission.
+                # Since the DBC slot is unsigned, cantools gives us (raw * scale).
+                # Example: -1.0g raw=0xFFFF(65535). cantools gives 65535 * 0.01 = 655.35.
+                # We need to subtract the max offset created by the scale.
+                if "accel" in name:
+                    fvalue -= 655.36  # 65536 * 0.01
+                else:
+                    fvalue -= 6553.6  # 65536 * 0.1
 
-        # ADR-018: Kalman fusion for smooth distance. Only synthesize a
-        # `distance_m` value when this frame carries speed/IMU/distance —
-        # frames with only inputs (throttle, brake, steering) leave distance
-        # alone so we don't trigger spurious flushes mid-burst.
+            # Apply AIM MXP mapping and conversions
+            target_name = _CANONICAL_MAPPING.get(name, name)
+            if target_name in _CONVERSIONS:
+                fvalue = _CONVERSIONS[target_name](fvalue)
+            elif name in _CONVERSIONS:
+                fvalue = _CONVERSIONS[name](fvalue)
+
+            if target_name in _WIDE_FIELDS:
+                wide_updates[target_name] = fvalue
+            
+            # We always push to tall store with the original name for diagnostic fidelity
+            tall_signals.append((name, t, fvalue))
+            # And push mapped canonicals to tall store if they differ
+            if target_name != name:
+                 tall_signals.append((target_name, t, fvalue))
+
+        # ADR-018: Kalman fusion for smooth distance.
         if self._dr is not None:
             advanced = False
+
             if "g_long" in wide_updates:
                 self._dr.update_imu(t, wide_updates["g_long"])
                 advanced = True
@@ -344,14 +385,10 @@ class CanReader:
             if "distance_m" in wide_updates:
                 raw_d = wide_updates["distance_m"]
                 self._dr.update_distance(t, raw_d)
-                # Persist raw GPS distance to the tall store for diagnostics.
                 tall_signals.append(("gps_distance_m", t, raw_d))
                 wide_updates["distance_m"] = self._dr.distance_m
                 advanced = True
             elif advanced and self._dr.t is not None:
-                # GPS didn't update this frame but speed/IMU did — propagate
-                # the filter and emit the dead-reckoned distance so lap
-                # detection sees motion at CAN rate, not GPS rate.
                 self._dr.predict_to(t)
                 wide_updates["distance_m"] = self._dr.distance_m
 
@@ -364,6 +401,7 @@ class CanReader:
 
         if tall_signals:
             self._sink_tall(tall_signals)
+
 
     # ── tall-store sink (ADR-015) ────────────────────────────────────────
 
