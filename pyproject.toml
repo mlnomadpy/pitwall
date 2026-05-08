@@ -7,7 +7,7 @@ name = "pitwall"
 version = "0.1.0"
 description = "Telemetry-driven virtual racing coach — Flask backend, DuckDB persistence, CAN ingest"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = { text = "Proprietary" }
 authors = [{ name = "mlnomadpy" }]
 keywords = ["motorsport", "telemetry", "coaching", "racing", "CAN"]

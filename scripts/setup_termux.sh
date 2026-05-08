@@ -35,7 +35,7 @@ fi
 echo "[4/4] Setting up Python Environment..."
 cd ~/pitwall
 # uv is installed via pkg earlier
-uv venv .venv
+uv venv --python python .venv
 source .venv/bin/activate
 uv pip install -e .[all]
 
