@@ -10,6 +10,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -22,9 +23,11 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -39,8 +42,11 @@ import androidx.navigation.NavController
 import com.pitwall.app.BuildConfig
 import com.pitwall.app.data.local.AppPreferences
 import com.pitwall.app.data.local.SaveStore
+import com.pitwall.app.data.remote.NetworkModule
 import com.pitwall.app.di.SessionHolder
+import com.pitwall.app.ui.navigation.Routes
 import com.pitwall.app.ui.theme.NightModeController
+import kotlinx.serialization.json.JsonObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,6 +56,19 @@ fun AppSettingsScreen(navController: NavController) {
     val tabs = listOf("General", "Driver", "Audio", "Display", "Controls", "Car")
 
     var driverField by remember { mutableStateOf(AppPreferences.readDriverId(ctx)) }
+    var profileEpoch by remember { mutableIntStateOf(0) }
+    var bridgeProfile by remember { mutableStateOf<JsonObject?>(null) }
+    var bridgeProfileLoading by remember { mutableStateOf(false) }
+
+    LaunchedEffect(profileEpoch) {
+        val id = SessionHolder.activeDriver.trim().ifEmpty { return@LaunchedEffect }
+        bridgeProfileLoading = true
+        bridgeProfile =
+            runCatching {
+                NetworkModule.pitwallApi.driverProfile(id)
+            }.getOrNull()
+        bridgeProfileLoading = false
+    }
 
     val slot = SaveStore.activeSlot()
     val s = slot?.settings
@@ -149,6 +168,7 @@ fun AppSettingsScreen(navController: NavController) {
                             onClick = {
                                 AppPreferences.saveDriverId(ctx, driverField)
                                 driverField = SessionHolder.activeDriver
+                                profileEpoch++
                             },
                         ) {
                             Text("Save driver")
@@ -158,6 +178,28 @@ fun AppSettingsScreen(navController: NavController) {
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        TextButton(onClick = { profileEpoch++ }) {
+                            Text("Refresh bridge profile")
+                        }
+                        if (bridgeProfileLoading) {
+                            CircularProgressIndicator(
+                                modifier =
+                                    Modifier.padding(top = 8.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        }
+                        DriverBridgeProfileCard(bridgeProfile)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 8.dp),
+                        ) {
+                            TextButton(onClick = { navController.navigate(Routes.EVOLUTION) }) {
+                                Text("Evolution chart")
+                            }
+                            TextButton(onClick = { navController.navigate(Routes.SESSION_SCORE) }) {
+                                Text("Session grade")
+                            }
+                        }
                     }
                     2 -> {
                         AudioSlider(

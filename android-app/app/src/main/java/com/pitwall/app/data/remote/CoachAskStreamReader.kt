@@ -36,7 +36,21 @@ object CoachAskStreamReader {
                 .build()
         NetworkModule.okHttpClient.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) {
-                onError("HTTP ${resp.code}")
+                val snippet =
+                    try {
+                        resp.body?.string()?.trim()?.take(400)
+                    } catch (_: Exception) {
+                        null
+                    }
+                onError(
+                    buildString {
+                        append("HTTP ${resp.code}")
+                        if (!snippet.isNullOrBlank()) {
+                            append(": ")
+                            append(snippet)
+                        }
+                    },
+                )
                 return
             }
             resp.body?.byteStream()?.bufferedReader(Charsets.UTF_8)?.use { reader ->

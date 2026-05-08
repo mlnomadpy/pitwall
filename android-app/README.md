@@ -66,8 +66,8 @@ Cleartext HTTP to localhost is allowed via [`network_security_config.xml`](app/s
 
 | Status | Scope |
 |--------|--------|
-| **Implemented** | Same Flask bridge as PWA (`docs/api.md`): health, sessions, session detail, lap / ideal / distribution / sectors, scorecard + bundle sections, signals, coach flows, insights, evolution, diagnostics, **three-slot save store** (`Routes.SAVE`), **`GET /sessions` merged into active slot** after bridge session list load, **session bridge tools** (sync preview, Parquet export to cache, burst reset), **track reference** (markers / danger / weather / elevation), garage + analysis hubs, HUD SSE, settings + **system night** (`NightModeController`). Many analytics screens still render structured JSON (see `SqlConsoleScreen`, replay, etc.). |
-| **Not native-parity** | PWA shell visuals, DuckDB-Wasm in-browser SQL, `POST /coach/ask/stream`, sprite/audio polish. Leaderboard remains mock until a shared API exists. |
+| **Implemented** | Same Flask bridge as PWA (`docs/api.md`): health, sessions, session detail, lap / ideal / distribution / sectors, scorecard + bundle sections, signals, coach flows, insights (**bar summaries for est. gain / effort**), evolution (**line chart + profile sparkline + JSON**), diagnostics, **`POST /score` session grade**, **driver profile** in Settings (`GET /driver/…/profile`) + shortcuts to evolution/grade, **Debrief bundle Stats** (**normalized numeric bars** + compact text), **three-slot save store** (`Routes.SAVE`), **`GET /sessions` merged into active slot**, session bridge tools, track reference, garage (**SESSION GRADE** tile), HUD SSE, settings + **system night** (`NightModeController`). Raw JSON remains where charts aren’t wired yet (e.g. replay). |
+| **Not native-parity** | Title uses cyber shell cues (no WebAudio / sprite wanderer). SQL console uses bridge probes (GET /laps, /capabilities, /signals) instead of DuckDB-Wasm; stream Q&A needs ADK `stream_adk` on the bridge. Leaderboard ranks real laps when DuckDB has rows, else falls back to the arcade mock ladder. |
 
 ## Package / application id
 

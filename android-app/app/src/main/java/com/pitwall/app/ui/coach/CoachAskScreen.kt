@@ -83,7 +83,7 @@ fun CoachAskScreen(
                 },
                 actions = {
                     TextButton(onClick = { vm.clearConversation() }) {
-                        Text("Clear")
+                        Text("Clear + sync")
                     }
                 },
             )
@@ -164,7 +164,7 @@ fun CoachAskScreen(
             if (turns.isEmpty()) {
                 item {
                     Text(
-                        "Paddock Q&A — POST /coach/ask or toggle Stream for /coach/ask/stream (when ADK streaming is available).",
+                        "Paddock Q&A — sync mode uses POST /coach/ask. Toggle Stream for POST /coach/ask/stream (SSE). Clear + sync flushes to POST /coach/ask/end.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

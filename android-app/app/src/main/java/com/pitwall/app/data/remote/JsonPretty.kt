@@ -1,5 +1,6 @@
 package com.pitwall.app.data.remote
 
+import kotlin.math.abs
 import kotlinx.serialization.SerializationStrategy
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -44,6 +45,21 @@ fun JsonObject.compactSummary(maxKeys: Int = 120): String {
         if (list.size > maxKeys) {
             append("… (${list.size} keys total)")
         }
+    }
+}
+
+/** Top-level numeric JSON fields as normalized bar fractions (0–1) for quick charts. */
+fun JsonObject.topLevelNumericFractions(): List<Pair<String, Float>> {
+    val nums =
+        entries.mapNotNull { (k, v) ->
+            val prim = v as? JsonPrimitive ?: return@mapNotNull null
+            val d = prim.content.toDoubleOrNull() ?: return@mapNotNull null
+            k to d
+        }
+    if (nums.isEmpty()) return emptyList()
+    val maxAbs = nums.maxOf { abs(it.second) }.takeIf { it > 1e-12 } ?: 1.0
+    return nums.map { (k, v) ->
+        k to (abs(v / maxAbs)).toFloat().coerceIn(0f, 1f)
     }
 }
 

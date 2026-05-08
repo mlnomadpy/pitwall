@@ -59,6 +59,7 @@ fun GarageHubScreen(navController: NavController) {
             GarageTile("PIT STALL", "CONNECT · TUNE", Routes.PIT_STALL),
             GarageTile("TRAINER CARD", "STATS · MEDALS", Routes.TRAINER_CARD),
             GarageTile("ANALYSIS", "LAPS · CORNERS", Routes.ANALYSIS),
+            GarageTile("SESSION GRADE", "POST /score · GEMINI", Routes.SESSION_SCORE),
             GarageTile("COACHES", "ROSTER · AFFINITY", Routes.COACH_SELECT),
             GarageTile("HIGH SCORES", "GLOBAL RANKING", Routes.LEADERBOARD),
             GarageTile("QUEST LOG", "GOALS · CONTRACTS", Routes.QUESTS),

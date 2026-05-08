@@ -23,6 +23,7 @@ import com.pitwall.app.ui.analytics.LapDistributionScreen
 import com.pitwall.app.ui.analytics.LapTimesScreen
 import com.pitwall.app.ui.analytics.PedalProfileScreen
 import com.pitwall.app.ui.analytics.SessionClipsScreen
+import com.pitwall.app.ui.analytics.SessionScoreScreen
 import com.pitwall.app.ui.analytics.SectorTimesScreen
 import com.pitwall.app.ui.analytics.StraightsAndSpeedScreen
 import com.pitwall.app.ui.analytics.ThrottleCornerBoxScreen
@@ -137,6 +138,9 @@ fun PitwallNavHost(
         }
         composable(Routes.INSIGHTS) {
             InsightsScreen(navController)
+        }
+        composable(Routes.SESSION_SCORE) {
+            SessionScoreScreen(navController)
         }
         composable(Routes.LAP_DISTRIBUTION) {
             LapDistributionScreen(navController)

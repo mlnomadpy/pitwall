@@ -25,6 +25,8 @@ object Routes {
     const val ANALYSIS = "garage/analysis"
     /** GET /insights — burst-derived coaching gaps */
     const val INSIGHTS = "analysis/insights"
+    /** POST /score — Gemini-graded session score */
+    const val SESSION_SCORE = "analysis/session-score"
     /** GET /session/{sid}/lap_time_distribution */
     const val LAP_DISTRIBUTION = "analysis/lap-distribution"
     const val LAP_TIMES = "analysis/lap-times"

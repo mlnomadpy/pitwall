@@ -76,6 +76,7 @@ fun AnalysisHubScreen(navController: NavController) {
         listOf(
             HubModule("DEBRIEF BUNDLE", "POST COACH/DEBRIEF", Routes.ANALYSIS_BUNDLE),
             HubModule("INSIGHTS", "COACHING GAPS", Routes.INSIGHTS),
+            HubModule("SESSION GRADE", "POST /score · GEMINI", Routes.SESSION_SCORE),
             HubModule("LAP DISTRIBUTION", "BOX PLOT", Routes.LAP_DISTRIBUTION),
             HubModule("SECTOR TIMES", "S1 · S2 · S3", Routes.SECTOR_TIMES),
             HubModule("SESSION CLIPS", "VIDEO CUTS", Routes.SESSION_CLIPS),
@@ -222,8 +223,8 @@ fun AnalysisHubScreen(navController: NavController) {
                         }
                         item(span = { GridItemSpan(2) }) {
                             PitwallTileCard(
-                                title = "SQL · SIGNALS PROBE",
-                                subtitle = "SPACE IN PWA — /signals",
+                                title = "SQL · BRIDGE PROBE",
+                                subtitle = "/signals · /laps · /capabilities · /registry",
                                 onClick = { navController.navigate(Routes.SQL) },
                                 entranceIndex = core.size + extended.size,
                             )
@@ -282,8 +283,8 @@ fun AnalysisHubScreen(navController: NavController) {
                         )
                     }
                     PitwallTileCard(
-                        title = "SQL · SIGNALS PROBE",
-                        subtitle = "SPACE · /signals",
+                        title = "SQL · BRIDGE PROBE",
+                        subtitle = "/signals · /laps · /capabilities · /registry",
                         onClick = { navController.navigate(Routes.SQL) },
                         entranceIndex = core.size + extended.size,
                     )

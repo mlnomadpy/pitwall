@@ -32,7 +32,9 @@ import com.pitwall.app.data.remote.NetworkModule
 import com.pitwall.app.data.remote.PitwallApi
 import com.pitwall.app.data.remote.compactSummary
 import com.pitwall.app.data.remote.prettyJson
+import com.pitwall.app.data.remote.topLevelNumericFractions
 import com.pitwall.app.di.SessionHolder
+import com.pitwall.app.ui.components.pitwall.PitwallHorizontalBar
 import kotlinx.serialization.json.JsonObject
 import retrofit2.HttpException
 
@@ -66,12 +68,14 @@ fun AnalysisBundleScreen(navController: NavController) {
     var section by remember { mutableStateOf(BundleSection.HIGHLIGHTS) }
     val sid = SessionHolder.activeSessionId
     var text by remember { mutableStateOf<String?>(null) }
+    var bundleJson by remember { mutableStateOf<JsonObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
 
     LaunchedEffect(sid, section) {
         if (sid.isNullOrBlank()) {
             text = null
+            bundleJson = null
             error = null
             return@LaunchedEffect
         }
@@ -80,6 +84,7 @@ fun AnalysisBundleScreen(navController: NavController) {
         try {
             val api = NetworkModule.pitwallApi
             val json = api.loadBundleSection(sid, section)
+            bundleJson = json
             text =
                 if (section == BundleSection.STATS) {
                     json.compactSummary()
@@ -94,9 +99,11 @@ fun AnalysisBundleScreen(navController: NavController) {
                     else -> e.message ?: "HTTP ${e.code()}"
                 }
             text = null
+            bundleJson = null
         } catch (e: Exception) {
             error = e.message ?: e.toString()
             text = null
+            bundleJson = null
         } finally {
             loading = false
         }
@@ -160,8 +167,28 @@ fun AnalysisBundleScreen(navController: NavController) {
                     loading -> CircularProgressIndicator()
                     error != null ->
                         Text(error ?: "", color = MaterialTheme.colorScheme.error)
-                    text != null ->
-                        Text(text!!, style = MaterialTheme.typography.bodySmall)
+                    text != null -> {
+                        Column {
+                            if (section == BundleSection.STATS && bundleJson != null) {
+                                val bars = bundleJson!!.topLevelNumericFractions().take(14)
+                                if (bars.isNotEmpty()) {
+                                    Text(
+                                        "Numeric snapshot (normalized to largest magnitude)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.padding(bottom = 8.dp),
+                                    )
+                                    bars.forEach { (k, frac) ->
+                                        PitwallHorizontalBar(
+                                            label = k,
+                                            fraction = frac,
+                                            caption = "${(frac * 100).toInt()}%",
+                                        )
+                                    }
+                                }
+                            }
+                            Text(text!!, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
         }

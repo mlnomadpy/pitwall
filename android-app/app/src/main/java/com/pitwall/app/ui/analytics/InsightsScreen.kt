@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.pitwall.app.ui.components.pitwall.PitwallHorizontalBar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -122,6 +123,8 @@ fun InsightsScreen(
                     )
                 data != null -> {
                     val d = data!!
+                    val maxGain =
+                        d.insights.maxOfOrNull { it.estGainS ?: 0.0 }?.takeIf { it > 1e-9 } ?: 0.0
                     LazyColumn(
                         modifier =
                             Modifier
@@ -160,11 +163,20 @@ fun InsightsScreen(
                                             modifier = Modifier.padding(top = 6.dp),
                                         )
                                     }
-                                    if (ins.estGainS != null) {
-                                        Text(
-                                            "Est. gain ~${ins.estGainS}s · effort ${ins.effort ?: "—"}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    if (ins.estGainS != null && maxGain > 0) {
+                                        PitwallHorizontalBar(
+                                            label = "Est. gain (vs pack)",
+                                            fraction =
+                                                (ins.estGainS!! / maxGain).toFloat().coerceIn(0f, 1f),
+                                            caption = "${"%.3f".format(ins.estGainS)} s",
+                                            modifier = Modifier.padding(top = 8.dp),
+                                        )
+                                    }
+                                    ins.effort?.let { e ->
+                                        PitwallHorizontalBar(
+                                            label = "Effort",
+                                            fraction = (e.coerceIn(0, 10) / 10f).coerceIn(0f, 1f),
+                                            caption = "$e / 10",
                                             modifier = Modifier.padding(top = 4.dp),
                                         )
                                     }

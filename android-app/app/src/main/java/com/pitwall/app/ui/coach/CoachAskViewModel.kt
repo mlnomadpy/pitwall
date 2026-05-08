@@ -2,6 +2,7 @@ package com.pitwall.app.ui.coach
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pitwall.app.data.remote.CoachAskEndRequestDto
 import com.pitwall.app.data.remote.CoachAskRequestDto
 import com.pitwall.app.data.remote.CoachAskStreamReader
 import com.pitwall.app.data.remote.NetworkModule
@@ -167,7 +168,17 @@ class CoachAskViewModel : ViewModel() {
     }
 
     fun clearConversation() {
-        _turns.value = emptyList()
-        _lastError.value = null
+        viewModelScope.launch {
+            runCatching {
+                api.coachAskEnd(
+                    CoachAskEndRequestDto(
+                        driverId = SessionHolder.activeDriver,
+                        sessionId = SessionHolder.activeSessionId.orEmpty(),
+                    ),
+                )
+            }
+            _turns.value = emptyList()
+            _lastError.value = null
+        }
     }
 }
