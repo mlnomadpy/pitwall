@@ -57,3 +57,4 @@ scratch/
 # ── Build artifacts ───────────────────────────────────────────────────────────
 site/
 node_modules/
+.firebase/
