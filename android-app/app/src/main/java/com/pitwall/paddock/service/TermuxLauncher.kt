@@ -15,7 +15,7 @@ object TermuxLauncher {
                 putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
                 putExtra(
                     "com.termux.RUN_COMMAND_ARGUMENTS", 
-                    arrayOf("-c", "termux-wake-lock && cd ~/pitwall && source .venv/bin/activate && python -m src.pitwall")
+                    arrayOf("-c", "termux-wake-lock && cd ~/pitwall && source .venv/bin/activate && python -m src.pitwall --can-interface slcan --can-channel socket://127.0.0.1:9000")
                 )
                 putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home/pitwall")
                 putExtra("com.termux.RUN_COMMAND_BACKGROUND", true)
