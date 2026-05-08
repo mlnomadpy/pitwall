@@ -3,27 +3,37 @@ package com.pitwall.app.ui.theme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.ui.graphics.Color
 
-/** Palette aligned with PWA cyber tokens (ink, slate, curb, ui-good / warn). */
+/** Palette aligned with `src/pwa/src/app/styles/global.css` (`--color-ink`, `--color-ui-good`, …). */
 object PitwallPalette {
-    val Ink = Color(0xFF0D0D12)
-    val InkDeep = Color(0xFF060608)
-    val Surface = Color(0xFF14141C)
-    val SurfaceElevated = Color(0xFF1C1C28)
-    val Slate = Color(0xFF6B7280)
-    val Silver = Color(0xFFC9D1D9)
-    val CyanPrimary = Color(0xFF2AA198)
-    val OnCyan = Color(0xFF0A0A0F)
-    val CurbRed = Color(0xFFE74C3C)
-    val UiGood = Color(0xFF5FD68A)
-    val UiWarn = Color(0xFFF4D03F)
-    val OutlineSubtle = Color(0xFF2A2A38)
+    val Ink = Color(0xFF0b0c10)
+    val InkDeep = Color(0xFF050505)
+    val Charcoal = Color(0xFF1f2833)
+    val Surface = Color(0xFF1A252C)
+    val SurfaceElevated = Color(0xFF242830)
+
+    /** Tailwind `slate` in the PWA theme — teal accent, not gray. */
+    val AccentSlate = Color(0xFF66c2be)
+    val Silver = Color(0xFFc5c6c7)
+    /** Secondary / muted body text (between silver and ink). */
+    val SlateMuted = Color(0xFF6B7280)
+
+    val UiGood = Color(0xFF4ecdc4)
+    val OnUiGood = Ink
+    val UiWarn = Color(0xFFfeca57)
+    val CurbRed = Color(0xFFc93838)
+    val CurbWhite = Color(0xFFf5f5e8)
+    val CyanPrimary = AccentSlate
+    val OutlineSubtle = Color(0xFF2A3644)
+
+    /** Sprite / warm glow accents used on the title (see `TitleScreen.vue`). */
+    val TitleGlowWarm = Color(0xFFC8786A)
 }
 
 fun pitwallDarkColorScheme(deepSurfaces: Boolean = true) =
     darkColorScheme(
-        primary = PitwallPalette.CyanPrimary,
-        onPrimary = PitwallPalette.OnCyan,
-        primaryContainer = PitwallPalette.SurfaceElevated,
+        primary = PitwallPalette.UiGood,
+        onPrimary = PitwallPalette.OnUiGood,
+        primaryContainer = PitwallPalette.Charcoal,
         onPrimaryContainer = PitwallPalette.Silver,
         secondary = PitwallPalette.CurbRed,
         onSecondary = Color.White,
@@ -31,12 +41,12 @@ fun pitwallDarkColorScheme(deepSurfaces: Boolean = true) =
         onTertiary = PitwallPalette.Ink,
         background = if (deepSurfaces) PitwallPalette.InkDeep else PitwallPalette.Ink,
         onBackground = PitwallPalette.Silver,
-        surface = if (deepSurfaces) PitwallPalette.Surface else PitwallPalette.SurfaceElevated,
+        surface = if (deepSurfaces) PitwallPalette.Charcoal else PitwallPalette.Surface,
         onSurface = PitwallPalette.Silver,
         surfaceVariant = PitwallPalette.SurfaceElevated,
-        onSurfaceVariant = PitwallPalette.Slate,
-        outline = PitwallPalette.OutlineSubtle,
-        outlineVariant = PitwallPalette.OutlineSubtle.copy(alpha = 0.5f),
+        onSurfaceVariant = PitwallPalette.SlateMuted,
+        outline = PitwallPalette.AccentSlate.copy(alpha = 0.45f),
+        outlineVariant = PitwallPalette.OutlineSubtle,
         error = PitwallPalette.CurbRed,
         onError = Color.White,
     )

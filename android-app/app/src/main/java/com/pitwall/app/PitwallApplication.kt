@@ -1,18 +1,15 @@
 package com.pitwall.app
 
 import android.app.Application
-import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
+import com.pitwall.app.bridge.PitwallKotlinBridge
 
 /**
- * Starts Chaquopy once per process and launches the embedded Flask bridge.
+ * Starts the on-device Kotlin/Ktor HTTP bridge ([docs/api.md] compatible).
+ * Python/Chaquopy is no longer required for the shipping APK path.
  */
 class PitwallApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        if (!Python.isStarted()) {
-            Python.start(AndroidPlatform(this))
-        }
-        PitwallBridge.start(this)
+        PitwallKotlinBridge.start(this)
     }
 }

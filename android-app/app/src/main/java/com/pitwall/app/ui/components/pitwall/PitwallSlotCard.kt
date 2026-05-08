@@ -40,8 +40,8 @@ fun PitwallSlotCard(
         } else {
             Brush.linearGradient(
                 listOf(
-                    PitwallPalette.Slate.copy(alpha = 0.45f),
-                    PitwallPalette.Slate.copy(alpha = 0.15f),
+                    PitwallPalette.SlateMuted.copy(alpha = 0.45f),
+                    PitwallPalette.SlateMuted.copy(alpha = 0.15f),
                 ),
             )
         }

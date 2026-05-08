@@ -5,7 +5,6 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.chaquopy)
 }
 
 val localProperties = Properties().apply {
@@ -78,22 +77,12 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.webkit)
+    val ktorVersion = "2.3.12"
+    implementation("io.ktor:ktor-server-core-jvm:$ktorVersion")
+    implementation("io.ktor:ktor-server-cio-jvm:$ktorVersion")
+    implementation("io.ktor:ktor-server-content-negotiation-jvm:$ktorVersion")
+    implementation("io.ktor:ktor-serialization-kotlinx-json-jvm:$ktorVersion")
+    // Gemma on-device — https://ai.google.dev/gemma/docs/integrations/mobile
+    implementation("com.google.mediapipe:tasks-genai:0.10.29")
     debugImplementation(libs.androidx.ui.tooling.preview)
-}
-
-chaquopy {
-    defaultConfig {
-        version = "3.12"
-        pip {
-            install("Flask>=3.0")
-            install("flask-cors>=4.0")
-            install("duckdb>=1.0")
-            install("numpy>=1.26")
-        }
-    }
-    sourceSets {
-        getByName("main") {
-            srcDir("../../src")
-        }
-    }
 }
