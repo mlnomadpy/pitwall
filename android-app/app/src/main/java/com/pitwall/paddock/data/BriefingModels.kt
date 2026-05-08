@@ -1,9 +1,9 @@
 package com.pitwall.paddock.data
 
 import androidx.compose.ui.graphics.Color
-import com.pitwall.paddock.ui.theme.AccentGreen
-import com.pitwall.paddock.ui.theme.AccentPeach
-import com.pitwall.paddock.ui.theme.PitwallCyan
+import com.pitwall.paddock.ui.theme.ColorBiosGreen
+import com.pitwall.paddock.ui.theme.ColorUiGood
+import com.pitwall.paddock.ui.theme.ColorUiWarn
 
 enum class BriefingCardStyle {
     Green,
@@ -12,10 +12,11 @@ enum class BriefingCardStyle {
 }
 
 fun BriefingCardStyle.toAccentColor(): Color = when (this) {
-    BriefingCardStyle.Green -> AccentGreen
-    BriefingCardStyle.Peach -> AccentPeach
-    BriefingCardStyle.Cyan -> PitwallCyan
+    BriefingCardStyle.Green -> ColorBiosGreen
+    BriefingCardStyle.Peach -> ColorUiWarn
+    BriefingCardStyle.Cyan  -> ColorUiGood
 }
+
 
 data class BriefingCardData(
     val mkrCode: String,

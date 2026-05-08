@@ -5,24 +5,46 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+// ── Material3 Color Scheme — web token parity ─────────────────────────────────
 private val DarkColors = darkColorScheme(
-    primary = PitwallCyan,
-    onPrimary = Color.Black,
-    primaryContainer = Color(0xFF0D2A2E),
-    onPrimaryContainer = PitwallCyan,
-    surface = PitwallSurface,
-    onSurface = TextPrimary,
-    surfaceContainerHighest = NavBarBg,
-    background = PitwallBg,
-    onBackground = TextPrimary,
-    outline = CardStroke,
-    onSurfaceVariant = TextSecondary,
+    // Primary: cyber cyan (#4ECDC4)
+    primary             = ColorUiGood,
+    onPrimary           = Color(0xFF002B29),
+    primaryContainer    = Color(0xFF003D3A),
+    onPrimaryContainer  = ColorUiGood,
+    // Secondary: electric blue
+    secondary           = ColorUiInfo,
+    onSecondary         = Color.Black,
+    secondaryContainer  = Color(0xFF002030),
+    onSecondaryContainer = ColorUiInfo,
+    // Tertiary: arcade yellow
+    tertiary            = ColorUiWarn,
+    onTertiary          = Color(0xFF2A1F00),
+    // Error: neon red
+    error               = ColorUiBad,
+    onError             = Color.Black,
+    // Backgrounds
+    background          = ColorInk,
+    onBackground        = ColorSilver,
+    surface             = ColorCharcoal,
+    onSurface           = ColorSilver,
+    surfaceVariant      = ColorCharcoalMid,
+    onSurfaceVariant    = ColorSlate,
+    surfaceContainerHighest = ColorInk,   // nav bar
+    // Borders / outlines
+    outline             = ColorSlate.copy(alpha = 0.3f),
+    outlineVariant      = ColorCharcoal,
+    // Inverse
+    inverseSurface      = ColorSilver,
+    inverseOnSurface    = ColorInk,
 )
 
 @Composable
 fun PaddockTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = DarkColors,
-        content = content,
+        typography  = PitwallTypography,
+        content     = content,
     )
 }
+

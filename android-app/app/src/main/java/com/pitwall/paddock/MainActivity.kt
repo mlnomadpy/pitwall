@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -52,6 +54,12 @@ fun PaddockAppContent() {
     val state by vm.state.collectAsStateWithLifecycle()
     val backStack by nav.currentBackStackEntryAsState()
     val route = backStack?.destination?.route.orEmpty()
+    val context = LocalContext.current
+
+    // Boot track outline from assets on first composition
+    LaunchedEffect(Unit) {
+        vm.loadTrackOutline(context)
+    }
     val showBottomBar = !route.startsWith("marker_detail") && route !in setOf(
         "post_session",
         "briefing_web",
@@ -126,21 +134,31 @@ fun PaddockAppContent() {
             }
             composable(MainTab.Garage.route) {
                 GarageScreen(
-                    state = state,
-                    baseUrl = BuildConfig.PITWALL_API_BASE_URL,
-                    markers = vm.markers,
+                    bridgeLine      = state.bridgeLine,
+                    apiBaseUrl      = BuildConfig.PITWALL_API_BASE_URL,
+                    isBridgeOnline  = state.bridgeLine.startsWith("v"),
                     onRefreshBridge = { vm.refreshBridgeHealth() },
-                    onOpenPostSessionCatalog = { nav.navigate("post_session") },
+                    onOpenAnalysis  = { nav.navigate("post_session") },
+                    onOpenHistoricalMap = { nav.navigate("historical_track_map") },
                 )
             }
             composable("post_session") {
                 PostSessionAnalysisScreen(
-                    onBack = { nav.popBackStack() },
-                    onOpenHistoricalMap = { nav.navigate("historical_track_map") },
+                    laps             = state.laps,
+                    insights         = state.insights,
+                    insightsLoading  = state.insightsLoading,
+                    insightsError    = state.insightsError,
+                    cornerStats      = state.cornerStats,
+                    trackOutline     = state.trackOutline,
+                    useMph           = state.useMph,
+                    onRefreshInsights = { vm.refreshInsights() },
                 )
             }
             composable("historical_track_map") {
-                HistoricalTrackMapScreen(onBack = { nav.popBackStack() })
+                HistoricalTrackMapScreen(
+                    trackOutline = state.trackOutline,
+                    useMph       = state.useMph,
+                )
             }
             composable(
                 route = "marker_detail/{markerId}",
