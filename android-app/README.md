@@ -1,48 +1,78 @@
-# Pitwall Paddock (Jetpack)
+# Pitwall Android (Jetpack Compose)
 
-Native **Android (Jetpack Compose)** shell for the Sonoma pre-brief: **Google Maps** markers, **WebView** for a hosted/Three.js briefing, **pick-3** focus chips, and a live **on-track** view that uses **Play Services location** to show distance to your three focus corners. It calls the same **Pitwall HTTP bridge** as the Flutter app (`/health` today; extend as Taha adds endpoints).
+Native Android client for Pitwall: **same HTTP bridge** as [`src/pwa/`](../src/pwa/) (`docs/api.md`). This module replaced the older Maps/WebView prototype that lived here previously.
 
-## Requirements
+## Prerequisites
 
-- **Android Studio** Koala+ or a working command-line build with:
-  - **Android SDK** Platform **35** (install via SDK Manager)
-  - **JDK 17** for compiling the app. If you have **no** JDK 17, Gradle can **auto-download** one: the project includes the **Foojay Toolchains** convention (see `settings.gradle.kts`) — use **File → Sync Project with Gradle Files** and allow the download on first sync.
-  - **Android Studio Gradle JDK:** In **Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK**, pick **jbr-17** / **17** (Embedded is often fine) so Studio’s JDK matches. If you still see *“Cannot find a Java installation … languageVersion=17”*, run `brew install openjdk@17` and set `JAVA_HOME` to the Homebrew `openjdk@17` path, or rely on the Foojay auto-download after sync.
-- **New JREs only (e.g. 25 / 25.0.2):** the Gradle **runtime** for `gradlew` should be **17–23**; do not use the project’s Kotlin DSL on Java 25 without a separate JDK 17 for Android — using Studio with **jbr-17** avoids that.
-- **Google Maps SDK key** (optional for map tiles): [Maps SDK for Android](https://developers.google.com/maps/documentation/android-sdk/start) — enable the API, create an API key, restrict it to package `com.pitwall.paddock` and your **debug** SHA-1, then set `MAPS_API_KEY` in `local.properties` (see `local.properties.example`).
+| Requirement | Notes |
+|-------------|--------|
+| **JDK 17** | Android Gradle Plugin 8.7.x — use Android Studio’s bundled JBR or Temurin 17. |
+| **Android SDK** | Platform **API 35** recommended (compileSdk 35). Install via Android Studio SDK Manager. |
+| **Android Studio** | Koala+ — open the **`android-app`** folder. |
 
 ## First-time setup
 
-1. Copy `local.properties.example` to `local.properties` and set `sdk.dir` to your Android SDK (e.g. `~/Library/Android/sdk` on macOS).
-2. Add to `local.properties` as needed:
-   - `MAPS_API_KEY=...` — without this, the **Map** tab shows a message instead of tiles.
-   - `PITWALL_API_BASE_URL=...` — default is `http://10.0.2.2:8765` (emulator → host). For a device on the same Wi‑Fi, use your machine’s LAN IP.
-3. Start the Python bridge from the repo root: `python3 tools/pitwall_bridge.py` (or your team’s process).
-4. Build: `./gradlew :app:assembleDebug` (set `JAVA_HOME` to JDK 17 if the build errors with a cryptic `IllegalArgumentException` and a version string).
+1. Copy `local.properties.example` to **`local.properties`** (gitignored) and set:
 
-## UI (tabs)
+   ```properties
+   sdk.dir=/path/to/Android/sdk
+   ```
 
-- **TRACK** — Sonoma map (cyan polyline, colored markers), marker tooltip + **VIEW** opens **marker detail** (replay block, Ross notes, entry/apex stats, **TACKLE** to add to your pick-3). **N SELECTED** → **Briefing**.
-- **BRIEFING** — Pre-briefing summary cards (mock data from `DemoContent`) and **COMMENCE TRACK SESSION** → back to track.
-- **RANKING** — Marker mastery leaderboard + Gemma insights (mock).
-- **GARAGE** — Bridge health, API base URL, **Post-race / session feedback** (expandable PITWALL-style module catalog: temp, track, pits, flags, tires, traffic, telemetry, laps, ideal lap, speed/corner, AI, multi-season, live timing — **stat hints** are chips for future API wiring), **location** card.
-- **Post-session screen** (no bottom nav) — open from **Garage** or **Ranking**; back returns to the previous tab.
+   macOS default: `~/Library/Android/sdk`.
 
-**Bottom navigation** — uses system **navigation bar insets** (not a fixed 64dp height) so labels are not clipped on gesture nav or edge-to-edge.
+2. Optional — override the Pitwall bridge base URL (must include trailing slash in Gradle-generated `BuildConfig`, default is `http://127.0.0.1:8765/`):
 
-## Run
+   ```properties
+   # Emulator talking to Flask on the host machine:
+   PITWALL_API_BASE_URL=http://10.0.2.2:8765/
 
-- **Android Studio:** Open the `android-app` folder, Run `app`.
-- **CLI:** `./gradlew :app:installDebug` with a device or emulator connected.
+   # Physical device + Termux bridge on the same phone:
+   PITWALL_API_BASE_URL=http://127.0.0.1:8765/
+   ```
 
-## Package
+3. Start the Python bridge from the repo root (see root [`README.md`](../README.md)), then build:
 
-- `applicationId`: `com.pitwall.paddock` — distinct from the Flutter app (`com.pitwall.app`).
+   ```bash
+   cd android-app
+   ./gradlew :app:assembleDebug
+   ./gradlew :app:installDebug   # device or emulator connected
+   ```
 
-## Next steps (with Taha’s API)
+## Android Skills (contributors)
 
-- Replace `MockSonomaData` with `GET` map/marker JSON from the backend.
-- `POST` pre-brief with `markers_selected` per ADR-014.
-- Wire `OnTrack` to continuous location and cue logic when the bridge exposes the right payloads.
+[Android Skills](https://github.com/android/skills) are **SKILL.md** packs for coding agents (Gemini, Antigravity, IDE assistants), **not** runtime dependencies.
 
-The existing Flutter stack under `flutter/` is unchanged; this module is a parallel **Jetpack** client for UX work on **Maps + WebView** and the Pixel.
+Install the [Android CLI](https://developer.android.com/studio/command-line) as documented upstream, then from the repo root (or your agent config directory):
+
+```bash
+android skills add --skill=edge-to-edge --project=.
+android skills add --skill=navigation-3 --project=.
+```
+
+Use **edge-to-edge** before polishing fullscreen HUD layouts; **navigation-3** when expanding the route graph in `ui/navigation/`.
+
+## App architecture
+
+| Area | Location |
+|------|----------|
+| **Routes** | [`Routes.kt`](app/src/main/java/com/pitwall/app/ui/navigation/Routes.kt) — aligned with [`src/pwa/src/app/router/index.ts`](../src/pwa/src/app/router/index.ts). |
+| **Nav host** | [`PitwallNavHost.kt`](app/src/main/java/com/pitwall/app/ui/navigation/PitwallNavHost.kt) |
+| **REST API** | [`PitwallApi.kt`](app/src/main/java/com/pitwall/app/data/remote/PitwallApi.kt), DTOs in [`BridgeDtos.kt`](app/src/main/java/com/pitwall/app/data/remote/BridgeDtos.kt) — extend alongside [`bridge.ts`](../src/pwa/src/shared/api/bridge.ts). |
+| **SSE (live cues)** | [`HudViewModel.kt`](app/src/main/java/com/pitwall/app/ui/hud/HudViewModel.kt) → `GET /cues/stream` |
+
+Cleartext HTTP to localhost is allowed via [`network_security_config.xml`](app/src/main/res/xml/network_security_config.xml) for development and on-device Termux.
+
+## Parity status
+
+| Status | Scope |
+|--------|--------|
+| **Implemented** | Same Flask bridge as PWA (`docs/api.md`): health, sessions, session detail, lap / ideal / distribution / sectors, scorecard + bundle sections, signals, coach flows, insights, evolution, diagnostics, **three-slot save store** (`Routes.SAVE`), **`GET /sessions` merged into active slot** after bridge session list load, **session bridge tools** (sync preview, Parquet export to cache, burst reset), **track reference** (markers / danger / weather / elevation), garage + analysis hubs, HUD SSE, settings + **system night** (`NightModeController`). Many analytics screens still render structured JSON (see `SqlConsoleScreen`, replay, etc.). |
+| **Not native-parity** | PWA shell visuals, DuckDB-Wasm in-browser SQL, `POST /coach/ask/stream`, sprite/audio polish. Leaderboard remains mock until a shared API exists. |
+
+## Package / application id
+
+- **`applicationId`**: `com.pitwall.app`
+
+## License
+
+Follow the Pitwall repo license once published; same as root [`README.md`](../README.md).

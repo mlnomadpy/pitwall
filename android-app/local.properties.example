@@ -1,8 +1,11 @@
-# Copy to local.properties (not committed). Adjust paths for your machine.
+# Copy to local.properties (gitignored).
 sdk.dir=/Users/yourname/Library/Android/sdk
-# Optional — Maps SDK for Android (from Google Cloud Console)
-# MAPS_API_KEY=AIza...
-# Optional — override default http://10.0.2.2:8765
+
+# Optional — Flask bridge base URL (default in build.gradle is http://127.0.0.1:8765/)
+# Trailing slash is normalized at build time for Retrofit.
+#
+# Android emulator → Flask on host:
 # PITWALL_API_BASE_URL=http://10.0.2.2:8765/
-# Optional — hosted pre-brief for WebView (app appends ?focus=...&track=sonoma)
-# WEB_BRIEF_BASE_URL=https://your-host/brief
+#
+# Physical Pixel + Termux bridge on-device:
+# PITWALL_API_BASE_URL=http://127.0.0.1:8765/

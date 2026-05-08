@@ -7,59 +7,54 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val localProps = Properties().apply {
+val localProperties = Properties().apply {
     val f = rootProject.file("local.properties")
-    if (f.exists()) load(f.inputStream())
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
+val pitwallBaseUrl: String =
+    localProperties.getProperty("PITWALL_API_BASE_URL", "http://127.0.0.1:8765")
+        .trim()
+        .let { if (it.endsWith("/")) it else "$it/" }
+
 android {
-    namespace = "com.pitwall.paddock"
+    namespace = "com.pitwall.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.pitwall.paddock"
-        minSdk = 28
+        applicationId = "com.pitwall.app"
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
-        // Emulator → host: 10.0.2.2. Device on LAN: your machine IP.
-        val base = localProps.getProperty("PITWALL_API_BASE_URL", "http://10.0.2.2:8765")
-        buildConfigField("String", "PITWALL_API_BASE_URL", "\"$base\"")
-        // Google Cloud Console → APIs & Services → Maps SDK for Android. Also set in local.properties as MAPS_API_KEY=...
-        val mapsKey: String = localProps.getProperty("MAPS_API_KEY", "")
-        manifestPlaceholders["MAPS_API_KEY"] = mapsKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$mapsKey\"")
-        // Optional: hosted pre-brief (Three.js / static) — WebView appends ?focus= & track=sonoma
-        val webBrief = localProps.getProperty("WEB_BRIEF_BASE_URL", "")
-        buildConfigField("String", "WEB_BRIEF_BASE_URL", "\"$webBrief\"")
+        buildConfigField("String", "PITWALL_API_BASE_URL", "\"${pitwallBaseUrl.replace("\\", "\\\\")}\"")
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
         }
     }
-
-    buildFeatures {
-        compose = true
-        buildConfig = true
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-
     kotlin {
         jvmToolchain(17)
+    }
+    buildFeatures {
+        compose = true
+        buildConfig = true
     }
 }
 
 dependencies {
+    implementation(libs.google.material)
+    implementation(libs.androidx.appcompat)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -72,13 +67,11 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons)
     implementation(libs.androidx.navigation.compose)
-    implementation(libs.play.services.maps)
-    implementation(libs.maps.compose)
-    implementation(libs.play.services.location)
     implementation(libs.retrofit)
-    implementation(libs.kotlinx.serialization.json)
     implementation(libs.retrofit.kotlinx.serialization)
+    implementation(libs.okhttp)
     implementation(libs.okhttp.logging)
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.coroutines.android)
+    debugImplementation(libs.androidx.ui.tooling.preview)
 }

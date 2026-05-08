@@ -6,12 +6,6 @@ pluginManagement {
     }
 }
 
-// Auto-provision JVM 17 when the machine has no local JDK 17 (fixes
-// "No locally installed toolchains match" in Android Studio sync).
-plugins {
-    id("org.gradle.toolchains.foojay-resolver-convention") version "0.8.0"
-}
-
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
@@ -20,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "PitwallPaddock"
+rootProject.name = "PitwallAndroid"
 include(":app")

@@ -154,7 +154,8 @@ pitwall/
 │   ├── adr/                          # 21 ADRs (019–021 cover ADK)
 │   └── …                             # pedagogy, telemetry-pipeline, etc.
 ├── tests/                            # 424 tests passing, modularised in tests/features/
-├── android/  +  android-app/         # FROZEN v1 native; deletes post-PWA
+├── android-app/                      # Active Jetpack Compose client (mirrors Vue PWA; see android-app/README.md)
+├── android/                          # FROZEN v1 Flutter — legacy reference until removed
 ├── .claude/commands/adk.md           # /adk slash command — ADK reference + audit tool
 ├── mkdocs.yml
 ├── CHANGELOG.md
@@ -237,6 +238,10 @@ python3 -m pytest tests/ -q
 python3 tests/test_endpoints_smoke.py --keep-db
 # Ingests 8273-frame Sonoma VBO → exercises 56 endpoints → 51 assertions
 ```
+
+### Run the Android native client
+
+Jetpack Compose app in [`android-app/`](android-app/) — same Flask bridge as the Vue PWA ([`src/pwa/`](src/pwa/)). Build with `./gradlew :app:assembleDebug`, install with `./gradlew :app:installDebug`. Full setup (JDK 17, SDK, `local.properties`, bridge URL for emulator vs Pixel) is documented in [`android-app/README.md`](android-app/README.md).
 
 ### ADK paddock Q&A
 
@@ -477,10 +482,8 @@ The May 23, 2026 Sonoma Raceway field test is the load-bearing milestone.
 
 ## Frozen artefacts
 
-`android/` and `android-app/` contain the v1 Flutter + native Kotlin
-implementation. No longer the active frontend — see
-[ADR-016](docs/adr/016-can-bus-ingest-and-frontend-pivot.md). Both will
-be removed once `pitwall-web` reaches feature parity.
+- **`android/`** — v1 Flutter implementation; frozen legacy — see [ADR-016](docs/adr/016-can-bus-ingest-and-frontend-pivot.md). Scheduled for removal once full frontend parity is elsewhere.
+- **`android-app/`** — **active** Kotlin/Jetpack Compose shell that mirrors the Vue PWA ([`src/pwa/`](src/pwa/)), same HTTP bridge. Not frozen; see [`android-app/README.md`](android-app/README.md).
 
 ## Team 2 (Intermediate, BMW M3)
 

@@ -1,4 +1,1 @@
-# Add project-specific ProGuard rules here. By default, keep Retrofit and kotlinx.serialization models.
--keep,allowobfuscation,allowshrinking class kotlin.Metadata { *; }
--dontwarn okhttp3.**
--dontwarn okio.**
+# Pitwall Android — add rules when minify is enabled for release.
