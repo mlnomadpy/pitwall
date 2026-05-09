@@ -230,6 +230,20 @@ internal fun Application.configureStandaloneBridgeRoutes(
             )
         }
 
+        post("/session/{sid}/capabilities/recompute") {
+            val sid = context.parameters["sid"] ?: return@post context.respond(HttpStatusCode.BadRequest)
+            if (!isSafeSessionId(sid)) return@post context.respond(HttpStatusCode.BadRequest)
+            val n = runtime.duck.withConnection {
+                runtime.duck.computeCapabilities(this, sid)
+            }
+            context.respond(
+                kotlinx.serialization.json.buildJsonObject {
+                    put("session_id", JsonPrimitive(sid))
+                    put("capabilities_count", JsonPrimitive(n))
+                },
+            )
+        }
+
         get("/session/{sid}/export.parquet") {
             val sid = context.parameters["sid"] ?: return@get context.respond(HttpStatusCode.BadRequest)
             if (!isSafeSessionId(sid)) return@get context.respond(HttpStatusCode.BadRequest)
@@ -355,7 +369,24 @@ internal fun Application.configureStandaloneBridgeRoutes(
         }
 
         get("/signals/registry") {
-            context.respondText("""{"signals":[],"count":0}""", ContentType.Application.Json)
+            val includeCan =
+                context.request.queryParameters["include_can_state"]?.equals("true", ignoreCase = true) == true
+            val signalsArray =
+                runtime.duck.withConnection {
+                    runtime.duck.querySignalsRegistry(this)
+                }
+            context.respond(
+                buildJsonObject {
+                    put("count", JsonPrimitive(signalsArray.size))
+                    put("signals", signalsArray)
+                    if (includeCan) {
+                        put(
+                            "can_state",
+                            EmbeddedNativeCanState.snapshotJson(runtime.activeSessionId.get(), runtime.context),
+                        )
+                    }
+                },
+            )
         }
 
         get("/diagnostics/llm_friction") {

@@ -2,6 +2,7 @@ package com.pitwall.bridge.ktor
 
 import android.content.Context
 import android.util.Log
+import com.pitwall.bridge.ktor.embedded.EmbeddedBridgeRegistry
 import com.pitwall.bridge.ktor.embedded.EmbeddedCueBroadcaster
 import com.pitwall.bridge.ktor.embedded.EmbeddedDuckDb
 import com.pitwall.bridge.ktor.embedded.EmbeddedSessionRepository
@@ -16,6 +17,7 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.io.File
@@ -56,6 +58,17 @@ object PitwallEmbeddedBridge {
 
         val dbFile = File(context.filesDir, "pitwall_embedded.duckdb")
         val duck = EmbeddedDuckDb(dbFile)
+        runBlocking(Dispatchers.IO) {
+            duck.withConnection {
+                try {
+                    val json =
+                        context.assets.open("registry/obd2_pids.json").bufferedReader().use { it.readText() }
+                    duck.seedSignalRegistry(this, json)
+                } catch (e: Exception) {
+                    Log.w(TAG, "signal_registry seed skipped (assets/registry/obd2_pids.json)", e)
+                }
+            }
+        }
         val sessions = EmbeddedSessionRepository(duck)
         val cues = EmbeddedCueBroadcaster()
         val activeSessionId = AtomicReference<String?>(null)
@@ -75,6 +88,7 @@ object PitwallEmbeddedBridge {
             sessionBundles = sessionBundles,
             burstHistory = burstHistory,
         )
+        EmbeddedBridgeRegistry.attach(runtime)
 
         val server = embeddedServer(CIO, host = "127.0.0.1", port = 8765) {
             install(ContentNegotiation) {
@@ -90,5 +104,6 @@ object PitwallEmbeddedBridge {
     fun stop() {
         engine?.stop(gracePeriodMillis = 200, timeoutMillis = 1000)
         engine = null
+        EmbeddedBridgeRegistry.detach()
     }
 }

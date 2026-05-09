@@ -85,6 +85,8 @@ dependencies {
     implementation(project(":pitwall-bridge-ktor"))
     implementation(libs.androidx.core.ktx)
     implementation("androidx.activity:activity:1.9.3")
+    /** USB serial (CDC/FTDI/…); Phase-1 bench read — [felHR85/UsbSerial](https://github.com/felHR85/UsbSerial) */
+    implementation("com.github.felHR85:UsbSerial:6.1.0")
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)

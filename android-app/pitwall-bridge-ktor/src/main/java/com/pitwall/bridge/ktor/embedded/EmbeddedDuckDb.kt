@@ -4,17 +4,24 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Types
+import kotlin.math.max
 
 /**
  * Embedded DuckDB (JDBC) mirroring the Flask bridge catalog/tables needed for the PWA offline.
@@ -99,8 +106,257 @@ class EmbeddedDuckDb(private val dbFile: File) {
                     ended_at      TIMESTAMP,
                     note          VARCHAR
                 );
+                CREATE SEQUENCE IF NOT EXISTS signal_registry_id_seq;
+                CREATE TABLE IF NOT EXISTS signal_registry (
+                    signal_id     INTEGER PRIMARY KEY DEFAULT nextval('signal_registry_id_seq'),
+                    name          VARCHAR UNIQUE NOT NULL,
+                    units         VARCHAR,
+                    semantics     VARCHAR,
+                    "group"       VARCHAR,
+                    expected_hz   DOUBLE,
+                    min_useful_hz DOUBLE,
+                    discovery     VARCHAR,
+                    obd2_pid      VARCHAR,
+                    discovered_at TIMESTAMP DEFAULT now()
+                );
+                CREATE TABLE IF NOT EXISTS telemetry_signals (
+                    session_id  VARCHAR NOT NULL,
+                    signal_id   INTEGER NOT NULL,
+                    t           DOUBLE  NOT NULL,
+                    value       DOUBLE  NOT NULL,
+                    PRIMARY KEY (session_id, signal_id, t)
+                );
+                CREATE INDEX IF NOT EXISTS idx_signals_sess_sig_t
+                    ON telemetry_signals (session_id, signal_id, t);
+                CREATE TABLE IF NOT EXISTS session_capabilities (
+                    session_id  VARCHAR NOT NULL,
+                    signal_id   INTEGER NOT NULL,
+                    n_samples   INTEGER NOT NULL,
+                    mean_hz     DOUBLE NOT NULL,
+                    t_start     DOUBLE NOT NULL,
+                    t_end       DOUBLE NOT NULL,
+                    PRIMARY KEY (session_id, signal_id)
+                );
                 """.trimIndent(),
             )
+        }
+    }
+
+    private val seedJson =
+        Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
+
+    /** Idempotent seed from Flask [`obd2_pids.json`](../../../../../data/registry/obd2_pids.json). */
+    fun seedSignalRegistry(conn: Connection, jsonText: String): Int {
+        val root = seedJson.parseToJsonElement(jsonText).jsonObject
+        val arr = root["signals"]?.jsonArray ?: return 0
+        val sql =
+            """
+            INSERT OR IGNORE INTO signal_registry
+                (name, units, semantics, "group", expected_hz, min_useful_hz, discovery, obd2_pid)
+            VALUES (?,?,?,?,?,?,?,?)
+            """.trimIndent()
+        var inserted = 0
+        for (el in arr) {
+            val o = el.jsonObject
+            val name = o["name"]?.jsonPrimitive?.content ?: continue
+            conn.prepareStatement(sql).use { ps ->
+                ps.setString(1, name)
+                setNullableString(ps, 2, o["units"]?.jsonPrimitive?.content)
+                setNullableString(ps, 3, o["semantics"]?.jsonPrimitive?.content)
+                setNullableString(ps, 4, o["group"]?.jsonPrimitive?.content)
+                val exp = o["expected_hz"]?.jsonPrimitive?.doubleOrNull
+                val minU = o["min_useful_hz"]?.jsonPrimitive?.doubleOrNull
+                if (exp != null) ps.setDouble(5, exp) else ps.setNull(5, Types.DOUBLE)
+                if (minU != null) ps.setDouble(6, minU) else ps.setNull(6, Types.DOUBLE)
+                ps.setString(7, o["discovery"]?.jsonPrimitive?.content ?: "static_seed")
+                setNullableString(ps, 8, o["obd2_pid"]?.jsonPrimitive?.content)
+                val n = ps.executeUpdate()
+                if (n > 0) inserted++
+            }
+        }
+        return inserted
+    }
+
+    private fun setNullableString(ps: PreparedStatement, idx: Int, s: String?) {
+        if (s == null) ps.setNull(idx, Types.VARCHAR) else ps.setString(idx, s)
+    }
+
+    fun resolveSignalId(conn: Connection, name: String): Int {
+        conn.prepareStatement("SELECT signal_id FROM signal_registry WHERE name = ?").use { ps ->
+            ps.setString(1, name)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) return rs.getInt(1)
+            }
+        }
+        conn.prepareStatement(
+            """
+            INSERT INTO signal_registry (name, discovery)
+            VALUES (?, 'discovered')
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, name)
+            ps.executeUpdate()
+        }
+        conn.prepareStatement("SELECT signal_id FROM signal_registry WHERE name = ?").use { ps ->
+            ps.setString(1, name)
+            ps.executeQuery().use { rs ->
+                if (rs.next()) return rs.getInt(1)
+            }
+        }
+        throw IllegalStateException("signal_registry: failed to resolve $name")
+    }
+
+    fun appendTelemetrySignals(
+        conn: Connection,
+        sessionId: String,
+        samples: List<Triple<String, Double, Double>>,
+    ): Int {
+        if (samples.isEmpty()) return 0
+        val sql =
+            """
+            INSERT INTO telemetry_signals VALUES (?,?,?,?)
+            ON CONFLICT (session_id, signal_id, t) DO UPDATE SET value = excluded.value
+            """.trimIndent()
+        var n = 0
+        for ((sigName, t, v) in samples) {
+            val sid = resolveSignalId(conn, sigName)
+            conn.prepareStatement(sql).use { ps ->
+                ps.setString(1, sessionId)
+                ps.setInt(2, sid)
+                ps.setDouble(3, t)
+                ps.setDouble(4, v)
+                ps.executeUpdate()
+                n++
+            }
+        }
+        return n
+    }
+
+    /**
+     * Rewrites [`session_capabilities`](../../../../../src/pitwall/db.py) for one session from
+     * wide [`telemetry`] plus grouped [`telemetry_signals`] — mirrors Flask `compute_capabilities`.
+     */
+    fun computeCapabilities(conn: Connection, sessionId: String): Int {
+        conn.prepareStatement("DELETE FROM session_capabilities WHERE session_id = ?").use { ps ->
+            ps.setString(1, sessionId)
+            ps.executeUpdate()
+        }
+        var rowsWritten = 0
+
+        conn.prepareStatement(
+            "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM telemetry WHERE session_id = ?",
+        ).use { ps ->
+            ps.setString(1, sessionId)
+            ps.executeQuery().use { rs ->
+                if (!rs.next()) return@use
+                val n = rs.getLong(1)
+                val tStart = rs.getObject(2) as? Double
+                val tEnd = rs.getObject(3) as? Double
+                if (n <= 0L || tStart == null || tEnd == null) return@use
+                val duration = max(tEnd - tStart, 1e-6)
+                val meanHz = n.toDouble() / duration
+                val placeholders = EMBEDDED_WIDE_SIGNAL_NAMES.joinToString(",") { "?" }
+                val sigSql =
+                    "SELECT signal_id FROM signal_registry WHERE name IN ($placeholders)"
+                conn.prepareStatement(sigSql).use { sigPs ->
+                    EMBEDDED_WIDE_SIGNAL_NAMES.forEachIndexed { i, name ->
+                        sigPs.setString(i + 1, name)
+                    }
+                    sigPs.executeQuery().use { srs ->
+                        while (srs.next()) {
+                            val sigId = srs.getInt(1)
+                            conn.prepareStatement(
+                                "INSERT INTO session_capabilities VALUES (?,?,?,?,?,?)",
+                            ).use { ins ->
+                                ins.setString(1, sessionId)
+                                ins.setInt(2, sigId)
+                                ins.setLong(3, n)
+                                ins.setDouble(4, meanHz)
+                                ins.setDouble(5, tStart)
+                                ins.setDouble(6, tEnd)
+                                ins.executeUpdate()
+                                rowsWritten++
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        conn.prepareStatement(
+            """
+            SELECT signal_id, COUNT(*), MIN(t), MAX(t)
+            FROM telemetry_signals
+            WHERE session_id = ?
+            GROUP BY signal_id
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, sessionId)
+            ps.executeQuery().use { rs ->
+                while (rs.next()) {
+                    val sigId = rs.getInt(1)
+                    val ns = rs.getLong(2)
+                    val ts = rs.getDouble(3)
+                    val te = rs.getDouble(4)
+                    val duration = max(te - ts, 1e-6)
+                    val hz = ns.toDouble() / duration
+                    conn.prepareStatement(
+                        """
+                        INSERT INTO session_capabilities VALUES (?,?,?,?,?,?)
+                        ON CONFLICT (session_id, signal_id) DO UPDATE SET
+                            n_samples = excluded.n_samples,
+                            mean_hz = excluded.mean_hz,
+                            t_start = excluded.t_start,
+                            t_end = excluded.t_end
+                        """.trimIndent(),
+                    ).use { ups ->
+                        ups.setString(1, sessionId)
+                        ups.setInt(2, sigId)
+                        ups.setLong(3, ns)
+                        ups.setDouble(4, hz)
+                        ups.setDouble(5, ts)
+                        ups.setDouble(6, te)
+                        ups.executeUpdate()
+                        rowsWritten++
+                    }
+                }
+            }
+        }
+        return rowsWritten
+    }
+
+    fun querySignalsRegistry(conn: Connection): JsonArray {
+        conn.prepareStatement(
+            """
+            SELECT signal_id, name, units, semantics, "group",
+                   expected_hz, min_useful_hz, discovery, obd2_pid
+            FROM signal_registry ORDER BY "group", name
+            """.trimIndent(),
+        ).use { ps ->
+            ps.executeQuery().use { rs ->
+                return buildJsonArray {
+                    while (rs.next()) {
+                        add(
+                            buildJsonObject {
+                                put("signal_id", JsonPrimitive(rs.getInt(1)))
+                                put("name", JsonPrimitive(rs.getString(2)))
+                                put("units", rs.getString(3)?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("semantics", rs.getString(4)?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("group", rs.getString(5)?.let { JsonPrimitive(it) } ?: JsonNull)
+                                val eh = rs.getObject(6) as Double?
+                                put("expected_hz", if (eh != null) JsonPrimitive(eh) else JsonNull)
+                                val mu = rs.getObject(7) as Double?
+                                put("min_useful_hz", if (mu != null) JsonPrimitive(mu) else JsonNull)
+                                put("discovery", rs.getString(8)?.let { JsonPrimitive(it) } ?: JsonNull)
+                                put("obd2_pid", rs.getString(9)?.let { JsonPrimitive(it) } ?: JsonNull)
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -355,5 +611,23 @@ class EmbeddedDuckDb(private val dbFile: File) {
                 ps.executeUpdate()
             }
         }
+    }
+
+    private companion object {
+        /** Matches Flask [`WIDE_SIGNAL_NAMES`](../../../../../src/pitwall/db.py). */
+        val EMBEDDED_WIDE_SIGNAL_NAMES: List<String> =
+            listOf(
+                "distance_m",
+                "speed_ms",
+                "g_lat",
+                "g_long",
+                "combo_g",
+                "brake_bar",
+                "throttle_pct",
+                "steering_deg",
+                "rpm",
+                "lat",
+                "lon",
+            )
     }
 }

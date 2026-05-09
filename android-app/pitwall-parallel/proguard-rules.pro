@@ -5,3 +5,4 @@
 
 -keep class androidx.room.** { *; }
 -keep class com.google.mediapipe.** { *; }
+-keep class com.felhr.** { *; }
