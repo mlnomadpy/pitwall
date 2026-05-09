@@ -415,6 +415,8 @@ internal fun Application.configureStandaloneBridgeRoutes(
             }
         }
 
+        embeddedFlaskCompatRoutes(runtime)
+
         route("/session/{sid}") {
             fun bundleSection(sid: String, section: String): Pair<HttpStatusCode, JsonObject> {
                 if (!isSafeSessionId(sid)) {

@@ -5,10 +5,10 @@ import kotlin.math.hypot
 
 /**
  * Ports [`can_reader.py`](../../../../../src/pitwall/features/telemetry/can_reader.py)
- * `_consume` behaviour: AIM signed-slot recovery, canonical wide mappings, tall-store pairs,
- * and simplified distance integration from **speed_ms** (full Kalman DR deferred).
+ * `_consume`: AIM mappings + tall sink + [**DeadReckoner**](DeadReckoner.kt) for `distance_m`
+ * (matches Python Kalman fusion).
  */
-class AimMxPipeline {
+class AimMxPipeline(private val dr: DeadReckoner = DeadReckoner()) {
 
     private val signedRecovery =
         setOf(
@@ -64,23 +64,17 @@ class AimMxPipeline {
     private var lat = 0.0
     private var lon = 0.0
 
-    /** Integrated distance from CAN speed (Termux path also fuses GPS via DeadReckoner). */
-    private var distanceM = 0.0
-    private var lastWallSec = -1.0
     private var lastFlushedDistance = -1.0
 
     var seenAny = false
         private set
 
+    fun deadReckoner(): DeadReckoner = dr
+
     /**
-     * Process one decoded DBC dict (physical units). Updates wide buffer, returns tall rows
-     * `(signal_name, timestamp, value)` matching Flask `_sink_tall` naming.
+     * Process one decoded DBC dict (physical units). Updates wide buffer, returns tall rows.
      */
     fun consumeDecoded(decoded: Map<String, Double>, timestampSec: Double): List<Triple<String, Double, Double>> {
-        if (lastWallSec < 0) lastWallSec = timestampSec
-        val dt = (timestampSec - lastWallSec).coerceAtLeast(0.0)
-        lastWallSec = timestampSec
-
         val tall = ArrayList<Triple<String, Double, Double>>()
         val wideUpdates = mutableMapOf<String, Double>()
 
@@ -123,8 +117,22 @@ class AimMxPipeline {
             wideUpdates["lon"]?.let { lon = it }
         }
 
-        if (dt > 0 && speedMs > 0) {
-            distanceM += speedMs * dt
+        var advanced = false
+        if (wideUpdates.containsKey("g_long")) {
+            dr.updateImu(timestampSec, wideUpdates["g_long"]!!)
+            advanced = true
+        }
+        if (wideUpdates.containsKey("speed_ms")) {
+            dr.updateSpeed(timestampSec, wideUpdates["speed_ms"]!!)
+            advanced = true
+        }
+        if (wideUpdates.containsKey("distance_m")) {
+            val rawD = wideUpdates["distance_m"]!!
+            dr.updateDistance(timestampSec, rawD)
+            tall.add(Triple("gps_distance_m", timestampSec, rawD))
+            advanced = true
+        } else if (advanced && dr.timeSec != null) {
+            dr.predictTo(timestampSec)
         }
 
         return tall
@@ -132,19 +140,20 @@ class AimMxPipeline {
 
     fun shouldFlushWide(): Boolean {
         if (!seenAny) return false
+        val d = dr.distanceM
         if (lastFlushedDistance < 0) return true
-        return abs(distanceM - lastFlushedDistance) >= 0.001
+        return abs(d - lastFlushedDistance) >= 0.001
     }
 
     fun markWideFlushed() {
-        lastFlushedDistance = distanceM
+        lastFlushedDistance = dr.distanceM
     }
 
     fun flushWideRow(timestampSec: Double): EmbeddedDuckDb.FrameRow {
         val combo = hypot(gLat, gLong)
         return EmbeddedDuckDb.FrameRow(
             timestamp = timestampSec,
-            distanceM = distanceM,
+            distanceM = dr.distanceM,
             speedMs = speedMs,
             gLat = gLat,
             gLong = gLong,
@@ -156,5 +165,20 @@ class AimMxPipeline {
             lat = lat,
             lon = lon,
         )
+    }
+
+    fun resetSession() {
+        dr.reset()
+        lastFlushedDistance = -1.0
+        seenAny = false
+        rpm = 0.0
+        throttle = 0.0
+        speedMs = 0.0
+        steer = 0.0
+        brake = 0.0
+        gLat = 0.0
+        gLong = 0.0
+        lat = 0.0
+        lon = 0.0
     }
 }

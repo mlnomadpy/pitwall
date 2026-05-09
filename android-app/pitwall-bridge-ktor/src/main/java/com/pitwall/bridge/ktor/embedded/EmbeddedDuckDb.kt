@@ -360,6 +360,308 @@ class EmbeddedDuckDb(private val dbFile: File) {
         }
     }
 
+    /** Flask `GET /session/<sid>/capabilities` (coaches_* left empty on embedded). */
+    fun querySessionCapabilitiesJson(conn: Connection, sessionId: String): JsonObject? {
+        data class CapRow(
+            val name: String,
+            val nSamples: Long,
+            val meanHz: Double,
+            val minUseful: Double?,
+            val tStart: Double,
+            val tEnd: Double,
+        )
+        val rows = ArrayList<CapRow>()
+        conn.prepareStatement(
+            """
+            SELECT sr.name, sc.n_samples, sc.mean_hz, sr.min_useful_hz, sc.t_start, sc.t_end
+            FROM session_capabilities sc
+            JOIN signal_registry sr USING(signal_id)
+            WHERE sc.session_id = ?
+            ORDER BY sr.name
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setString(1, sessionId)
+            ps.executeQuery().use { rs ->
+                while (rs.next()) {
+                    rows.add(
+                        CapRow(
+                            name = rs.getString(1),
+                            nSamples = rs.getLong(2),
+                            meanHz = rs.getDouble(3),
+                            minUseful = rs.getObject(4) as Double?,
+                            tStart = rs.getDouble(5),
+                            tEnd = rs.getDouble(6),
+                        ),
+                    )
+                }
+            }
+        }
+        if (rows.isEmpty()) return null
+        val tStarts = rows.map { it.tStart }
+        val tEnds = rows.map { it.tEnd }
+        val durationS = if (tStarts.isNotEmpty()) (tEnds.maxOrNull()!! - tStarts.minOrNull()!!) else 0.0
+        val signalsArr = buildJsonArray {
+            for (r in rows) {
+                val useful = r.minUseful == null || r.meanHz >= r.minUseful
+                add(
+                    buildJsonObject {
+                        put("name", JsonPrimitive(r.name))
+                        put("n_samples", JsonPrimitive(r.nSamples.toInt()))
+                        put("mean_hz", JsonPrimitive(r.meanHz))
+                        put("useful", JsonPrimitive(useful))
+                    },
+                )
+            }
+        }
+        return buildJsonObject {
+            put("session_id", JsonPrimitive(sessionId))
+            put("duration_s", JsonPrimitive(durationS))
+            put("signals", signalsArr)
+            put("coaches_available", JsonArray(emptyList()))
+            put("coaches_disabled", JsonArray(emptyList()))
+        }
+    }
+
+    /**
+     * Simplified Flask `GET /session/<sid>/signals`: wide-table columns + tall store,
+     * axis `time`/`gps`/`t` from telemetry timestamps; `interp` hold or lerp on aligned axis_ts.
+     */
+    fun querySessionSignalsJson(
+        conn: Connection,
+        sessionId: String,
+        names: List<String>,
+        axis: String,
+        interpKind: String,
+        rateHz: Double,
+        tFromIn: Double?,
+        tToIn: Double?,
+    ): JsonObject? {
+        val nWide =
+            conn.prepareStatement("SELECT COUNT(*) FROM telemetry WHERE session_id = ?").use { ps ->
+                ps.setString(1, sessionId)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else 0L }
+            }
+        val nTall =
+            conn.prepareStatement("SELECT COUNT(*) FROM telemetry_signals WHERE session_id = ?").use { ps ->
+                ps.setString(1, sessionId)
+                ps.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else 0L }
+            }
+        if (nWide == 0L && nTall == 0L) return null
+
+        var tFrom = tFromIn
+        var tTo = tToIn
+        if (tFrom == null || tTo == null) {
+            val bounds = mutableListOf<Pair<Double, Double>>()
+            conn.prepareStatement(
+                "SELECT MIN(timestamp), MAX(timestamp) FROM telemetry WHERE session_id = ?",
+            ).use { ps ->
+                ps.setString(1, sessionId)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val a = rs.getObject(1) as? Double
+                        val b = rs.getObject(2) as? Double
+                        if (a != null && b != null) bounds.add(a to b)
+                    }
+                }
+            }
+            conn.prepareStatement(
+                "SELECT MIN(t), MAX(t) FROM telemetry_signals WHERE session_id = ?",
+            ).use { ps ->
+                ps.setString(1, sessionId)
+                ps.executeQuery().use { rs ->
+                    if (rs.next()) {
+                        val a = rs.getObject(1) as? Double
+                        val b = rs.getObject(2) as? Double
+                        if (a != null && b != null) bounds.add(a to b)
+                    }
+                }
+            }
+            if (bounds.isNotEmpty()) {
+                if (tFrom == null) tFrom = bounds.minOf { it.first }
+                if (tTo == null) tTo = bounds.maxOf { it.second }
+            }
+        }
+        if (tFrom == null || tTo == null) return null
+
+        val axisTs =
+            when {
+                rateHz > 0 -> {
+                    val step = 1.0 / rateHz
+                    val out = ArrayList<Double>()
+                    var t = tFrom
+                    while (t <= tTo + 1e-9) {
+                        out.add(t)
+                        t += step
+                    }
+                    out
+                }
+                axis.lowercase() in setOf("gps", "time", "t") -> {
+                    val sql =
+                        buildString {
+                            append("SELECT DISTINCT timestamp FROM telemetry WHERE session_id = ?")
+                            append(" AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp")
+                        }
+                    conn.prepareStatement(sql).use { ps ->
+                        ps.setString(1, sessionId)
+                        ps.setDouble(2, tFrom)
+                        ps.setDouble(3, tTo)
+                        ps.executeQuery().use { rs ->
+                            val out = ArrayList<Double>()
+                            while (rs.next()) out.add(rs.getDouble(1))
+                            out
+                        }
+                    }
+                }
+                else ->
+                    return buildJsonObject {
+                        put("error", JsonPrimitive("embedded: axis must be gps, time, t, or rate_hz>0"))
+                    }
+            }
+        if (axisTs.isEmpty()) {
+            return buildJsonObject {
+                put("session_id", JsonPrimitive(sessionId))
+                put("axis", JsonPrimitive(axis))
+                put("rate_hz", JsonPrimitive(rateHz))
+                put("interp", JsonPrimitive(interpKind))
+                put("t_from", JsonPrimitive(tFrom))
+                put("t_to", JsonPrimitive(tTo))
+                put("names", JsonArray(names.map { JsonPrimitive(it) }))
+                put("rows", JsonArray(emptyList()))
+                put("missing", JsonArray(emptyList()))
+                put("count", JsonPrimitive(0))
+            }
+        }
+
+        val wideCol =
+            mapOf(
+                "distance_m" to "distance_m",
+                "speed_ms" to "speed_ms",
+                "g_lat" to "g_lat",
+                "g_long" to "g_long",
+                "combo_g" to "combo_g",
+                "brake_bar" to "brake_bar",
+                "throttle_pct" to "throttle_pct",
+                "steering_deg" to "steering_deg",
+                "rpm" to "rpm",
+                "lat" to "lat",
+                "lon" to "lon",
+            )
+
+        for (nm in names) {
+            if (wideCol.containsKey(nm)) continue
+            conn.prepareStatement("SELECT 1 FROM signal_registry WHERE name = ? LIMIT 1").use { ps ->
+                ps.setString(1, nm)
+                ps.executeQuery().use { rs ->
+                    if (!rs.next()) {
+                        return buildJsonObject {
+                            put("error", JsonPrimitive("unknown signal: $nm"))
+                        }
+                    }
+                }
+            }
+        }
+
+        val series = LinkedHashMap<String, List<Pair<Double, Double>>>()
+        val missing = ArrayList<String>()
+        for (nm in names) {
+            val col = wideCol[nm]
+            if (col != null) {
+                val pts = ArrayList<Pair<Double, Double>>()
+                conn.prepareStatement(
+                    "SELECT timestamp, $col FROM telemetry WHERE session_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
+                ).use { ps ->
+                    ps.setString(1, sessionId)
+                    ps.setDouble(2, tFrom)
+                    ps.setDouble(3, tTo)
+                    ps.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            pts.add(rs.getDouble(1) to rs.getDouble(2))
+                        }
+                    }
+                }
+                series[nm] = pts
+                if (pts.isEmpty()) missing.add(nm)
+            } else {
+                val sid =
+                    conn.prepareStatement("SELECT signal_id FROM signal_registry WHERE name = ?").use { ps ->
+                        ps.setString(1, nm)
+                        ps.executeQuery().use { rs ->
+                            if (rs.next()) rs.getInt(1) else null
+                        }
+                    }
+                if (sid == null) {
+                    return buildJsonObject {
+                        put("error", JsonPrimitive("unknown signal: $nm"))
+                    }
+                }
+                val pts = ArrayList<Pair<Double, Double>>()
+                conn.prepareStatement(
+                    """
+                    SELECT t, value FROM telemetry_signals
+                    WHERE session_id = ? AND signal_id = ? AND t >= ? AND t <= ? ORDER BY t
+                    """.trimIndent(),
+                ).use { ps ->
+                    ps.setString(1, sessionId)
+                    ps.setInt(2, sid)
+                    ps.setDouble(3, tFrom)
+                    ps.setDouble(4, tTo)
+                    ps.executeQuery().use { rs ->
+                        while (rs.next()) {
+                            pts.add(rs.getDouble(1) to rs.getDouble(2))
+                        }
+                    }
+                }
+                series[nm] = pts
+                if (pts.isEmpty()) missing.add(nm)
+            }
+        }
+
+        fun interpAt(t: Double, pts: List<Pair<Double, Double>>): Double? {
+            if (pts.isEmpty()) return null
+            if (pts.size == 1) return pts[0].second
+            var lo = 0
+            var hi = pts.size - 1
+            if (t <= pts[lo].first) return pts[lo].second
+            if (t >= pts[hi].first) return pts[hi].second
+            while (hi - lo > 1) {
+                val mid = (lo + hi) / 2
+                if (pts[mid].first <= t) lo = mid else hi = mid
+            }
+            val (t0, v0) = pts[lo]
+            val (t1, v1) = pts[hi]
+            return when (interpKind.lowercase()) {
+                "lerp" -> v0 + (v1 - v0) * ((t - t0) / (t1 - t0).coerceAtLeast(1e-12))
+                else -> v0
+            }
+        }
+
+        val rowsOut = buildJsonArray {
+            for (at in axisTs) {
+                add(
+                    buildJsonObject {
+                        put("t", JsonPrimitive(at))
+                        for (nm in names) {
+                            val pts = series[nm].orEmpty()
+                            put(nm, interpAt(at, pts)?.let { JsonPrimitive(it) } ?: JsonNull)
+                        }
+                    },
+                )
+            }
+        }
+        return buildJsonObject {
+            put("session_id", JsonPrimitive(sessionId))
+            put("axis", JsonPrimitive(axis))
+            put("rate_hz", JsonPrimitive(rateHz))
+            put("interp", JsonPrimitive(interpKind))
+            put("t_from", JsonPrimitive(tFrom))
+            put("t_to", JsonPrimitive(tTo))
+            put("names", JsonArray(names.map { JsonPrimitive(it) }))
+            put("rows", rowsOut)
+            put("missing", JsonArray(missing.map { JsonPrimitive(it) }))
+            put("count", JsonPrimitive(axisTs.size))
+        }
+    }
+
     fun countTelemetry(conn: Connection, sessionId: String): Long =
         conn.prepareStatement("SELECT COUNT(*) FROM telemetry WHERE session_id = ?").use { ps ->
             ps.setString(1, sessionId)
