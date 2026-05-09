@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.kotlin.kapt)
 }
 
 val localProps = Properties().apply {
@@ -32,6 +33,23 @@ android {
         // Optional: hosted pre-brief (Three.js / static) — WebView appends ?focus= & track=sonoma
         val webBrief = localProps.getProperty("WEB_BRIEF_BASE_URL", "")
         buildConfigField("String", "WEB_BRIEF_BASE_URL", "\"$webBrief\"")
+
+        val useEmbeddedBridge = localProps.getProperty("PITWALL_USE_EMBEDDED_BRIDGE", "false")
+            .equals("true", ignoreCase = true)
+        val llmModelPath = localProps.getProperty("PITWALL_LLM_MODEL_PATH", "")
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        buildConfigField("Boolean", "PITWALL_USE_EMBEDDED_BRIDGE", "$useEmbeddedBridge")
+        buildConfigField("String", "PITWALL_LLM_MODEL_PATH", "\"$llmModelPath\"")
+
+        val configuredApiBase = localProps.getProperty("PITWALL_API_BASE_URL", "http://10.0.2.2:8765")
+            .trim().trimEnd('/')
+        val effectiveApiBase = if (useEmbeddedBridge) {
+            "http://127.0.0.1:8765"
+        } else {
+            configuredApiBase
+        }
+        buildConfigField("String", "PITWALL_API_BASE_URL_EFFECTIVE", "\"$effectiveApiBase/\"")
     }
 
     buildTypes {
@@ -60,6 +78,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":pitwall-bridge-ktor"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
@@ -79,6 +98,11 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.retrofit.kotlinx.serialization)
     implementation(libs.okhttp.logging)
+    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    kapt(libs.androidx.room.compiler)
+    implementation(libs.duckdb.jdbc)
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

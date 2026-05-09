@@ -127,9 +127,10 @@ fun PaddockAppContent() {
             composable(MainTab.Garage.route) {
                 GarageScreen(
                     state = state,
-                    baseUrl = BuildConfig.PITWALL_API_BASE_URL,
+                    baseUrl = BuildConfig.PITWALL_API_BASE_URL_EFFECTIVE,
                     markers = vm.markers,
                     onRefreshBridge = { vm.refreshBridgeHealth() },
+                    onAnalyzeDemo = { vm.runAnalyzeDemo() },
                     onOpenPostSessionCatalog = { nav.navigate("post_session") },
                 )
             }

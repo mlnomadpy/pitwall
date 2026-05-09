@@ -22,3 +22,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "PitwallPaddock"
 include(":app")
+include(":pitwall-bridge-ktor")
+include(":pitwall-parallel")

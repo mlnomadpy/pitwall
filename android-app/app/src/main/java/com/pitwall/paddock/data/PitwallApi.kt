@@ -2,11 +2,16 @@ package com.pitwall.paddock.data
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
 
 interface PitwallApi {
     @GET("health")
     suspend fun health(): HealthResponse
+
+    @POST("analyze")
+    suspend fun analyze(@Body body: AnalyzeBurstRequest): AnalyzeBurstResponse
 }
 
 @Serializable

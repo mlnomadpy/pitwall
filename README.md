@@ -1,16 +1,16 @@
 # Pitwall — Trustable AI Racing Coach
 
-[![Tests](https://img.shields.io/badge/tests-358%20passed-2aa198?style=flat-square)](tests/)
-[![Smoke](https://img.shields.io/badge/smoke-51%20assertions-2aa198?style=flat-square)](tests/test_endpoints_smoke.py)
-[![Routes](https://img.shields.io/badge/routes-56-859900?style=flat-square)](docs/api.md)
-[![ADRs](https://img.shields.io/badge/ADRs-21-b58900?style=flat-square)](docs/adr/index.md)
-[![Agents](https://img.shields.io/badge/ADK%20agents-18-6c71c4?style=flat-square)](docs/adk-agent-architecture.md)
-[![PWA design](https://img.shields.io/badge/PWA%20design-38%20screens-d33682?style=flat-square)](docs/vue/README.md)
-[![Python](https://img.shields.io/badge/python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white)](#install)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Termux-1a3a52?style=flat-square)](#hardware)
-[![Field test](https://img.shields.io/badge/Sonoma%20field%20test-May%2023%2C%202026-cb4b16?style=flat-square)](#status)
-[![License](https://img.shields.io/badge/license-TBD-555555?style=flat-square)](#license)
-[![Explainer](https://img.shields.io/badge/explainer-live-0058bd?style=flat-square)](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)
+[Tests](tests/)
+[Smoke](tests/test_endpoints_smoke.py)
+[Routes](docs/api.md)
+[ADRs](docs/adr/index.md)
+[Agents](docs/adk-agent-architecture.md)
+[PWA design](docs/vue/README.md)  
+[Python](#install)
+[Platform](#hardware)
+[Field test](#status)
+[License](#license)
+[Explainer](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)
 
 > **[→ Project Explainer](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)** — architecture, cue distribution, Sonoma corner doctrine, team.
 
@@ -18,20 +18,21 @@ A real-time, on-device coaching system for track-day drivers. Runs on a
 Pixel 10 via Termux: ingests CAN telemetry over USB from the car's OBD-II
 port, makes coaching decisions with on-device Gemma 4 (via litert-lm),
 and pairs with a Vue PWA (`pitwall-web`, sibling repo, fully designed in
-[`docs/vue/`](docs/vue/README.md), implementation pending) for
+`[docs/vue/](docs/vue/README.md)`, implementation pending) for
 presentation. Built for the May 23, 2026 Sonoma Raceway field test —
 **no cloud dependency** for the core coaching loop.
 
 Three LLM tiers, all on-device:
 
-| Tier | Model | Runtime | When |
-|---|---|---|---|
-| Hot path | — | `sonic_model` + canonical phrases | In-drive, < 50 ms |
-| Warm path | Gemma 4 E2B | `litert_lm.Engine` (in-process) | In-drive brief cues, < 100 ms |
-| Paddock | Gemma 4 E4B | `lit serve` + 18 ADK agents | Pre-brief, debrief, Q&A, 2–15 s |
 
-<details>
-<summary><strong>Table of contents</strong></summary>
+| Tier      | Model       | Runtime                           | When                            |
+| --------- | ----------- | --------------------------------- | ------------------------------- |
+| Hot path  | —           | `sonic_model` + canonical phrases | In-drive, < 50 ms               |
+| Warm path | Gemma 4 E2B | `litert_lm.Engine` (in-process)   | In-drive brief cues, < 100 ms   |
+| Paddock   | Gemma 4 E4B | `lit serve` + 18 ADK agents       | Pre-brief, debrief, Q&A, 2–15 s |
+
+
+**Table of contents**
 
 - [Status](#status)
 - [What this is / what this isn't](#what-this-is--what-this-isnt)
@@ -53,7 +54,7 @@ Three LLM tiers, all on-device:
 - [Changelog](#changelog)
 - [License](#license)
 
-</details>
+
 
 The architecture is documented across 21 ADRs. The four most recent focus on the ADK paddock backend:
 [ADR-018](docs/adr/018-field-readiness-blockers-and-pedagogy-tuning.md)
@@ -84,29 +85,29 @@ driver skill level.
 ## Status
 
 - **Bridge**: shipped. 56 HTTP endpoints, 358 tests passing, 0 skipped,
-  smoke-tested end-to-end against a real 8273-frame Sonoma VBO with 51
-  assertions green.
+smoke-tested end-to-end against a real 8273-frame Sonoma VBO with 51
+assertions green.
 - **CAN pipeline**: shipped. `python-can` reader + simulator + DBC; 6
-  round-trip tests on `interface='virtual'`. USB-CAN device enumeration
-  via pyserial — adapter VID:PID lookup table covers CANable, Macchina
-  M2, Korlan USB2CAN, PEAK, Kvaser, FTDI ELM327, CH340.
+round-trip tests on `interface='virtual'`. USB-CAN device enumeration
+via pyserial — adapter VID:PID lookup table covers CANable, Macchina
+M2, Korlan USB2CAN, PEAK, Kvaser, FTDI ELM327, CH340.
 - **Termux foreground service**: shipped. Drop-in install package in
-  [`deploy/termux/`](deploy/termux/INSTALL.md).
+`[deploy/termux/](deploy/termux/INSTALL.md)`.
 - **Three-tier coach architecture (ADR-017)**: shipped. In-drive cues
-  are canonical phrases (no LLM); paddock brief + debrief are
-  Gemma-via-litert-lm; cloud Gemini removed entirely.
+are canonical phrases (no LLM); paddock brief + debrief are
+Gemma-via-litert-lm; cloud Gemini removed entirely.
 - **Field-readiness blockers + pedagogy tuning (ADR-018)**: shipped
-  2026-04-30. LLM friction sink, audio ducker, 1D Kalman dead-reckoning,
-  intermediate-driver pedagogy refit.
+2026-04-30. LLM friction sink, audio ducker, 1D Kalman dead-reckoning,
+intermediate-driver pedagogy refit.
 - **ADK multi-agent paddock backend (ADR-019–021)**: shipped 2026-05-01.
-  18 agents, 15 tools, `PitwallOrchestrator(BaseAgent)`, `DebriefPipeline`
-  with `ParallelAgent`, `BriefPipeline`, `Runner` + persistent sessions
-  for KV cache reuse, `PitwallTracingPlugin` + `agent_traces` DuckDB
-  table, `AgentMetaAgent`, multi-turn Q&A (`/coach/ask`). All phases
-  shipped ahead of original post-Sonoma schedule.
-- **`pitwall-web` Vue PWA**: design-only. 54 markdown files in
-  [`docs/vue/`](docs/vue/README.md) — 38 screens specced, foundation
-  + systems + sprite spec + character bible + Gemma-controlled emotion
+18 agents, 15 tools, `PitwallOrchestrator(BaseAgent)`, `DebriefPipeline`
+with `ParallelAgent`, `BriefPipeline`, `Runner` + persistent sessions
+for KV cache reuse, `PitwallTracingPlugin` + `agent_traces` DuckDB
+table, `AgentMetaAgent`, multi-turn Q&A (`/coach/ask`). All phases
+shipped ahead of original post-Sonoma schedule.
+- `**pitwall-web` Vue PWA**: design-only. 54 markdown files in
+`[docs/vue/](docs/vue/README.md)` — 38 screens specced, foundation
+  - systems + sprite spec + character bible + Gemma-controlled emotion
   taxonomy + god navigation map. Code lives in a future sibling repo;
   implementation hasn't started.
 - **Sonoma field test**: May 23, 2026.
@@ -341,39 +342,44 @@ PitwallOrchestrator(BaseAgent)         ← keyword classifier, no LLM routing
 ```
 
 **Key properties:**
+
 - All 15 tools query DuckDB `read_only=True` with `LIMIT 500` enforced
 - `PitwallTracingPlugin` logs every agent run + tool call to `agent_traces` DuckDB table
 - Persistent ADK sessions per driver — `lit serve` clones KV cache across calls (~30–50% prefill reduction on warm requests)
 - `POST /session/start` triggers `reset_driver_session()` for a clean session baseline
 
-See [`docs/adk-agent-architecture.md`](docs/adk-agent-architecture.md) for the full topology, tool specs, KV cache design, and agent telemetry schema.
+See `[docs/adk-agent-architecture.md](docs/adk-agent-architecture.md)` for the full topology, tool specs, KV cache design, and agent telemetry schema.
 
 ## Performance budget
 
-| Path | Budget | Notes |
-|---|---|---|
-| Hot path — sonic_model cue | **< 50 ms** | [ADR-002](docs/adr/002-split-brain-arbiter.md) |
-| In-drive canonical phrase (RuleCoach) | **< 100 ms** | [ADR-017](docs/adr/017-three-tier-coach-architecture.md) |
-| Pre-brief LLM (Gemma 4 E2B, cold) | **6–8 s** | measured on Apple Silicon CPU |
-| Post-session debrief LLM (E2B) | **8–12 s** | measured |
-| ADK paddock — cold call (new session) | **2–15 s** | E4B via `lit serve`, Tensor G5 NPU |
-| ADK paddock — warm call (persistent session) | **~30–50% less** | KV cache clone; session instructions pre-filled |
-| CAN frame → DuckDB row | **< 5 ms** | `src/pitwall/features/telemetry/can_reader.py` |
-| Agent trace DuckDB write | **< 1 ms** | batch drain after `run_adk()` |
-| End-to-end smoke (8273 frames + every endpoint) | **~12 s** | `tests/test_endpoints_smoke.py` |
-| Parquet export (90-min session) | **< 500 ms** | `GET /session/<sid>/export.parquet` |
+
+| Path                                            | Budget           | Notes                                                    |
+| ----------------------------------------------- | ---------------- | -------------------------------------------------------- |
+| Hot path — sonic_model cue                      | **< 50 ms**      | [ADR-002](docs/adr/002-split-brain-arbiter.md)           |
+| In-drive canonical phrase (RuleCoach)           | **< 100 ms**     | [ADR-017](docs/adr/017-three-tier-coach-architecture.md) |
+| Pre-brief LLM (Gemma 4 E2B, cold)               | **6–8 s**        | measured on Apple Silicon CPU                            |
+| Post-session debrief LLM (E2B)                  | **8–12 s**       | measured                                                 |
+| ADK paddock — cold call (new session)           | **2–15 s**       | E4B via `lit serve`, Tensor G5 NPU                       |
+| ADK paddock — warm call (persistent session)    | **~30–50% less** | KV cache clone; session instructions pre-filled          |
+| CAN frame → DuckDB row                          | **< 5 ms**       | `src/pitwall/features/telemetry/can_reader.py`           |
+| Agent trace DuckDB write                        | **< 1 ms**       | batch drain after `run_adk()`                            |
+| End-to-end smoke (8273 frames + every endpoint) | **~12 s**        | `tests/test_endpoints_smoke.py`                          |
+| Parquet export (90-min session)                 | **< 500 ms**     | `GET /session/<sid>/export.parquet`                      |
+
 
 ## Hardware
 
 For the May 23 Sonoma field test:
 
-| Item | Role | Notes |
-|---|---|---|
-| Pixel 10 | Compute + display + audio gateway | Tensor G5 NPU for E4B + E2B; Termux + bridge + PWA in Chrome |
-| USB-CAN adapter | Reads OBD-II powertrain bus | CANable Pro (~$60) or Macchina M2 (~$90) |
-| Powered USB-C OTG hub | Charge passthrough during 4-hour session | needs USB-PD passthrough |
-| OBD-II cable | Connects USB-CAN adapter to car port | standard OBD-II to DB9 |
-| Pixel Earbuds | Audio coaching output (TTS) | ANC + tight fit handle cabin noise |
+
+| Item                  | Role                                     | Notes                                                        |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------------ |
+| Pixel 10              | Compute + display + audio gateway        | Tensor G5 NPU for E4B + E2B; Termux + bridge + PWA in Chrome |
+| USB-CAN adapter       | Reads OBD-II powertrain bus              | CANable Pro (~~$60) or Macchina M2 (~~$90)                   |
+| Powered USB-C OTG hub | Charge passthrough during 4-hour session | needs USB-PD passthrough                                     |
+| OBD-II cable          | Connects USB-CAN adapter to car port     | standard OBD-II to DB9                                       |
+| Pixel Earbuds         | Audio coaching output (TTS)              | ANC + tight fit handle cabin noise                           |
+
 
 Test target: 2003 BMW M3 (E46) at Sonoma Raceway.
 
@@ -396,11 +402,11 @@ OPFS only, never sent off-device.
 
 ### Backend / bridge
 
-- [`docs/api.md`](docs/api.md) — every endpoint with request/response shapes
-- [`docs/adk-agent-architecture.md`](docs/adk-agent-architecture.md) — **ADK topology**: 18 agents, 15 tools, `PitwallOrchestrator`, `Runner`, KV cache, `agent_traces` schema
-- [`docs/adk-implementation-plan.md`](docs/adk-implementation-plan.md) — as-built status + remaining backlog (SSE streaming, state scopes, LoopAgent)
-- [`docs/internal_architecture.md`](docs/internal_architecture.md) — backend topology with mermaid diagrams
-- [`docs/adr/index.md`](docs/adr/index.md) — all 21 architecture decisions
+- `[docs/api.md](docs/api.md)` — every endpoint with request/response shapes
+- `[docs/adk-agent-architecture.md](docs/adk-agent-architecture.md)` — **ADK topology**: 18 agents, 15 tools, `PitwallOrchestrator`, `Runner`, KV cache, `agent_traces` schema
+- `[docs/adk-implementation-plan.md](docs/adk-implementation-plan.md)` — as-built status + remaining backlog (SSE streaming, state scopes, LoopAgent)
+- `[docs/internal_architecture.md](docs/internal_architecture.md)` — backend topology with mermaid diagrams
+- `[docs/adr/index.md](docs/adr/index.md)` — all 21 architecture decisions
 
 ### Recent ADRs
 
@@ -412,21 +418,21 @@ OPFS only, never sent off-device.
 
 ### Frontend (`pitwall-web`)
 
-- [`docs/vue/README.md`](docs/vue/README.md) — canonical PWA design: 38 screens, emotion taxonomy, navigation map
-- [`docs/vue/10-coach-emotions.md`](docs/vue/10-coach-emotions.md) — 12-emotion taxonomy, Gemma prompt contract
-- [`docs/vue/11-navigation-map.md`](docs/vue/11-navigation-map.md) — god mermaid + per-screen reference
-- [`docs/ux.md`](docs/ux.md) — UX principles: audio-first, silence-is-coaching, fail-open
+- `[docs/vue/README.md](docs/vue/README.md)` — canonical PWA design: 38 screens, emotion taxonomy, navigation map
+- `[docs/vue/10-coach-emotions.md](docs/vue/10-coach-emotions.md)` — 12-emotion taxonomy, Gemma prompt contract
+- `[docs/vue/11-navigation-map.md](docs/vue/11-navigation-map.md)` — god mermaid + per-screen reference
+- `[docs/ux.md](docs/ux.md)` — UX principles: audio-first, silence-is-coaching, fail-open
 
 ### On-track operators
 
-- [`deploy/termux/INSTALL.md`](deploy/termux/INSTALL.md) — Pixel + Termux foreground service install
-- [`docs/hardware.md`](docs/hardware.md) — sensor + adapter + cable spec
-- [`docs/sonoma_track_intelligence.md`](docs/sonoma_track_intelligence.md) — corner-by-corner reference + danger zones + weather phases
+- `[deploy/termux/INSTALL.md](deploy/termux/INSTALL.md)` — Pixel + Termux foreground service install
+- `[docs/hardware.md](docs/hardware.md)` — sensor + adapter + cable spec
+- `[docs/sonoma_track_intelligence.md](docs/sonoma_track_intelligence.md)` — corner-by-corner reference + danger zones + weather phases
 
 ### Pedagogy
 
-- [`docs/pedagogy.md`](docs/pedagogy.md) — Ross Bentley curriculum in the coaching engine
-- [`docs/coaching-engine.md`](docs/coaching-engine.md) — rule + LiteRT-LM coach composition
+- `[docs/pedagogy.md](docs/pedagogy.md)` — Ross Bentley curriculum in the coaching engine
+- `[docs/coaching-engine.md](docs/coaching-engine.md)` — rule + LiteRT-LM coach composition
 
 ### Build the docs site
 
@@ -437,13 +443,15 @@ mkdocs serve -a 127.0.0.1:8889
 
 ## Test status
 
-| Suite | Count | Notes |
-|---|---|---|
-| `tests/` (pytest) | **424 passed, 0 skipped** | Unit + integration; vendored fixtures, no network |
-| `tests/features/telemetry/test_can_pipeline.py` | 9 of 424 | Round-trip on `interface='virtual'` + ADR-018 dead-reckoner wiring |
-| `tests/features/telemetry/test_dead_reckoning.py` | 13 of 424 | ADR-018 1D Kalman filter unit suite |
-| `tests/features/coaching/test_coach_engine_litert.py` | 8 of 424 | Live-Gemma tests; auto-skip when model file is absent |
-| `tests/test_endpoints_smoke.py` | **51 assertions, 0 failed** | End-to-end against a real 8273-frame Sonoma VBO |
+
+| Suite                                                 | Count                       | Notes                                                              |
+| ----------------------------------------------------- | --------------------------- | ------------------------------------------------------------------ |
+| `tests/` (pytest)                                     | **424 passed, 0 skipped**   | Unit + integration; vendored fixtures, no network                  |
+| `tests/features/telemetry/test_can_pipeline.py`       | 9 of 424                    | Round-trip on `interface='virtual'` + ADR-018 dead-reckoner wiring |
+| `tests/features/telemetry/test_dead_reckoning.py`     | 13 of 424                   | ADR-018 1D Kalman filter unit suite                                |
+| `tests/features/coaching/test_coach_engine_litert.py` | 8 of 424                    | Live-Gemma tests; auto-skip when model file is absent              |
+| `tests/test_endpoints_smoke.py`                       | **51 assertions, 0 failed** | End-to-end against a real 8273-frame Sonoma VBO                    |
+
 
 ```bash
 python3 -m pytest tests/features/test_api_core.py -q
@@ -461,7 +469,7 @@ The May 23, 2026 Sonoma Raceway field test is the load-bearing milestone.
 
 **Before Sonoma (3 weeks):**
 
-- **Scaffold `pitwall-web`** — Vue 3 + Vite + Tailwind PWA per [`docs/vue/`](docs/vue/README.md). MVP: boot path → session loop → 1 analytics screen → tutorial overlay. Bridge contract is complete.
+- **Scaffold `pitwall-web`** — Vue 3 + Vite + Tailwind PWA per `[docs/vue/](docs/vue/README.md)`. MVP: boot path → session loop → 1 analytics screen → tutorial overlay. Bridge contract is complete.
 - **Pre-rendered TTS phrase library** — bake canonical phrases per coach into MP3 clips, packaged into `pitwall-web/public/audio/coaches/<id>/`
 - **Per-car DBC packs** — Subaru GR86 next; hardware enumeration table ready to extend
 
@@ -471,7 +479,7 @@ The May 23, 2026 Sonoma Raceway field test is the load-bearing milestone.
 - **ADK state scopes** — `user:` prefix for driver preferences persisting across sessions; `app:` for shared track conditions
 - **Vue PWA paddock Q&A screen** — connects to `/coach/ask` + `/coach/agents`
 - **Multi-track support** — Laguna Seca and Thunderhill slot ready in `data/tracks/`
-- **Sprite generation** — nano-banana prompts ready in [`docs/vue/assets/reference-sheet-source.md`](docs/vue/assets/reference-sheet-source.md); ~56 frames for 4 non-T-Rod coaches
+- **Sprite generation** — nano-banana prompts ready in `[docs/vue/assets/reference-sheet-source.md](docs/vue/assets/reference-sheet-source.md)`; ~56 frames for 4 non-T-Rod coaches
 - **Public release + license** — TBD post-field-test
 - **Framework refactor** — per ADR-018: abstract `CoachContext`, parameterise LSTM input layer, decouple spatial awareness engine
 
@@ -484,13 +492,15 @@ be removed once `pitwall-web` reaches feature parity.
 
 ## Team 2 (Intermediate, BMW M3)
 
-| Role | Person |
-|------|--------|
-| Tech Lead | Hemanth HM |
-| Edge / Telemetry | Simon Margolis |
-| AGY Pipeline | Taha Bouhsine |
-| Data Reasoning | Vijay Vivekanand |
-| UX / Frontend | Aileen Villanueva |
+
+| Role             | Person            |
+| ---------------- | ----------------- |
+| Tech Lead        | Hemanth HM        |
+| Edge / Telemetry | Simon Margolis    |
+| AGY Pipeline     | Taha Bouhsine     |
+| Data Reasoning   | Vijay Vivekanand  |
+| UX / Frontend    | Aileen Villanueva |
+
 
 ## Acknowledgements
 
@@ -512,8 +522,8 @@ For team members:
 
 - Branch from `master`; merge via PR. Tests must pass before merge.
 - Run `python3 -m pytest tests/ -q` and `python3 tests/test_endpoints_smoke.py` before opening a PR that touches ingest, lap detection, or the sink.
-- New endpoints get an entry in [`docs/api.md`](docs/api.md) plus a test in `tests/test_bridge.py`.
-- New ADK agents get an entry in `AGENT_REGISTRY` in `adk_agents.py` and a row in the agent catalogue in [`docs/adk-agent-architecture.md`](docs/adk-agent-architecture.md).
+- New endpoints get an entry in `[docs/api.md](docs/api.md)` plus a test in `tests/test_bridge.py`.
+- New ADK agents get an entry in `AGENT_REGISTRY` in `adk_agents.py` and a row in the agent catalogue in `[docs/adk-agent-architecture.md](docs/adk-agent-architecture.md)`.
 - Architectural changes get a new ADR in `docs/adr/` (ADR-NNN-slug.md). Update `docs/adr/index.md` in the same PR.
 
 ## Code style
@@ -528,7 +538,7 @@ For team members:
 
 ## Changelog
 
-Notable changes by date in [CHANGELOG.md](CHANGELOG.md). Architecture decisions in [`docs/adr/`](docs/adr/index.md).
+Notable changes by date in [CHANGELOG.md](CHANGELOG.md). Architecture decisions in `[docs/adr/](docs/adr/index.md)`.
 
 ## License
 
