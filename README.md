@@ -426,6 +426,7 @@ OPFS only, never sent off-device.
 ### On-track operators
 
 - `[deploy/termux/INSTALL.md](deploy/termux/INSTALL.md)` — Pixel + Termux foreground service install
+- `[docs/android_parallel_llm_install.md](docs/android_parallel_llm_install.md)` — sideload **pitwall-parallel** + **android-llm-service** on one device (embedded PWA + on-device LLM)
 - `[docs/hardware.md](docs/hardware.md)` — sensor + adapter + cable spec
 - `[docs/sonoma_track_intelligence.md](docs/sonoma_track_intelligence.md)` — corner-by-corner reference + danger zones + weather phases
 

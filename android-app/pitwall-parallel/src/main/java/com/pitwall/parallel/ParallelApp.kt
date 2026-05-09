@@ -27,7 +27,9 @@ class ParallelApp : Application() {
         if (BuildConfig.PITWALL_USE_EMBEDDED_BRIDGE) {
             val rawPath = BuildConfig.PITWALL_LLM_MODEL_PATH.trim()
             val llmPath = rawPath.takeUnless { it.isEmpty() }
-            val engine = DefaultCoachingEngine(this, llmPath)
+            val httpBase = BuildConfig.PITWALL_LLM_HTTP_BASE_URL.trim().trimEnd('/').takeUnless { it.isEmpty() }
+            val httpModel = BuildConfig.PITWALL_LLM_HTTP_MODEL.trim().ifEmpty { "gemma-4-E2B-it" }
+            val engine = DefaultCoachingEngine(this, llmPath, httpBase, httpModel)
             PitwallEmbeddedBridge.onAnalyzed = { payload ->
                 db.analyzeEventDao().insert(
                     AnalyzeEventEntity(

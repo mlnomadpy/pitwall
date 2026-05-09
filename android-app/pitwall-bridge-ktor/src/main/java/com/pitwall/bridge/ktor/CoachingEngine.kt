@@ -16,7 +16,12 @@ import java.io.File
 import java.time.Instant
 
 /**
- * Bridge-domain coaching: health payload + /analyze. Stub when no model; MediaPipe when [.task] exists.
+ * Bridge-domain coaching: health payload + /analyze.
+ *
+ * Resolution order for inference:
+ * 1. Optional HTTP backend ([PitwallLlmHttpClient]) — same contract as `android-llm-service` on port 8080.
+ * 2. In-process MediaPipe when a `.task` file exists at [llmModelAbsolutePath].
+ * 3. Stub text when neither is available.
  */
 interface CoachingEngine {
     fun healthPayload(): HealthPayload
@@ -27,11 +32,17 @@ interface CoachingEngine {
 class DefaultCoachingEngine(
     private val context: Context,
     private val llmModelAbsolutePath: String?,
+    /** e.g. `http://127.0.0.1:8080` — empty/null disables HTTP and uses local `.task` only. */
+    private val llmHttpBaseUrl: String? = null,
+    /** Model id forwarded to `/v1/chat/completions` (must match what `android-llm-service` expects). */
+    private val llmHttpModel: String = "gemma-4-E2B-it",
 ) : CoachingEngine {
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val inferenceMutex = Mutex()
     private var llmInference: LlmInference? = null
+    private val httpBase: String? =
+        llmHttpBaseUrl?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() }
     private val sessionOptions by lazy {
         LlmInferenceSession.LlmInferenceSessionOptions.builder()
             .setTopK(40)
@@ -58,12 +69,24 @@ class DefaultCoachingEngine(
 
     override fun healthPayload(): HealthPayload {
         val ts = Instant.now().toString()
-        val modelLoaded = llmInference != null
+        val localLoaded = llmInference != null
+        val httpConfigured = httpBase != null
+        val engine = when {
+            localLoaded && httpConfigured -> "sonic_model+llm_http"
+            localLoaded -> "sonic_model"
+            httpConfigured -> "llm_http"
+            else -> "rules"
+        }
+        val coach = when {
+            localLoaded -> "litert"
+            httpConfigured -> "litert"
+            else -> null
+        }
         return HealthPayload(
             status = "ok",
             version = "2.0-embedded",
-            engine = if (modelLoaded) "sonic_model" else "rules",
-            coach = if (modelLoaded) "litert" else null,
+            engine = engine,
+            coach = coach,
             driverLevel = "intermediate",
             track = null,
             duckdb = true,
@@ -75,11 +98,39 @@ class DefaultCoachingEngine(
 
     override suspend fun analyze(burstJson: String): AnalyzeResponsePayload = inferenceMutex.withLock {
         val burstId = parseBurstId(burstJson)
+        val prompt =
+            "You are a racing engineer. Given this telemetry burst JSON, reply with one short coaching sentence only.\n$burstJson"
+
+        val httpUrl = httpBase
+        if (httpUrl != null) {
+            val model = llmHttpModel.trim().ifEmpty { "gemma-4-E2B-it" }
+            val viaHttp = PitwallLlmHttpClient.chatCompletion(
+                baseUrl = httpUrl,
+                model = model,
+                sessionId = "pitwall-analyze-$burstId",
+                userPrompt = prompt,
+            )
+            if (viaHttp != null) {
+                return AnalyzeResponsePayload(
+                    coaching = viaHttp,
+                    paceNote = null,
+                    coachSource = "litert",
+                    burstId = burstId,
+                    source = "sonic_model",
+                )
+            }
+        }
+
         val inference = llmInference
         val coaching = if (inference != null) {
-            runMediaPipe(inference, burstJson)
+            runMediaPipe(inference, prompt)
         } else {
-            "Embedded Ktor stub — add .task at PITWALL_LLM_MODEL_PATH (see README)."
+            buildString {
+                append(
+                    "Embedded Ktor stub — start android-llm-service on 8080, set PITWALL_LLM_HTTP_BASE_URL, ",
+                )
+                append("or add a .task at PITWALL_LLM_MODEL_PATH (see README).")
+            }
         }
         AnalyzeResponsePayload(
             coaching = coaching,
@@ -97,13 +148,11 @@ class DefaultCoachingEngine(
             0
         }
 
-    private suspend fun runMediaPipe(inference: LlmInference, burstJson: String): String =
+    private suspend fun runMediaPipe(inference: LlmInference, fullPrompt: String): String =
         withContext(Dispatchers.IO) {
-            val prompt =
-                "You are a racing engineer. Given this telemetry burst JSON, reply with one short coaching sentence only.\n$burstJson"
             val session = LlmInferenceSession.createFromOptions(inference, sessionOptions)
             try {
-                session.addQueryChunk(prompt)
+                session.addQueryChunk(fullPrompt)
                 session.generateResponse()
             } finally {
                 session.close()

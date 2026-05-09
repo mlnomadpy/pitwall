@@ -9,6 +9,8 @@
 - **Build:** `cd src/pwa && npm ci && npm run build` then `./gradlew :pitwall-parallel:assembleDebug` (task `syncPwaDist` copies `../src/pwa/dist` into `assets/pwa-www` when the dist folder exists).
 - **APK:** `pitwall-parallel/build/outputs/apk/debug/pitwall-parallel-debug.apk`
 
+**Install pitwall-parallel + LLM service on one device:** To sideload the parallel APK together with the separate **`android-llm-service`** app (loopback **8080** for MediaPipe coaching while the PWA uses **8765**), follow the step-by-step checklist in [`docs/android_parallel_llm_install.md`](../docs/android_parallel_llm_install.md).
+
 ---
 
 Native **Android (Jetpack Compose)** shell for the Sonoma pre-brief: **Google Maps** markers, **WebView** for a hosted/Three.js briefing, **pick-3** focus chips, and a live **on-track** view that uses **Play Services location** to show distance to your three focus corners. By default it calls the **Python Flask bridge** on your dev machine (same HTTP contract as the rest of the repo). Optionally, you can enable an **embedded Ktor** loopback server plus **MediaPipe GenAI** inside the APK for a parallel native stack (see below) without changing the Vue or Python sources.

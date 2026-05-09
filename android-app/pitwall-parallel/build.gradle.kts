@@ -32,8 +32,20 @@ android {
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
 
+        val llmHttpBase = localProps.getProperty(
+            "PITWALL_LLM_HTTP_BASE_URL",
+            "http://127.0.0.1:8080",
+        ).trim().trimEnd('/')
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+        val llmHttpModel = localProps.getProperty("PITWALL_LLM_HTTP_MODEL", "gemma-4-E2B-it").trim()
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+
         buildConfigField("Boolean", "PITWALL_USE_EMBEDDED_BRIDGE", "$parallelEmbeddedDefault")
         buildConfigField("String", "PITWALL_LLM_MODEL_PATH", "\"$llmModelPath\"")
+        buildConfigField("String", "PITWALL_LLM_HTTP_BASE_URL", "\"$llmHttpBase\"")
+        buildConfigField("String", "PITWALL_LLM_HTTP_MODEL", "\"$llmHttpModel\"")
 
         val configuredApiBase = localProps.getProperty("PITWALL_API_BASE_URL", "http://10.0.2.2:8765")
             .trim().trimEnd('/')
