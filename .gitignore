@@ -48,6 +48,8 @@ android-app/build/
 android-app/app/build/
 android-app/.idea/
 android-app/.gradle/
+# Built APKs exceed GitHub's 100 MB blob limit — distribute via GitHub Releases or Drive/S3
+android-app/*.apk
 
 # Native LLM Sidecar Service
 android-llm-service/build/
@@ -72,3 +74,4 @@ scratch/
 # ── Build artifacts ───────────────────────────────────────────────────────────
 site/
 node_modules/
+.firebase/

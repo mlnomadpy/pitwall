@@ -2,6 +2,7 @@ package com.pitwall.paddock
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pitwall.paddock.data.AnalyzeBurstRequest
 import com.pitwall.paddock.data.NetworkModule
 import com.pitwall.paddock.data.PitwallApi
 import com.pitwall.paddock.data.TrackMarker
@@ -14,6 +15,7 @@ import kotlinx.coroutines.launch
 
 data class PaddockUiState(
     val bridgeLine: String = "Tap refresh to reach pitwall bridge",
+    val analyzePreview: String = "",
     val selectedMarkerIds: Set<String> = emptySet(),
 )
 
@@ -41,6 +43,21 @@ class PaddockViewModel(
                     )
                 } catch (e: Exception) {
                     it.copy(bridgeLine = "Offline: ${e.message?.take(80)}")
+                }
+            }
+        }
+    }
+
+    /** Vertical slice: POST /analyze with a minimal burst (embedded Ktor or Python bridge). */
+    fun runAnalyzeDemo() {
+        viewModelScope.launch {
+            _state.update { it.copy(analyzePreview = "Calling /analyze…") }
+            _state.update {
+                try {
+                    val r = api.analyze(AnalyzeBurstRequest())
+                    it.copy(analyzePreview = r.coaching.take(400))
+                } catch (e: Exception) {
+                    it.copy(analyzePreview = "/analyze failed: ${e.message?.take(200)}")
                 }
             }
         }

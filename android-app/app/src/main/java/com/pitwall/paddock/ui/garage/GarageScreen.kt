@@ -36,6 +36,7 @@ fun GarageScreen(
     baseUrl: String,
     markers: List<TrackMarker>,
     onRefreshBridge: () -> Unit = {},
+    onAnalyzeDemo: () -> Unit = {},
     onOpenPostSessionCatalog: () -> Unit = {},
 ) {
     Column(
@@ -80,11 +81,33 @@ fun GarageScreen(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
         Text(
-            "Set PITWALL_API_BASE_URL in local.properties. Emulator: 10.0.2.2:8765",
+            "Effective URL uses 127.0.0.1 when PITWALL_USE_EMBEDDED_BRIDGE=true (see README).",
             color = TextSecondary,
             fontSize = 11.sp,
             lineHeight = 16.sp,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+        )
+        Spacer(Modifier.height(12.dp))
+        Text("Native slice · POST /analyze", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 20.dp))
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = onAnalyzeDemo, modifier = Modifier.weight(1f)) {
+                Text("Demo burst → /analyze", color = PitwallCyan, fontSize = 12.sp)
+            }
+        }
+        Text(
+            state.analyzePreview.ifBlank { "—" },
+            color = TextPrimary,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .background(PitwallSurface, RoundedCornerShape(8.dp))
+                .padding(12.dp),
         )
         Spacer(Modifier.height(20.dp))
         OutlinedButton(

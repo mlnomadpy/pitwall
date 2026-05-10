@@ -6,3 +6,10 @@ sdk.dir=/Users/yourname/Library/Android/sdk
 # PITWALL_API_BASE_URL=http://10.0.2.2:8765/
 # Optional — hosted pre-brief for WebView (app appends ?focus=...&track=sonoma)
 # WEB_BRIEF_BASE_URL=https://your-host/brief
+
+# Optional — embedded Ktor bridge + MediaPipe (parallel native stack; do not run Python on :8765 at the same time)
+# Overrides default for the pitwall-parallel app only (defaults to true there when unset)
+# PITWALL_PARALLEL_USE_EMBEDDED_BRIDGE=false
+# PITWALL_USE_EMBEDDED_BRIDGE=true
+# Absolute path on device to a MediaPipe-compatible .task bundle (ADB push for dev; PAD for production)
+# PITWALL_LLM_MODEL_PATH=/data/local/tmp/llm/gemma.task

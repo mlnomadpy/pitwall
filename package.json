@@ -1,0 +1,11 @@
+{
+  "name": "pitwall",
+  "private": true,
+  "scripts": {
+    "pwa:build": "npm install --prefix src/pwa && npm run build --prefix src/pwa",
+    "pwa:deploy": "npm run pwa:build && firebase deploy --only hosting"
+  },
+  "devDependencies": {
+    "firebase-tools": "^14.12.0"
+  }
+}

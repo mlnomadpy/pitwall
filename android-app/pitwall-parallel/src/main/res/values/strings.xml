@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Pitwall Parallel</string>
+
+    <string name="usb_probe_channel_name">USB serial bench probe</string>
+    <string name="usb_probe_notification_title">USB serial probe</string>
+    <string name="usb_probe_waiting_device">Waiting for USB serial device…</string>
+    <string name="usb_probe_permission_denied">USB permission denied</string>
+    <string name="usb_probe_open_failed">Could not open USB device</string>
+    <string name="usb_probe_unsupported_adapter">USB serial not supported for this device</string>
+    <string name="usb_probe_streaming">Streaming @ %1$d baud — check logcat tag UsbSerialProbe</string>
+    <string name="usb_probe_notification_stats">%1$s bytes · %2$s B/s · slcan %3$s · Duck %4$s</string>
+</resources>
