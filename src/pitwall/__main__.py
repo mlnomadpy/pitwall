@@ -66,7 +66,8 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--can-channel", default=None)
     parser.add_argument("--can-interface", default="virtual")
-    parser.add_argument("--can-bitrate", type=int, default=500_000)
+    parser.add_argument("--can-bitrate", type=int, default=1_000_000,
+                        help="CAN bus bitrate; AiM MXP CAN2 output is 1 Mbit/s")
     parser.add_argument("--can-dbc", action="append", default=None)
     parser.add_argument("--can-session-id", default=None)
     parser.add_argument("--can-flush-ms", type=int, default=100)

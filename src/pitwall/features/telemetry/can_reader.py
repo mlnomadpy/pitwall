@@ -30,6 +30,19 @@ For dev/test use `interface=virtual` (pure Python, no kernel modules).
 For production over USB use `interface=slcan, channel=/dev/ttyACM0` (CANable,
 Macchina M2, similar). For Linux native CAN use `interface=socketcan,
 channel=can0`.
+
+Production target — 2003 BMW M3 (E46) via AiM MXP CAN2 output:
+
+    interface = slcan          # ASCII "t<ID><DLC><DATA>\\r" frames
+    channel   = /dev/ttyACM0   # CANable 2.0 / Jhoinrch RH-02 PRO CDC port
+    bitrate   = 1_000_000      # MXP CAN2 runs at 1 Mbit/s, NOT 500 kbps
+    dbc       = data/dbc/pitwall.dbc  # AIM MXP SmartyCam V3.0 layouts
+
+See .context/CANable2_Pixel10_Developer_Integration_Spec_v1.0.pdf and
+data/cars/bmw_e46_m3.yaml for the full wiring + protocol description.
+The MXP re-broadcasts a clean 8-frame protocol (0x420-0x424, 0x450-0x452)
+at 11-bit standard / Little Endian; this reader only needs the bitrate
+to match. Native BMW PT-CAN is never touched.
 """
 from __future__ import annotations
 
@@ -143,7 +156,7 @@ class CanReader:
         *,
         interface: str = "virtual",
         channel: str = "pitwall_dev",
-        bitrate: int = 500_000,
+        bitrate: int = 1_000_000,
         dbc_paths: Optional[list[str]] = None,
         flush_ms: int = 100,
         bridge=None,
@@ -478,7 +491,8 @@ def main():
                    help="python-can interface (virtual, socketcan, slcan, pcan, …)")
     p.add_argument("--channel", default="pitwall_dev",
                    help="interface channel (e.g. /dev/ttyACM0, vcan0, pitwall_dev)")
-    p.add_argument("--bitrate", type=int, default=500_000)
+    p.add_argument("--bitrate", type=int, default=1_000_000,
+                   help="CAN bus bitrate; AiM MXP CAN2 output runs at 1 Mbit/s")
     p.add_argument("--dbc", action="append", default=None,
                    help="DBC file(s) to load (default: data/dbc/pitwall.dbc). May repeat.")
     p.add_argument("--flush-ms", type=int, default=100,
