@@ -25,7 +25,7 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.okhttp)
-    implementation(libs.duckdb.jdbc)
+    // DuckDB JDBC removed — using Android built-in SQLite via AndroidSqliteJdbc shim
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.ktor.bom))

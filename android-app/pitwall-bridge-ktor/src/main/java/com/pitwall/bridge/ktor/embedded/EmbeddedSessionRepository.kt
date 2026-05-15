@@ -60,14 +60,14 @@ class EmbeddedSessionRepository(private val duck: EmbeddedDuckDb) {
             val exists = duck.sessionExists(this, sessionId)
             if (!exists) {
                 prepareStatement(
-                    "INSERT INTO sessions (session_id, ended_at) VALUES (?, now())",
+                    "INSERT INTO sessions (session_id, ended_at) VALUES (?, datetime('now'))",
                 ).use { ps ->
                     ps.setString(1, sessionId)
                     ps.executeUpdate()
                 }
             } else {
                 prepareStatement(
-                    "UPDATE sessions SET ended_at = now() WHERE session_id = ? AND ended_at IS NULL",
+                    "UPDATE sessions SET ended_at = datetime('now') WHERE session_id = ? AND ended_at IS NULL",
                 ).use { ps ->
                     ps.setString(1, sessionId)
                     ps.executeUpdate()
