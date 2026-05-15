@@ -186,3 +186,187 @@ collision_registry:
       purpose: "isolated; NOT retransmitted on CAN2 output" }
   - { ids: "0x420-0x456", bus: "SmartyCam port",       owner: "AiM MXP",
       purpose: "independent physical bus to VBOX HD2; no collision possible" }
+
+# === 10. Signal post-processing pipelines ================================
+#
+# Each entry maps a raw DBC signal name (left side) to the chain of
+# transforms applied after cantools decodes the bytes. Three kinds of
+# operations exist:
+#
+#   apply:        list of in-place transforms applied to the signal's
+#                 own value. Each item references a formula by name from
+#                 data/formulas/standard.yaml (or a car-local override).
+#                 Shortcuts: `sign_flip: true` (= formula: negate),
+#                            `bias: <num>` (= formula: offset, b=<num>).
+#                 By default the formula's first input is bound to $self;
+#                 other inputs must be set with `bind: { a: 1, b: 2 }`.
+#
+#   rename_to:    change the emitted name (DBC name was wrong/legacy).
+#                 The cache key for downstream binds uses this new name.
+#
+#   canonical:    additionally emit the value under the canonical
+#                 wide-row name (speed_ms, g_lat, ...) for the bridge.
+#
+#   derive:       emit additional named signals computed from this
+#                 signal's value (+ optional other signals via bind).
+#                 Typical use: unit twins (psi_to_bar, mph_to_ms, f_to_c).
+#
+# Signals not listed here pass through untouched (emit as-is under the
+# DBC name).
+
+signals:
+
+  # --- 0x420 — engine + GPS speed + water temp -----------------------------
+  speed_mph:
+    derive:
+      - { name: speed_ms,  formula: mph_to_ms }                 # x = $self
+      - { name: speed_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+    # `canonical:` is intentionally NOT set here — the wide-row speed_ms
+    # has a different value (m/s, not mph). It's emitted via derive: above,
+    # which uses the converted value.
+
+  water_temp_f:
+    derive:
+      - { name: water_temp_c, formula: f_to_c }
+
+  # --- 0x421 — pressures + roll + oil filter temp ---------------------------
+  # DBC name "oil_temp_f" is misleading — PDF calls this "Oil Filter Temp"
+  # (PT-100 at filter housing). The DBC's other oil temp at 0x451.4-5 is
+  # the DME sump sensor — already named engine_oil_temp_f. Rename here.
+  oil_temp_f:
+    rename_to: oil_filter_temp_f
+    derive:
+      - { name: oil_filter_temp_c, formula: f_to_c }
+
+  water_press_psi:
+    derive:
+      - { name: water_press_bar, formula: psi_to_bar }
+
+  oil_press_psi:
+    derive:
+      - { name: oil_press_bar, formula: psi_to_bar }
+
+  # --- 0x422 — driver inputs + pitch ---------------------------------------
+  brake_press_psi:
+    derive:
+      - { name: brake_bar, formula: psi_to_bar }
+    # canonical: not set — brake_bar has a different value (bar vs psi),
+    # so it's emitted by derive: above with the converted unit.
+
+  throttle_pos_pct:
+    canonical: throttle_pct
+
+  # --- 0x423 — chassis IMU -------------------------------------------------
+  # See PDF §6.2 — sign convention must be verified on first capture.
+  # Updates here apply the negation in the decoder per the audit table.
+  steer_angle_deg:
+    canonical: steering_deg
+    # NOTE: sign verified on first drive — flip with `apply: [{sign_flip: true}]`
+    #       if right-of-centre reads negative.
+
+  yaw_rate_degs:
+    # Idle drift +4.3°/s observed; apply a calibration bias once
+    # characterised. Leave un-biased until we have a multi-trip mean.
+    # Example once calibrated:
+    #   apply: [{bias: -4.3}]
+
+  lateral_accel_g:
+    canonical: g_lat
+
+  inline_accel_g:
+    canonical: g_long
+    # First-capture audit pending. Read -0.30 g at idle (impossible
+    # on level ground). Either negate here AND the car is on a downhill
+    # slope, or accept the slope explanation. Tentative — confirmed on drive.
+
+  # --- 0x424 — fuel + battery + vertical accel -----------------------------
+  vertical_accel_g:
+    apply:
+      - sign_flip: true                  # PDF §6.2: read -0.99 g at rest, must be +1 g
+    canonical: g_vert
+
+  fuel_level_gal:
+    derive:
+      - { name: fuel_level_l, formula: gal_to_l }
+
+  # --- 0x450 — wheel speeds -----------------------------------------------
+  wheel_speed_fl_mph:
+    derive:
+      - { name: wheel_speed_fl_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_fl_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_fr_mph:
+    derive:
+      - { name: wheel_speed_fr_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_fr_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_rl_mph:
+    derive:
+      - { name: wheel_speed_rl_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_rl_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_rr_mph:
+    derive:
+      - { name: wheel_speed_rr_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_rr_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+
+  # --- 0x451 — ECU supplemental --------------------------------------------
+  ecu_speed_mph:
+    derive:
+      - { name: ecu_speed_ms,  formula: mph_to_ms }
+      - { name: ecu_speed_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+
+  ambient_temp_f:
+    derive:
+      - { name: ambient_temp_c, formula: f_to_c }
+
+  engine_oil_temp_f:
+    derive:
+      - { name: engine_oil_temp_c, formula: f_to_c }
+
+  # --- 0x452 — GPS ---------------------------------------------------------
+  gps_lat:
+    canonical: lat
+  gps_lon:
+    canonical: lon
+
+
+# === 11. Cross-signal derived =============================================
+# Multi-input pure-arithmetic emissions. Evaluated after the frame's per-
+# signal pipelines finish; inputs are read from the latest-value cache.
+# Each input binding must name a signal (string), a $self is not allowed
+# here because there's no single "self" channel.
+
+derived:
+  combo_g:
+    formula: combo_g
+    bind:
+      glat:  g_lat                       # canonical, set by lateral_accel_g
+      glong: g_long                      # canonical, set by inline_accel_g
+
+  wheel_speed_avg_mph:
+    formula: mean_4
+    bind:
+      a: wheel_speed_fl_mph
+      b: wheel_speed_fr_mph
+      c: wheel_speed_rl_mph
+      d: wheel_speed_rr_mph
+
+
+# === 12. Methods (non-arithmetic derivations) =============================
+# For derivations that need lookup tables, hysteresis, or other non-pure
+# logic. Handlers are registered in code (car_config.METHOD_HANDLERS);
+# YAML supplies parameters.
+
+methods:
+  gear_position:
+    method: rpm_over_wheel_speed_ratio
+    inputs: [rpm, wheel_speed_rl_mph, wheel_speed_rr_mph]
+    ratios:                              # S54 ZF S6S420G
+      "1": 4.227
+      "2": 2.528
+      "3": 1.669
+      "4": 1.226
+      "5": 1.000
+      "6": 0.828
+    final_drive: 3.62
+    tire_circumference_m: 1.998          # 245/40 R18 rear, stock
+    min_speed_kmh: 5.0
+

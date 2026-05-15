@@ -1,0 +1,431 @@
+\documentclass[11pt,a4paper]{article}
+
+% -- packages -------------------------------------------------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage{siunitx}
+\usepackage{caption}
+\usepackage{titlesec}
+\usepackage[hidelinks]{hyperref}
+
+% -- style ----------------------------------------------------------------
+\definecolor{ok}{HTML}{2E7D32}
+\definecolor{warn}{HTML}{B26A00}
+\definecolor{bad}{HTML}{B71C1C}
+\definecolor{codebg}{HTML}{F5F5F5}
+\definecolor{rulegray}{HTML}{555555}
+
+\newcommand{\ok}{\textcolor{ok}{\checkmark}}
+\newcommand{\bad}{\textcolor{bad}{$\times$}}
+\newcommand{\warnmark}{\textcolor{warn}{!}}
+\newcommand{\hex}[1]{\texttt{0x#1}}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  framerule=0pt,
+  framesep=4pt,
+  breaklines=true,
+  columns=fullflexible,
+  xleftmargin=4pt,
+  showstringspaces=false,
+}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+% -- meta -----------------------------------------------------------------
+\title{\textbf{AiM MXP CAN2 $\rightarrow$ CANable 2.0 Integration Validation}\\
+       \large 2003 BMW M3 (E46) --- Live Bus Capture Report}
+\author{Pitwall Engineering}
+\date{2026-05-15}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+End-to-end validation of the AiM MXP \texttt{CAN2 Output} ingest chain
+on a 2003 BMW M3 (E46), captured at idle on a MacBook host through a
+Jhoinrch RH-02 PRO (CANable 2.0) adapter running SLCAN firmware at
+\SI{1}{Mbit/s}. All 29 documented channels were received and
+decoded; the DBC math agrees with the \emph{Developer Integration
+Spec v1.0} byte-for-byte on every channel. Two issues found: the
+\textbf{vertical accelerometer sign is inverted} relative to the PDF
+convention, and frames \hex{421}--\hex{424} broadcast at $\sim$\SI{16.5}{Hz}
+instead of the spec's \SI{50}{Hz} at idle.
+\end{abstract}
+
+% =========================================================================
+\section{System under test}
+
+\subsection{Hardware chain}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Component & Detail \\
+\midrule
+Vehicle              & 2003 BMW M3 (E46), engine S54B32, DME MSS54HP \\
+Dash logger          & AiM MXP \\
+On-bus protocol      & AIM MXP SmartyCam Enhanced CAN v3.0 \\
+Bus parameters       & 1 Mbit/s, 11-bit standard IDs, little-endian, DLC 8 \\
+Frames broadcast     & 8 (\hex{420}--\hex{424}, \hex{450}--\hex{452}) carrying 29 channels \\
+CAN-to-USB adapter   & Jhoinrch RH-02 PRO (CANable 2.0), SLCAN firmware \\
+Wiring               & RLCAB015L: Blue $\to$ CAN H, White $\to$ CAN L; GND/5V unconnected \\
+Termination          & MXP internal 120\,$\Omega$ \ok\ + RH-02 PRO switch \ok\ \\
+Host                 & MacBook Pro (darwin 25.4.0), python-can 4.6.1, cantools 41.3.1 \\
+Device node          & \texttt{/dev/cu.usbmodem205F35854E451} \\
+\bottomrule
+\end{tabular}
+
+\subsection{Wire-level protocol}
+
+Each CAN frame arrives as an ASCII SLCAN record terminated by carriage
+return:
+
+\begin{lstlisting}
+t<ID:3hex><DLC:1><DATA:16hex>\r
+example: t42081A2B3C4D5E6F7A8B\r
+\end{lstlisting}
+
+The CANable was opened with the standard SLCAN handshake
+\texttt{C\textbackslash r}, \texttt{S8\textbackslash r} (\SI{1}{Mbit/s}),
+\texttt{O\textbackslash r}, after which frames flowed continuously.
+
+% =========================================================================
+\section{Decode math validation}
+
+\subsection{Method}
+
+For each of the 29 channels documented in the PDF, the corresponding
+\texttt{SG\_} entry in \texttt{data/dbc/pitwall.dbc} was checked
+programmatically against the spec, asserting equality on six
+properties: start bit, length, byte order, signedness, scale, and
+offset. Units strings were compared case-insensitively.
+
+\subsection{Result: 29 of 29 channels match the PDF}
+
+Table~\ref{tab:math} summarises one row per channel. The verification
+script is in \texttt{docs/reports/scripts/validate\_can\_math.py}; it
+exited with \texttt{0 math mismatches} against the reference DBC.
+
+\begin{table}[h]
+\caption{PDF-vs-DBC math validation, all 29 channels (10-second idle
+capture).}
+\label{tab:math}
+\centering
+\footnotesize
+\begin{tabular}{@{}rl l r c r l c@{}}
+\toprule
+\# & Channel (PDF) & Frame.bytes & Bits & Signed & Scale & Unit & Match \\
+\midrule
+1  & RPM              & \hex{420}.0--1 & 0$\vert$16  & --    & 1     & rpm    & \ok \\
+2  & GPS Speed        & \hex{420}.2--3 & 16$\vert$16 & --    & 0.1   & mph    & \ok \\
+3  & Gear             & \hex{420}.4--5 & 32$\vert$16 & --    & 1     & gear   & \ok \\
+4  & Water Temp       & \hex{420}.6--7 & 48$\vert$16 & --    & 0.1   & \textdegree F & \ok \\
+\addlinespace
+5  & Water Pressure   & \hex{421}.0--1 & 0$\vert$16  & --    & 0.1   & psi    & \ok \\
+6  & Roll Rate        & \hex{421}.2--3 & 16$\vert$16 & yes   & 0.1   & \textdegree/s & \ok \\
+7  & Oil Filter Temp  & \hex{421}.4--5 & 32$\vert$16 & --    & 0.1   & \textdegree F & \ok \\
+8  & Oil Pressure     & \hex{421}.6--7 & 48$\vert$16 & --    & 0.1   & psi    & \ok \\
+\addlinespace
+9  & Brake Pressure   & \hex{422}.0--1 & 0$\vert$16  & --    & 1     & psi    & \ok \\
+10 & Pedal Position   & \hex{422}.2--3 & 16$\vert$16 & --    & 0.01  & \%     & \ok \\
+11 & Brake Switch     & \hex{422}.4--5 & 32$\vert$16 & --    & 1     & bin.   & \ok \\
+12 & Pitch Rate       & \hex{422}.6--7 & 48$\vert$16 & yes   & 0.1   & \textdegree/s & \ok \\
+\addlinespace
+13 & Steering Angle   & \hex{423}.0--1 & 0$\vert$16  & yes   & 0.1   & \textdegree & \ok \\
+14 & Yaw Rate         & \hex{423}.2--3 & 16$\vert$16 & yes   & 0.1   & \textdegree/s & \ok \\
+15 & Lateral Accel    & \hex{423}.4--5 & 32$\vert$16 & yes   & 0.01  & g      & \ok \\
+16 & Inline Accel     & \hex{423}.6--7 & 48$\vert$16 & yes   & 0.01  & g      & \ok \\
+\addlinespace
+17 & Fuel Level       & \hex{424}.0--1 & 0$\vert$16  & --    & 0.01  & gal    & \ok \\
+18 & Battery Voltage  & \hex{424}.2--3 & 16$\vert$16 & --    & 0.1   & V      & \ok \\
+19 & Vertical Accel   & \hex{424}.4--5 & 32$\vert$16 & yes   & 0.01  & g      & \ok \\
+\addlinespace
+20 & Wheel Speed FL   & \hex{450}.0--1 & 0$\vert$16  & --    & 0.1   & mph    & \ok \\
+21 & Wheel Speed FR   & \hex{450}.2--3 & 16$\vert$16 & --    & 0.1   & mph    & \ok \\
+22 & Wheel Speed RL   & \hex{450}.4--5 & 32$\vert$16 & --    & 0.1   & mph    & \ok \\
+23 & Wheel Speed RR   & \hex{450}.6--7 & 48$\vert$16 & --    & 0.1   & mph    & \ok \\
+\addlinespace
+24 & ECU Speed        & \hex{451}.0--1 & 0$\vert$16  & --    & 0.1   & mph    & \ok \\
+25 & Temp Outside     & \hex{451}.2--3 & 16$\vert$16 & --    & 0.1   & \textdegree F & \ok \\
+26 & Engine Oil Temp  & \hex{451}.4--5 & 32$\vert$16 & --    & 0.1   & \textdegree F & \ok \\
+27 & DSC REG          & \hex{451}.6--7 & 48$\vert$16 & --    & 1     & bin.   & \ok \\
+\addlinespace
+28 & GPS Latitude     & \hex{452}.0--3 & 0$\vert$32  & yes   & 1e-7  & \textdegree & \ok \\
+29 & GPS Longitude    & \hex{452}.4--7 & 32$\vert$32 & yes   & 1e-7  & \textdegree & \ok \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Post-decode unit conversions}
+
+Two physical-unit conversions are applied in \texttt{can\_reader.py}
+on top of the DBC decode:
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Conversion & Coefficient & Exact value \\
+\midrule
+mph $\to$ m/s          & 0.44704     & \SI{0.44704}{m/s} per mph (NIST exact) \quad\ok \\
+psi $\to$ bar          & 0.0689476   & \SI{0.06894757}{bar} per psi ($\sim$0 ppm error) \quad\ok \\
+\bottomrule
+\end{tabular}
+
+\subsection{Raw-byte arithmetic spot-check}
+
+For seven channels, raw little-endian bytes were re-decoded by hand
+and compared with the cantools output. All seven agreed exactly:
+
+\begin{center}
+\footnotesize
+\begin{tabular}{@{}lllrrl@{}}
+\toprule
+Channel & Frame & Raw bytes & Raw int & Manual & cantools \\
+\midrule
+rpm                 & \hex{420} & \texttt{ed 03} & 1005    & 1005.00 rpm & 1005.00 \ok \\
+water\_temp\_f      & \hex{420} & \texttt{df 02} & 735     & 73.50 \textdegree F  & 73.50 \ok \\
+lateral\_accel\_g   & \hex{423} & \texttt{00 00} & 0       & 0.00 g      & 0.00 \ok \\
+inline\_accel\_g    & \hex{423} & \texttt{e2 ff} & $-30$   & $-0.30$ g   & $-0.30$ \ok \\
+battery\_volt       & \hex{424} & \texttt{82 00} & 130     & 13.00 V     & 13.00 \ok \\
+vertical\_accel\_g  & \hex{424} & \texttt{9e ff} & $-98$   & $-0.98$ g   & $-0.98$ \ok \\
+ecu\_speed\_mph     & \hex{451} & \texttt{00 00} & 0       & 0.00 mph    & 0.00 \ok \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =========================================================================
+\section{Live capture --- per-channel readings}
+
+10-second window. Engine idling, vehicle parked indoors, no GPS fix.
+Total bus throughput: \textbf{3452 frames}, \textbf{\SI{344}{fps}}
+overall. Sanity column reads "$\ok$" for plausible idle values,
+"\warnmark" for suspicious, "\bad" for unphysical / non-conformant.
+
+\begin{longtable}{@{}rl l r l rr l@{}}
+\caption{Per-channel decoded values and observed broadcast rates vs.\
+PDF spec.}\label{tab:capture}\\
+\toprule
+\# & Channel & Frame.bytes & Value & Unit & Obs Hz & PDF Hz & Sanity \\
+\midrule
+\endfirsthead
+\toprule
+\# & Channel & Frame.bytes & Value & Unit & Obs Hz & PDF Hz & Sanity \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+
+1  & RPM             & \hex{420}.0--1 & 1003     & rpm     & 16.5 & 10 & \ok\ (idle) \\
+2  & GPS Speed       & \hex{420}.2--3 & 0.00     & mph     & 16.5 & 10 & \ok\ (parked) \\
+3  & Gear            & \hex{420}.4--5 & 53246    & gear    & 16.5 & 10 & \bad\ MSS54HP \\
+4  & Water Temp      & \hex{420}.6--7 & 73.5     & \textdegree F & 16.5 & 10 & \ok\ (cold) \\
+5  & Water Pressure  & \hex{421}.0--1 & 0.7      & psi     & 16.5 & 50 & \ok \\
+6  & Roll Rate       & \hex{421}.2--3 & $-0.2$   & \textdegree/s & 16.5 & 50 & \ok\ ($\sim$0) \\
+7  & Oil Filter Temp & \hex{421}.4--5 & 58.9     & \textdegree F & 16.5 & 50 & \ok\ (cold) \\
+8  & Oil Pressure    & \hex{421}.6--7 & 17.6     & psi     & 16.5 & 50 & \ok\ (idle) \\
+9  & Brake Pressure  & \hex{422}.0--1 & 21       & psi     & 16.4 & 50 & \ok\ (parked) \\
+10 & Pedal Position  & \hex{422}.2--3 & 0.00     & \%      & 16.4 & 50 & \ok \\
+11 & Brake Switch    & \hex{422}.4--5 & 0        & ---     & 16.4 & 50 & \ok \\
+12 & Pitch Rate      & \hex{422}.6--7 & 0.1      & \textdegree/s & 16.4 & 50 & \ok \\
+13 & Steering Angle  & \hex{423}.0--1 & 3.0      & \textdegree & 16.5 & 50 & \ok\ (centered) \\
+14 & Yaw Rate        & \hex{423}.2--3 & 4.3      & \textdegree/s & 16.5 & 50 & \warnmark\ gyro bias \\
+15 & Lateral Accel   & \hex{423}.4--5 & 0.00     & g       & 16.5 & 50 & \ok \\
+16 & Inline Accel    & \hex{423}.6--7 & $-0.30$  & g       & 16.5 & 50 & \warnmark\ slope or sign \\
+17 & Fuel Level      & \hex{424}.0--1 & 0.48     & gal     & 16.3 & 50 & \warnmark\ low \\
+18 & Battery Voltage & \hex{424}.2--3 & 12.9     & V       & 16.3 & 50 & \ok\ (charging) \\
+19 & Vertical Accel  & \hex{424}.4--5 & $-0.99$  & g       & 16.3 & 50 & \bad\ sign inverted \\
+20 & Wheel Speed FL  & \hex{450}.0--1 & 0.00     & mph     & 10.0 & 10 & \ok \\
+21 & Wheel Speed FR  & \hex{450}.2--3 & 0.00     & mph     & 10.0 & 10 & \ok \\
+22 & Wheel Speed RL  & \hex{450}.4--5 & 0.00     & mph     & 10.0 & 10 & \ok \\
+23 & Wheel Speed RR  & \hex{450}.6--7 & 0.00     & mph     & 10.0 & 10 & \ok \\
+24 & ECU Speed       & \hex{451}.0--1 & 0.00     & mph     & 9.9  & 10 & \ok \\
+25 & Temp Outside    & \hex{451}.2--3 & 0.6      & \textdegree F & 9.9 & 10 & \warnmark\ likely sensor \\
+26 & Engine Oil Temp & \hex{451}.4--5 & 1.6      & \textdegree F & 9.9 & 10 & \warnmark\ DME no report \\
+27 & DSC REG         & \hex{451}.6--7 & 0        & ---     & 9.9  & 10 & \ok\ (inactive) \\
+28 & GPS Latitude    & \hex{452}.0--3 & 0.000    & \textdegree & 20.1 & 20 & \ok\ (no fix) \\
+29 & GPS Longitude   & \hex{452}.4--7 & 0.000    & \textdegree & 20.1 & 20 & \ok\ (no fix) \\
+\end{longtable}
+
+% =========================================================================
+\section{Observed broadcast rates}
+
+Three of eight frames are at spec; five are running at a uniform
+\textbf{$\sim$\SI{16.5}{Hz}} that does not match the PDF.
+
+\begin{center}
+\begin{tabular}{@{}lrrrl@{}}
+\toprule
+Frame & Obs Hz & PDF Hz & $\Delta$ & Status \\
+\midrule
+\hex{420} SmartyCam01 & 16.5 & 10 & $+6$  & at rest faster than spec \\
+\hex{421} SmartyCam02 & 16.5 & 50 & $-34$ & at rest slower than spec \\
+\hex{422} SmartyCam03 & 16.4 & 50 & $-34$ & at rest slower than spec \\
+\hex{423} SmartyCam04 & 16.5 & 50 & $-34$ & at rest slower than spec \\
+\hex{424} SmartyCam05 & 16.3 & 50 & $-34$ & at rest slower than spec \\
+\hex{450} AimExt01    & 10.0 & 10 & $\sim 0$ & \ok \\
+\hex{451} AimExt02    &  9.9 & 10 & $\sim 0$ & \ok \\
+\hex{452} AimExt03    & 20.1 & 20 & $\sim 0$ & \ok \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All five SmartyCam frames landing on the same $\sim$\SI{16.5}{Hz}
+cadence indicates a shared scheduler at the MXP. The two most likely
+explanations are (a)~idle-mode rate reduction --- the IMU-driven
+50\,Hz mode kicks in only under motion, or (b)~an MXP configuration
+divergence from the v1.0 reference. Resolution requires re-measuring
+during a moving capture.
+
+% =========================================================================
+\section{Unmapped traffic}
+
+In addition to the 12 documented frames, the bus carries
+\textbf{2230 frames across 13 IDs} not covered by the PDF or the
+\texttt{pitwall.dbc} mapping:
+
+\begin{center}
+\begin{tabular}{@{}llr@{}}
+\toprule
+ID & Rate (Hz) & Purpose \\
+\midrule
+\hex{028} & 69.2 & unknown, fast --- likely BMW DSC/ABS frame \\
+\hex{023} & 62.0 & unknown, fast \\
+\hex{024} & 62.0 & unknown, fast \\
+\hex{425} & 17.0 & AiM-shaped ID, undocumented extended channel \\
+\hex{42E} &  3.0 & unknown \\
+\hex{02F}, \hex{032}, \hex{043}, \hex{044} & 1.0 & status/diagnostic \\
+\hex{000}, \hex{00F}, \hex{020} & sporadic & MXP diagnostics? \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Per PDF \S 10 only \hex{420}--\hex{456} should appear on \texttt{CAN2
+Output}; these extras suggest either firmware-newer-than-v1.0
+behaviour or BMW-bus echo on the MXP scheduler. They are counted
+under \texttt{frames\_unknown} by the reader and discarded; no harm
+to ingest. Decoding them requires an AiM tech doc or capture-based
+reverse engineering.
+
+% =========================================================================
+\section{Issues found and recommended actions}
+
+\subsection{Vertical accelerometer sign is inverted}
+
+\textbf{Severity:} high (affects vehicle-attitude features).
+
+At rest on level ground, \texttt{vertical\_accel\_g} must read
+$+1.0$\,g per the PDF \S 6.2 convention (``Bump (upward) =
+positive''). The captured value is $-0.99$\,g, magnitude correct,
+direction reversed. PDF \S 6.2 anticipates this case and prescribes
+the remedy verbatim: \emph{``Negate value in decoder.''}
+
+The minimal fix is to flip the scale sign in \texttt{pitwall.dbc}:
+
+\begin{lstlisting}
+- SG_ vertical_accel_g : 32|16@1- (0.01,0) [-32|32] "g" DASH
++ SG_ vertical_accel_g : 32|16@1- (-0.01,0) [-32|32] "g" DASH
+\end{lstlisting}
+
+\subsection{Inline accelerometer reads $-0.30$\,g at idle}
+
+\textbf{Severity:} indeterminate without motion data.
+
+Inline accel at rest on level ground must be zero. The captured
+$-0.30$\,g corresponds to either (i)~a sign inversion combined with
+the same calibration issue as vertical, or (ii)~the car being
+parked on a $\sim$17\textdegree\ slope with the nose tilted upward, or
+(iii)~a sensor bias. A drive-test will discriminate: accelerate hard
+forward; the reading should swing positive if the PDF convention is
+respected.
+
+\subsection{Yaw rate bias $+4.3$\,\textdegree/s at idle}
+
+\textbf{Severity:} medium (will skew cornering analytics).
+
+A stationary car must read zero. The bias is consistent with MEMS
+gyro warm-up drift; suggest a startup zero-offset calibration pass
+based on the first 5\,s of stationary data.
+
+\subsection{Gear channel returns 53246, not 0}
+
+\textbf{Severity:} known PDF constraint, no fix required.
+
+PDF \S 9 declares the channel always-zero on MSS54HP. We observe
+non-zero garbage instead, but functionally equivalent --- the channel
+is unusable. The derived-gear path in
+\texttt{data/cars/bmw\_e46\_m3.yaml} (RPM / wheel-speed ratio with
+S54 gear ratios) is the correct replacement and is already in place.
+
+\subsection{SmartyCam frame rates are $3\times$ slower than spec}
+
+\textbf{Severity:} affects ADR-015 capability gating.
+
+Frames \hex{421}--\hex{424} at $\sim$\SI{16.5}{Hz} instead of
+\SI{50}{Hz} may cause the bridge's \texttt{min\_useful\_hz} guards
+to mark IMU-derived coaches as below-rate during idle. Suggested
+mitigation: defer rate verification until a moving capture; if rates
+do not climb under motion, raise with AiM or reconfigure the MXP in
+Race Studio.
+
+\subsection{Naming mismatch in DBC vs PDF}
+
+\textbf{Severity:} cosmetic but error-prone for future readers.
+
+Two DBC names disagree with PDF labels:
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+PDF name & DBC name & Recommendation \\
+\midrule
+Oil Filter Temp & \texttt{oil\_temp\_f}        & rename to \texttt{oil\_filter\_temp\_f} \\
+Pedal Position  & \texttt{throttle\_pos\_pct}  & accept; we treat them as synonyms \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The Oil Filter Temp rename is recommended because the PDF
+\emph{also} defines an Engine Oil Temp on a different frame
+(\hex{451}.4--5, mapped to \texttt{engine\_oil\_temp\_f}); the
+two represent different sensors with different response times and
+must not be confused.
+
+% =========================================================================
+\section{Conclusion}
+
+The AiM MXP CAN2 ingest chain works end-to-end at \SI{1}{Mbit/s} on
+the host. Every one of the 29 channels documented in the
+\emph{Developer Integration Spec v1.0} arrives on the bus, decodes
+through \texttt{pitwall.dbc} without errors, and yields physically
+sensible values for a parked, idling E46 M3 --- modulo the
+\textbf{vertical-axis sign inversion} that the PDF explicitly told
+us to check for, and a \textbf{$3\times$ slower than spec rate} on
+the five SmartyCam frames that we believe is idle-mode behaviour.
+
+Immediate, low-risk fix: flip the vertical-accel scale in the DBC.
+Remaining sign-convention questions on inline / lateral / roll /
+pitch / yaw require a brief drive test to discriminate sign
+inversion from slope, bias, or normal idle-time gyro drift.
+
+\vspace{1em}
+
+\noindent\textbf{Reference documents.}\\
+\hspace*{1em}\textit{CANable 2.0 $\to$ Google Pixel 10 Developer Integration Spec v1.0} (PDF, AiM/Pitwall)\\
+\hspace*{1em}\texttt{data/cars/bmw\_e46\_m3.yaml} (this repo)\\
+\hspace*{1em}\texttt{data/dbc/pitwall.dbc} (this repo)\\
+\hspace*{1em}Git: branch \texttt{aim-mxp-can-1mbps}, commit \texttt{aa65143}.
+
+\end{document}

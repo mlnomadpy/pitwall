@@ -62,6 +62,7 @@ import cantools
 ROOT = Path(__file__).resolve().parents[4]
 
 from pitwall.dead_reckoning import DeadReckoner, DeadReckonerConfig
+from pitwall.features.telemetry.car_config import CarConfig, load_car_config
 
 # Lazy import — bridge module pulls in flask + sonic_model. Reader works
 # without the bridge when run standalone (it'll POST signals over HTTP).
@@ -74,6 +75,7 @@ except ImportError:
 
 
 DEFAULT_DBC = ROOT / "data" / "dbc" / "pitwall.dbc"
+DEFAULT_CAR_CONFIG = ROOT / "data" / "cars" / "bmw_e46_m3.yaml"
 
 
 @dataclass
@@ -100,30 +102,11 @@ _WIDE_FIELDS = (
     "brake_bar", "throttle_pct", "steering_deg", "rpm", "lat", "lon",
 )
 
-# AIM MXP V3.0 Canonical Mappings
-_CANONICAL_MAPPING = {
-    "speed_mph": "speed_ms",          # mph -> m/s
-    "lateral_accel_g": "g_lat",       # g -> g
-    "inline_accel_g": "g_long",       # g -> g
-    "brake_press_psi": "brake_bar",   # psi -> bar
-    "throttle_pos_pct": "throttle_pct", # % -> %
-    "steer_angle_deg": "steering_deg", # deg -> deg
-    "gps_lat": "lat",                 # deg -> deg
-    "gps_lon": "lon"                  # deg -> deg
-}
+# Canonical mapping, unit conversions, and sign-convention fixes are now
+# data-driven from data/cars/<car>.yaml via the CarConfig pipeline (see
+# car_config.py and data/formulas/standard.yaml). The reader is car-
+# agnostic; per-car onboarding is YAML + DBC, no Python edits.
 
-# Values from these channels need specific scaling/conversion before hitting the wide table
-_CONVERSIONS = {
-    "speed_mph": lambda v: v * 0.44704,           # mph to m/s
-    "brake_press_psi": lambda v: v * 0.0689476,   # psi to bar
-}
-
-# Bidirectional channels mapped to unsigned slots that require signed recovery
-_SIGNED_RECOVERY = {
-    "roll_rate_degs", "pitch_rate_degs", "yaw_rate_degs", 
-    "lateral_accel_g", "inline_accel_g", "vertical_accel_g", 
-    "steer_angle_deg"
-}
 
 class CanReader:
 
@@ -148,6 +131,11 @@ class CanReader:
         flush_ms:   time-based wide-row flush interval (default 100 ms = 10 Hz).
         bridge:     optional reference to the loaded pitwall_bridge module.
                     If None, the reader will try to import it.
+        car_config_path: per-car YAML driving the post-decode pipeline
+                    (sign flips, unit conversions, canonical renames,
+                    derived signals, methods). Defaults to the BMW E46 M3
+                    config. Pass `False` to skip car config entirely
+                    (raw DBC names pass through verbatim).
     """
 
     def __init__(
@@ -162,6 +150,7 @@ class CanReader:
         bridge=None,
         log: Optional[logging.Logger] = None,
         dead_reckon: bool = True,
+        car_config_path: Optional[str] = None,
     ):
         self.session_id = session_id
         self.interface = interface
@@ -192,6 +181,36 @@ class CanReader:
         self._db = cantools.database.load_file(paths[0])
         for extra in paths[1:]:
             self._db.add_dbc_file(extra)
+
+        # Load per-car config (sign flips, conversions, derived signals).
+        # car_config_path=False is the explicit opt-out; None means "use
+        # the default car YAML if it exists, otherwise pass through".
+        self._car_config: Optional[CarConfig] = None
+        if car_config_path is not False:
+            cfg_path = car_config_path or str(DEFAULT_CAR_CONFIG)
+            try:
+                self._car_config = load_car_config(cfg_path)
+                self.log.info(
+                    "loaded car config: %s (%d signal pipelines, "
+                    "%d cross-derived, %d methods)",
+                    self._car_config.car_id,
+                    len(self._car_config.processors),
+                    len(self._car_config.cross_derived),
+                    len(self._car_config.methods),
+                )
+            except FileNotFoundError:
+                self.log.warning(
+                    "car config %s not found; raw DBC signals will pass "
+                    "through without canonical rename/unit conversion",
+                    cfg_path,
+                )
+            except Exception as e:
+                self.log.error("car config load failed: %s", e)
+                raise
+
+        # Latest-value cache used by the car-config pipeline so cross-
+        # signal derives + methods can read any signal's most recent value.
+        self._latest: dict[str, float] = {}
 
         self._bus: Optional[can.BusABC] = None
         self._stop = threading.Event()
@@ -349,41 +368,39 @@ class CanReader:
             self._consume(msg.timestamp, decoded)
 
     def _consume(self, t: float, decoded: dict):
-        """Route a decoded frame's signals to wide buffer and/or tall sink."""
-        wide_updates = {}
-        tall_signals = []
-        for name, value in decoded.items():
-            try:
-                fvalue = float(value)
-            except (TypeError, ValueError):
-                continue
-                
-            # Apply AIM MXP signed recovery for unsigned slots
-            if name in _SIGNED_RECOVERY and fvalue > 32767:
-                # The raw value was scaled (e.g. * 10 or 100) before transmission.
-                # Since the DBC slot is unsigned, cantools gives us (raw * scale).
-                # Example: -1.0g raw=0xFFFF(65535). cantools gives 65535 * 0.01 = 655.35.
-                # We need to subtract the max offset created by the scale.
-                if "accel" in name:
-                    fvalue -= 655.36  # 65536 * 0.01
-                else:
-                    fvalue -= 6553.6  # 65536 * 0.1
+        """Route a decoded frame's signals through the car-config pipeline,
+        then into the wide-row buffer and tall sink.
 
-            # Apply AIM MXP mapping and conversions
-            target_name = _CANONICAL_MAPPING.get(name, name)
-            if target_name in _CONVERSIONS:
-                fvalue = _CONVERSIONS[target_name](fvalue)
-            elif name in _CONVERSIONS:
-                fvalue = _CONVERSIONS[name](fvalue)
+        The pipeline (data/cars/<car>.yaml) handles all per-car semantics:
+        sign-convention fixes (PDF §6.2), unit conversions (mph→m/s,
+        psi→bar, etc.), canonical renames, multi-input derived signals
+        (combo_g), and lookup-table methods (gear_position). The reader
+        itself stays car-agnostic — adding a new car is a YAML + DBC,
+        not a Python change.
+        """
+        # Run the YAML pipeline if one is loaded; otherwise pass through
+        # raw DBC names with their decoded float values.
+        if self._car_config is not None:
+            emissions = self._car_config.process_decoded_frame(decoded, self._latest)
+        else:
+            emissions = []
+            for name, value in decoded.items():
+                try:
+                    emissions.append((name, float(value)))
+                except (TypeError, ValueError):
+                    continue
+                self._latest[name] = emissions[-1][1]
 
-            if target_name in _WIDE_FIELDS:
-                wide_updates[target_name] = fvalue
-            
-            # We always push to tall store with the original name for diagnostic fidelity
-            tall_signals.append((name, t, fvalue))
-            # And push mapped canonicals to tall store if they differ
-            if target_name != name:
-                 tall_signals.append((target_name, t, fvalue))
+        # Distribute emissions: any name in _WIDE_FIELDS lands in the
+        # wide-row buffer; everything goes to the tall sink. Duplicates
+        # (e.g. a signal that's both renamed and canonical) are fine —
+        # they hit the tall store under each name.
+        wide_updates: dict[str, float] = {}
+        tall_signals: list[tuple[str, float, float]] = []
+        for name, value in emissions:
+            if name in _WIDE_FIELDS:
+                wide_updates[name] = value
+            tall_signals.append((name, t, value))
 
         # ADR-018: Kalman fusion for smooth distance.
         if self._dr is not None:
@@ -495,6 +512,11 @@ def main():
                    help="CAN bus bitrate; AiM MXP CAN2 output runs at 1 Mbit/s")
     p.add_argument("--dbc", action="append", default=None,
                    help="DBC file(s) to load (default: data/dbc/pitwall.dbc). May repeat.")
+    p.add_argument("--car-config", default=None,
+                   help="per-car YAML driving the post-decode pipeline "
+                        "(default: data/cars/bmw_e46_m3.yaml; pass --no-car-config to skip)")
+    p.add_argument("--no-car-config", action="store_true",
+                   help="skip car config entirely; emit raw DBC signal names")
     p.add_argument("--flush-ms", type=int, default=100,
                    help="wide-table flush cadence in ms (default 100 = 10 Hz)")
     p.add_argument("--verbose", action="store_true")
@@ -512,6 +534,7 @@ def main():
         bitrate=args.bitrate,
         dbc_paths=args.dbc,
         flush_ms=args.flush_ms,
+        car_config_path=(False if args.no_car_config else args.car_config),
     )
     reader.run_forever()
 

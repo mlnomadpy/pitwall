@@ -37,7 +37,8 @@ from pitwall import create_app, register_blueprints
 app = create_app()
 
 
-def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths, flush_ms):
+def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths,
+                      flush_ms, car_config_path=None):
     """Start a CanReader thread that pumps CAN frames into pitwall's stores."""
     try:
         from pitwall.features.telemetry.can_reader import CanReader
@@ -49,6 +50,7 @@ def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths, flu
             session_id=session_id, interface=interface, channel=channel,
             bitrate=bitrate, dbc_paths=dbc_paths, flush_ms=flush_ms,
             bridge=sys.modules["pitwall.state"],
+            car_config_path=car_config_path,
         )
         reader.start()
         state.can_reader = reader
@@ -69,6 +71,12 @@ def main():
     parser.add_argument("--can-bitrate", type=int, default=1_000_000,
                         help="CAN bus bitrate; AiM MXP CAN2 output is 1 Mbit/s")
     parser.add_argument("--can-dbc", action="append", default=None)
+    parser.add_argument("--can-car-config", default=None,
+                        help="per-car YAML for the post-decode pipeline "
+                             "(default: data/cars/bmw_e46_m3.yaml; "
+                             "pass --can-no-car-config to skip)")
+    parser.add_argument("--can-no-car-config", action="store_true",
+                        help="skip car config; emit raw DBC signal names")
     parser.add_argument("--can-session-id", default=None)
     parser.add_argument("--can-flush-ms", type=int, default=100)
     args = parser.parse_args()
@@ -105,7 +113,8 @@ def main():
         ensure_session_row(sid, track=(state.track.name if state.track else None),
                            note="auto-created by bridge --can-channel" + (" (live placeholder)" if sid == "_live" else ""))
         _start_can_reader(session_id=sid, interface=args.can_interface, channel=args.can_channel,
-                          bitrate=args.can_bitrate, dbc_paths=args.can_dbc, flush_ms=args.can_flush_ms)
+                          bitrate=args.can_bitrate, dbc_paths=args.can_dbc, flush_ms=args.can_flush_ms,
+                          car_config_path=(False if args.can_no_car_config else args.can_car_config))
         print(f"    CAN session: {sid}")
 
     # 6. Launch
