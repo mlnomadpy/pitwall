@@ -56,7 +56,7 @@ object PitwallEmbeddedBridge {
             encodeDefaults = true
         }
 
-        val dbFile = File(context.filesDir, "pitwall_embedded.duckdb")
+        val dbFile = File(context.filesDir, "pitwall_embedded.sqlite")
         val duck = EmbeddedDuckDb(dbFile)
         runBlocking(Dispatchers.IO) {
             duck.withConnection {

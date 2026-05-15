@@ -1,5 +1,6 @@
 package com.pitwall.bridge.ktor.embedded
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,7 +18,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.sql.Connection
-import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.ResultSet
 import java.sql.Types
@@ -44,10 +44,8 @@ class EmbeddedDuckDb(private val dbFile: File) {
     }
 
     private fun openAndMigrate(): Connection {
-        dbFile.parentFile?.mkdirs()
-        Class.forName("org.duckdb.DuckDBDriver")
-        val conn = DriverManager.getConnection("jdbc:duckdb:${dbFile.absolutePath}")
-        conn.autoCommit = true
+        Log.i("EmbeddedDuckDb", "Opening Android SQLite at ${dbFile.absolutePath}")
+        val conn = AndroidSqliteConnection.open(dbFile)
         migrate(conn)
         return conn
     }
@@ -56,85 +54,82 @@ class EmbeddedDuckDb(private val dbFile: File) {
         c.createStatement().use { st ->
             st.execute(
                 """
-                CREATE SEQUENCE IF NOT EXISTS laps_id_seq;
                 CREATE TABLE IF NOT EXISTS laps (
-                    id            INTEGER PRIMARY KEY DEFAULT nextval('laps_id_seq'),
-                    session_id    VARCHAR,
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id    TEXT,
                     lap_number    INTEGER,
-                    lap_time_s    DOUBLE,
-                    best_sector   DOUBLE,
-                    avg_speed_kmh DOUBLE,
-                    max_combo_g   DOUBLE,
-                    coast_pct     DOUBLE,
-                    recorded_at   TIMESTAMP DEFAULT now()
+                    lap_time_s    REAL,
+                    best_sector   REAL,
+                    avg_speed_kmh REAL,
+                    max_combo_g   REAL,
+                    coast_pct     REAL,
+                    recorded_at   TEXT DEFAULT (datetime('now'))
                 );
-                CREATE SEQUENCE IF NOT EXISTS notes_id_seq;
                 CREATE TABLE IF NOT EXISTS coaching_notes (
-                    id            INTEGER PRIMARY KEY DEFAULT nextval('notes_id_seq'),
-                    session_id    VARCHAR,
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id    TEXT,
                     burst_id      INTEGER,
-                    distance_m    DOUBLE,
-                    text          VARCHAR,
-                    source        VARCHAR,
-                    recorded_at   TIMESTAMP DEFAULT now()
+                    distance_m    REAL,
+                    text          TEXT,
+                    source        TEXT,
+                    recorded_at   TEXT DEFAULT (datetime('now'))
                 );
                 CREATE TABLE IF NOT EXISTS telemetry (
-                    session_id   VARCHAR,
+                    session_id   TEXT,
                     frame_idx    INTEGER,
-                    timestamp    DOUBLE,
-                    distance_m   DOUBLE,
-                    speed_ms     DOUBLE,
-                    g_lat        DOUBLE,
-                    g_long       DOUBLE,
-                    combo_g      DOUBLE,
-                    brake_bar    DOUBLE,
-                    throttle_pct DOUBLE,
-                    steering_deg DOUBLE,
-                    rpm          DOUBLE,
-                    lat          DOUBLE,
-                    lon          DOUBLE
+                    timestamp    REAL,
+                    distance_m   REAL,
+                    speed_ms     REAL,
+                    g_lat        REAL,
+                    g_long       REAL,
+                    combo_g      REAL,
+                    brake_bar    REAL,
+                    throttle_pct REAL,
+                    steering_deg REAL,
+                    rpm          REAL,
+                    lat          REAL,
+                    lon          REAL
                 );
                 CREATE INDEX IF NOT EXISTS idx_telemetry_session
                     ON telemetry(session_id, frame_idx);
                 CREATE TABLE IF NOT EXISTS sessions (
-                    session_id    VARCHAR PRIMARY KEY,
-                    driver        VARCHAR,
-                    driver_level  VARCHAR,
-                    track         VARCHAR,
-                    car           VARCHAR,
-                    started_at    TIMESTAMP DEFAULT now(),
-                    ended_at      TIMESTAMP,
-                    note          VARCHAR
+                    session_id    TEXT PRIMARY KEY,
+                    driver        TEXT,
+                    driver_level  TEXT,
+                    track         TEXT,
+                    car           TEXT,
+                    started_at    TEXT DEFAULT (datetime('now')),
+                    ended_at      TEXT,
+                    note          TEXT
                 );
-                CREATE SEQUENCE IF NOT EXISTS signal_registry_id_seq;
                 CREATE TABLE IF NOT EXISTS signal_registry (
-                    signal_id     INTEGER PRIMARY KEY DEFAULT nextval('signal_registry_id_seq'),
-                    name          VARCHAR UNIQUE NOT NULL,
-                    units         VARCHAR,
-                    semantics     VARCHAR,
-                    "group"       VARCHAR,
-                    expected_hz   DOUBLE,
-                    min_useful_hz DOUBLE,
-                    discovery     VARCHAR,
-                    obd2_pid      VARCHAR,
-                    discovered_at TIMESTAMP DEFAULT now()
+                    signal_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name          TEXT UNIQUE NOT NULL,
+                    units         TEXT,
+                    semantics     TEXT,
+                    "group"       TEXT,
+                    expected_hz   REAL,
+                    min_useful_hz REAL,
+                    discovery     TEXT,
+                    obd2_pid      TEXT,
+                    discovered_at TEXT DEFAULT (datetime('now'))
                 );
                 CREATE TABLE IF NOT EXISTS telemetry_signals (
-                    session_id  VARCHAR NOT NULL,
+                    session_id  TEXT NOT NULL,
                     signal_id   INTEGER NOT NULL,
-                    t           DOUBLE  NOT NULL,
-                    value       DOUBLE  NOT NULL,
+                    t           REAL NOT NULL,
+                    value       REAL NOT NULL,
                     PRIMARY KEY (session_id, signal_id, t)
                 );
                 CREATE INDEX IF NOT EXISTS idx_signals_sess_sig_t
                     ON telemetry_signals (session_id, signal_id, t);
                 CREATE TABLE IF NOT EXISTS session_capabilities (
-                    session_id  VARCHAR NOT NULL,
+                    session_id  TEXT NOT NULL,
                     signal_id   INTEGER NOT NULL,
                     n_samples   INTEGER NOT NULL,
-                    mean_hz     DOUBLE NOT NULL,
-                    t_start     DOUBLE NOT NULL,
-                    t_end       DOUBLE NOT NULL,
+                    mean_hz     REAL NOT NULL,
+                    t_start     REAL NOT NULL,
+                    t_end       REAL NOT NULL,
                     PRIMARY KEY (session_id, signal_id)
                 );
                 """.trimIndent(),
@@ -741,13 +736,25 @@ class EmbeddedDuckDb(private val dbFile: File) {
     }
 
     fun exportTelemetryParquet(conn: Connection, sessionId: String, outFile: File) {
-        val escPath = outFile.absolutePath.replace("'", "''")
-        val escSid = sessionId.replace("'", "''")
-        conn.createStatement().use { st ->
-            st.execute(
-                "COPY (SELECT * FROM telemetry WHERE session_id = '$escSid') " +
-                    "TO '$escPath' (FORMAT PARQUET)",
-            )
+        // DuckDB COPY...PARQUET not available on Android SQLite; export as CSV instead
+        conn.prepareStatement(
+            "SELECT * FROM telemetry WHERE session_id = ? ORDER BY frame_idx",
+        ).use { ps ->
+            ps.setString(1, sessionId)
+            ps.executeQuery().use { rs ->
+                outFile.bufferedWriter().use { w ->
+                    val meta = rs.metaData
+                    val cols = (1..meta.columnCount).map { meta.getColumnLabel(it) }
+                    w.write(cols.joinToString(","))
+                    w.newLine()
+                    while (rs.next()) {
+                        w.write(cols.indices.joinToString(",") { i ->
+                            rs.getString(i + 1) ?: ""
+                        })
+                        w.newLine()
+                    }
+                }
+            }
         }
     }
 

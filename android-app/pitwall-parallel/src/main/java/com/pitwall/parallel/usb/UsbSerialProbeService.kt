@@ -229,7 +229,13 @@ class UsbSerialProbeService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification(waitingText()))
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(waitingText()))
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot start foreground — runtime permission not yet granted", e)
+            stopSelf()
+            return START_NOT_STICKY
+        }
         attachBestUsbSerial()
         handler.post(statsTicker)
         handler.post(duckFlushTicker)
