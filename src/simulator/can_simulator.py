@@ -171,7 +171,7 @@ def play(
     *,
     interface: str = "virtual",
     channel: str = "pitwall_dev",
-    bitrate: int = 500_000,
+    bitrate: int = 1_000_000,
     dbc_paths: Optional[list[str]] = None,
     speed: float = 1.0,
     inject_sink: bool = True,
@@ -233,7 +233,8 @@ def main():
                      help="emit ~3 synthetic laps of Sonoma-shaped data")
     p.add_argument("--interface", default="virtual")
     p.add_argument("--channel", default="pitwall_dev")
-    p.add_argument("--bitrate", type=int, default=500_000)
+    p.add_argument("--bitrate", type=int, default=1_000_000,
+                   help="match the AiM MXP CAN2 output: 1 Mbit/s")
     p.add_argument("--dbc", action="append", default=None)
     p.add_argument("--speed", type=float, default=1.0,
                    help="playback speed multiplier (1.0 = real-time, "

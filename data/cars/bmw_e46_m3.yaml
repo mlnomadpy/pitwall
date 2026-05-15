@@ -1,0 +1,372 @@
+# 2003 BMW M3 (E46) — AiM MXP CAN2 → CANable 2.0 → Pixel 10
+#
+# Source spec: .context/CANable2_Pixel10_Developer_Integration_Spec_v1.0.pdf
+#
+# This config does NOT describe native BMW PT-CAN. The Pixel 10 never
+# touches the BMW bus directly. The AiM MXP dash logger sits in the
+# middle: it ingests BMW DME/DSC + TPMS on its CAN1 / CAN2 inputs and
+# RE-BROADCASTS a clean, fixed 8-frame protocol on its CAN2 OUTPUT
+# port. The CANable 2.0 (Jhoinrch RH-02 PRO) listens to that output
+# bus and forwards frames as ASCII SLCAN over USB-C OTG.
+#
+# The on-bus frame layouts are encoded in data/dbc/pitwall.dbc
+# ("AIM MXP SmartyCam Enhanced CAN Protocol v3.0"). This YAML captures
+# the wrapping facts the DBC can't express: wiring, bitrate, USB
+# transport, broadcast rates, sign-recovery rules, known-broken
+# channels.
+
+car:
+  make: BMW
+  model: M3
+  chassis: E46
+  year: 2003
+  engine: S54B32 (MSS54HP DME)
+  notes: >
+    Gear position is not exposed by MSS54HP on any path. The MXP slot
+    at 0x420 bytes 4-5 will always read 0. Coaches must derive gear
+    from RPM / wheel-speed ratio.
+
+# --- 1. Dash logger (the bus master) -------------------------------------
+dash_logger:
+  make: AiM
+  model: MXP
+  output_port: CAN2
+  protocol: AIM MXP SmartyCam Enhanced CAN Protocol v3.0
+  total_frames: 8
+  total_channels: 29
+
+# --- 2. Wiring: MXP CAN2 → CANable 2.0 -----------------------------------
+# Cable: AiM RLCAB015L (4-wire) — only CAN H / CAN L are landed.
+wiring:
+  cable: RLCAB015L
+  conductors:
+    blue:  { lands_on: CAN_H, terminal: "RH-02 PRO CAN H" }
+    white: { lands_on: CAN_L, terminal: "RH-02 PRO CAN L" }
+    gnd:   { lands_on: unconnected, reason: "RH-02 PRO is galvanically isolated" }
+    "5v":  { lands_on: unconnected, reason: "5V terminal is an adapter OUTPUT, not required" }
+  termination:
+    mxp_internal_120R: enabled        # MXP CAN2 internal terminator ON
+    canable_switch_120R: enabled      # RH-02 PRO termination switch ON
+    topology: "two nodes, one 120 Ω resistor at each end of the pair"
+
+# --- 3. CAN bus electrical/timing ----------------------------------------
+can_bus:
+  name: AiM MXP CAN2 Output
+  bitrate_bps: 1000000          # 1 Mbit/s — NOT 500 kbps
+  frame_format: classic_can     # not CAN-FD
+  id_width: 11                  # 11-bit standard IDs only ("t" frames in SLCAN, never "T")
+  byte_order: little_endian     # byte 0 = LSB on every multi-byte channel
+  dlc: 8                        # every frame in this protocol is 8 bytes
+
+# --- 4. USB transport: CANable 2.0 → Pixel 10 ----------------------------
+usb_adapter:
+  make: Jhoinrch
+  model: RH-02 PRO
+  alias: CANable 2.0
+  firmware: SLCAN
+  usb_class: CDC                # appears as a virtual serial port
+  android_library: usb-serial-for-android (com.github.mik3y:usb-serial-for-android:3.4.6)
+  port_settings:
+    baud: 115200
+    data_bits: 8
+    stop_bits: 1
+    parity: none
+  slcan_frame_format:
+    template: "t<ID:3hex><DLC:1>< DATA:16hex>\\r"
+    terminator: "\\r"           # carriage return, 0x0D
+    standard_prefix: "t"        # lowercase = 11-bit standard
+    extended_prefix: "T"        # uppercase = 29-bit; NOT used in this protocol
+    example: "t42081A2B3C4D5E6F7A8B\\r"
+
+# --- 5. python-can configuration ----------------------------------------
+# Values to pass to can.Bus(...) on the Pixel 10 / Termux side. The
+# pitwall CAN reader reads these via --interface / --channel / --bitrate.
+python_can:
+  interface: slcan
+  channel: /dev/ttyACM0         # typical on Linux/Termux; varies per device
+  bitrate: 1000000
+  ttyBaudrate: 115200
+
+# --- 6. Frame summary ----------------------------------------------------
+# Authoritative bit layouts live in data/dbc/pitwall.dbc (BO_ 1056-1060,
+# 1104-1106). This block exists so a human can sanity-check the bus
+# without opening cantools.
+#
+# Rate is set per CAN ID, not per channel — slow channels (oil temp,
+# fuel) repeat values inside fast frames. Expected and harmless.
+frames:
+  0x420:
+    dbc_message: SmartyCam01
+    rate_hz: 10
+    channels: [rpm, gps_speed_mph, gear, water_temp_f]
+  0x421:
+    dbc_message: SmartyCam02
+    rate_hz: 50
+    channels: [water_press_psi, roll_rate_degs, oil_filter_temp_f, oil_press_psi]
+  0x422:
+    dbc_message: SmartyCam03
+    rate_hz: 50
+    channels: [brake_press_psi, pedal_pos_pct, brake_switch, pitch_rate_degs]
+  0x423:
+    dbc_message: SmartyCam04
+    rate_hz: 50
+    channels: [steer_angle_deg, yaw_rate_degs, lateral_accel_g, inline_accel_g]
+  0x424:
+    dbc_message: SmartyCam05
+    rate_hz: 50
+    channels: [fuel_level_gal, battery_volt, vertical_accel_g]
+  0x450:
+    dbc_message: AimExtended01
+    rate_hz: 10
+    channels: [wheel_speed_fl_mph, wheel_speed_fr_mph, wheel_speed_rl_mph, wheel_speed_rr_mph]
+    source: BMW DSC
+  0x451:
+    dbc_message: AimExtended02
+    rate_hz: 10
+    channels: [ecu_speed_mph, ambient_temp_f, engine_oil_temp_f, dsc_reg]
+  0x452:
+    dbc_message: AimExtended03
+    rate_hz: 20
+    channels: [gps_lat, gps_lon]
+    note: "4-byte signed, deg7 format (decimal degrees × 1e7), ~1.1 cm resolution"
+
+# --- 7. Signed channels --------------------------------------------------
+# Channels declared `@1-` in pitwall.dbc, so cantools decodes them
+# correctly. Listed here only for the sign-convention audit the PDF
+# requires on first capture: if a channel reads large-positive where
+# negative is expected, flip the scale to -value in the DBC (or negate
+# in the canonical mapping).
+signed_channels_first_capture_verify:
+  - { channel: roll_rate_degs,    positive: roll right,        negative: roll left }
+  - { channel: pitch_rate_degs,   positive: nose up,           negative: nose down }
+  - { channel: yaw_rate_degs,     positive: rotate right,      negative: rotate left }
+  - { channel: lateral_accel_g,   positive: cornering right,   negative: cornering left }
+  - { channel: inline_accel_g,    positive: acceleration,      negative: braking }
+  - { channel: vertical_accel_g,  positive: bump (upward),     negative: rebound (downward) }
+  - { channel: steer_angle_deg,   positive: right of centre,   negative: left of centre }
+
+# --- 8. Known-broken / derived channels ----------------------------------
+# Per PDF §9. The bridge must not gate coaches on these unless derived.
+known_constraints:
+  gear:
+    on_bus: 0x420 bytes 4-5
+    status: always_zero
+    reason: "MSS54HP DME does not transmit gear on any path"
+    derived_replacement:
+      method: rpm_over_wheel_speed_ratio
+      inputs: [rpm, wheel_speed_rl_mph, wheel_speed_rr_mph]
+      ratios:                       # S54 ZF S6S420G + 3.62 final drive
+        "1": 4.227
+        "2": 2.528
+        "3": 1.669
+        "4": 1.226
+        "5": 1.000
+        "6": 0.828
+      final_drive: 3.62
+      tire_circumference_m: 1.998   # 245/40 R18 rear, stock
+  oil_filter_temp_f:
+    role: primary oil health
+    caveat: "PT-100 at filter housing; slow thermal response — not for rapid events"
+  engine_oil_temp_f:
+    role: secondary reference
+    caveat: "DME sump sensor; lags real oil temp"
+  battery_volt:
+    caveat: "scale x 0.1 V confirmed; verify range on first capture"
+
+# --- 9. CAN ID collision registry (PDF §10) ------------------------------
+# Verified by AiM: zero collisions across the MXP's three buses.
+collision_registry:
+  - { ids: "0x420-0x424", bus: "CAN2 Output", owner: "AiM MXP",
+      purpose: "standard channels (RPM, speed, IMU, temps, pressures)" }
+  - { ids: "0x450-0x452", bus: "CAN2 Output", owner: "AiM MXP",
+      purpose: "extended channels (wheel speeds, ECU supplemental, GPS)" }
+  - { ids: "BMW DME/DSC", bus: "CAN1 (receive only)", owner: "BMW DME",
+      purpose: "engine/chassis input to MXP; NOT retransmitted on CAN2 output" }
+  - { ids: "0x18FEF433",  bus: "CAN2 (receive only)", owner: "TPMS",
+      purpose: "isolated; NOT retransmitted on CAN2 output" }
+  - { ids: "0x420-0x456", bus: "SmartyCam port",       owner: "AiM MXP",
+      purpose: "independent physical bus to VBOX HD2; no collision possible" }
+
+# === 10. Signal post-processing pipelines ================================
+#
+# Each entry maps a raw DBC signal name (left side) to the chain of
+# transforms applied after cantools decodes the bytes. Three kinds of
+# operations exist:
+#
+#   apply:        list of in-place transforms applied to the signal's
+#                 own value. Each item references a formula by name from
+#                 data/formulas/standard.yaml (or a car-local override).
+#                 Shortcuts: `sign_flip: true` (= formula: negate),
+#                            `bias: <num>` (= formula: offset, b=<num>).
+#                 By default the formula's first input is bound to $self;
+#                 other inputs must be set with `bind: { a: 1, b: 2 }`.
+#
+#   rename_to:    change the emitted name (DBC name was wrong/legacy).
+#                 The cache key for downstream binds uses this new name.
+#
+#   canonical:    additionally emit the value under the canonical
+#                 wide-row name (speed_ms, g_lat, ...) for the bridge.
+#
+#   derive:       emit additional named signals computed from this
+#                 signal's value (+ optional other signals via bind).
+#                 Typical use: unit twins (psi_to_bar, mph_to_ms, f_to_c).
+#
+# Signals not listed here pass through untouched (emit as-is under the
+# DBC name).
+
+signals:
+
+  # --- 0x420 — engine + GPS speed + water temp -----------------------------
+  speed_mph:
+    derive:
+      - { name: speed_ms,  formula: mph_to_ms }                 # x = $self
+      - { name: speed_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+    # `canonical:` is intentionally NOT set here — the wide-row speed_ms
+    # has a different value (m/s, not mph). It's emitted via derive: above,
+    # which uses the converted value.
+
+  water_temp_f:
+    derive:
+      - { name: water_temp_c, formula: f_to_c }
+
+  # --- 0x421 — pressures + roll + oil filter temp ---------------------------
+  # DBC name "oil_temp_f" is misleading — PDF calls this "Oil Filter Temp"
+  # (PT-100 at filter housing). The DBC's other oil temp at 0x451.4-5 is
+  # the DME sump sensor — already named engine_oil_temp_f. Rename here.
+  oil_temp_f:
+    rename_to: oil_filter_temp_f
+    derive:
+      - { name: oil_filter_temp_c, formula: f_to_c }
+
+  water_press_psi:
+    derive:
+      - { name: water_press_bar, formula: psi_to_bar }
+
+  oil_press_psi:
+    derive:
+      - { name: oil_press_bar, formula: psi_to_bar }
+
+  # --- 0x422 — driver inputs + pitch ---------------------------------------
+  brake_press_psi:
+    derive:
+      - { name: brake_bar, formula: psi_to_bar }
+    # canonical: not set — brake_bar has a different value (bar vs psi),
+    # so it's emitted by derive: above with the converted unit.
+
+  throttle_pos_pct:
+    canonical: throttle_pct
+
+  # --- 0x423 — chassis IMU -------------------------------------------------
+  # See PDF §6.2 — sign convention must be verified on first capture.
+  # Updates here apply the negation in the decoder per the audit table.
+  steer_angle_deg:
+    canonical: steering_deg
+    # NOTE: sign verified on first drive — flip with `apply: [{sign_flip: true}]`
+    #       if right-of-centre reads negative.
+
+  yaw_rate_degs:
+    # Idle drift +4.3°/s observed; apply a calibration bias once
+    # characterised. Leave un-biased until we have a multi-trip mean.
+    # Example once calibrated:
+    #   apply: [{bias: -4.3}]
+
+  lateral_accel_g:
+    canonical: g_lat
+
+  inline_accel_g:
+    canonical: g_long
+    # First-capture audit pending. Read -0.30 g at idle (impossible
+    # on level ground). Either negate here AND the car is on a downhill
+    # slope, or accept the slope explanation. Tentative — confirmed on drive.
+
+  # --- 0x424 — fuel + battery + vertical accel -----------------------------
+  vertical_accel_g:
+    apply:
+      - sign_flip: true                  # PDF §6.2: read -0.99 g at rest, must be +1 g
+    canonical: g_vert
+
+  fuel_level_gal:
+    derive:
+      - { name: fuel_level_l, formula: gal_to_l }
+
+  # --- 0x450 — wheel speeds -----------------------------------------------
+  wheel_speed_fl_mph:
+    derive:
+      - { name: wheel_speed_fl_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_fl_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_fr_mph:
+    derive:
+      - { name: wheel_speed_fr_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_fr_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_rl_mph:
+    derive:
+      - { name: wheel_speed_rl_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_rl_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+  wheel_speed_rr_mph:
+    derive:
+      - { name: wheel_speed_rr_ms,  formula: mph_to_ms }
+      - { name: wheel_speed_rr_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+
+  # --- 0x451 — ECU supplemental --------------------------------------------
+  ecu_speed_mph:
+    derive:
+      - { name: ecu_speed_ms,  formula: mph_to_ms }
+      - { name: ecu_speed_kmh, formula: linear, bind: { a: 1.609344, b: 0 } }
+
+  ambient_temp_f:
+    derive:
+      - { name: ambient_temp_c, formula: f_to_c }
+
+  engine_oil_temp_f:
+    derive:
+      - { name: engine_oil_temp_c, formula: f_to_c }
+
+  # --- 0x452 — GPS ---------------------------------------------------------
+  gps_lat:
+    canonical: lat
+  gps_lon:
+    canonical: lon
+
+
+# === 11. Cross-signal derived =============================================
+# Multi-input pure-arithmetic emissions. Evaluated after the frame's per-
+# signal pipelines finish; inputs are read from the latest-value cache.
+# Each input binding must name a signal (string), a $self is not allowed
+# here because there's no single "self" channel.
+
+derived:
+  combo_g:
+    formula: combo_g
+    bind:
+      glat:  g_lat                       # canonical, set by lateral_accel_g
+      glong: g_long                      # canonical, set by inline_accel_g
+
+  wheel_speed_avg_mph:
+    formula: mean_4
+    bind:
+      a: wheel_speed_fl_mph
+      b: wheel_speed_fr_mph
+      c: wheel_speed_rl_mph
+      d: wheel_speed_rr_mph
+
+
+# === 12. Methods (non-arithmetic derivations) =============================
+# For derivations that need lookup tables, hysteresis, or other non-pure
+# logic. Handlers are registered in code (car_config.METHOD_HANDLERS);
+# YAML supplies parameters.
+
+methods:
+  gear_position:
+    method: rpm_over_wheel_speed_ratio
+    inputs: [rpm, wheel_speed_rl_mph, wheel_speed_rr_mph]
+    ratios:                              # S54 ZF S6S420G
+      "1": 4.227
+      "2": 2.528
+      "3": 1.669
+      "4": 1.226
+      "5": 1.000
+      "6": 0.828
+    final_drive: 3.62
+    tire_circumference_m: 1.998          # 245/40 R18 rear, stock
+    min_speed_kmh: 5.0
+
