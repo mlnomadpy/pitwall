@@ -46,10 +46,14 @@ def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths,
         print(f"⚠  CAN reader unavailable ({e}); install python-can + cantools")
         return None
     try:
+        # CanReader needs the top-level `pitwall` package as `bridge` so it
+        # can reach both `bridge.state.db_lock` and `bridge.db.get_db()`.
+        # Passing `pitwall.state` was a pre-existing bug — the wide/tall
+        # sink calls crash with AttributeError once frames actually flow.
         reader = CanReader(
             session_id=session_id, interface=interface, channel=channel,
             bitrate=bitrate, dbc_paths=dbc_paths, flush_ms=flush_ms,
-            bridge=sys.modules["pitwall.state"],
+            bridge=sys.modules["pitwall"],
             car_config_path=car_config_path,
         )
         reader.start()
@@ -79,6 +83,14 @@ def main():
                         help="skip car config; emit raw DBC signal names")
     parser.add_argument("--can-session-id", default=None)
     parser.add_argument("--can-flush-ms", type=int, default=100)
+    parser.add_argument("--simulate", action="store_true",
+                        help="spawn the AiM MXP synthetic simulator and a "
+                             "virtual-bus CanReader so the bridge has live "
+                             "telemetry without any real car connected")
+    parser.add_argument("--simulate-speed", type=float, default=1.0,
+                        help="simulator speed multiplier (1.0 = real time)")
+    parser.add_argument("--simulate-lap-seconds", type=float, default=60.0,
+                        help="duration of one synthetic lap in seconds")
     args = parser.parse_args()
 
     # 1. Initialize imports (feature flags, coach engine, etc.)
@@ -105,7 +117,14 @@ def main():
         except Exception as e:
             print(f"⚠  signal_registry seed skipped: {e}")
 
-    # 5. CAN reader
+    # 5. CAN reader (+ optional synthetic simulator)
+    if args.simulate and not args.can_channel:
+        # Auto-pick a virtual channel so the simulator and reader meet
+        # in-process. Override --can-interface/--can-channel only if the
+        # user didn't set them.
+        args.can_interface = "virtual"
+        args.can_channel = "pitwall_simulate"
+
     if args.can_channel:
         sid = args.can_session_id or "_live"
         if sid == "_live":
@@ -116,6 +135,24 @@ def main():
                           bitrate=args.can_bitrate, dbc_paths=args.can_dbc, flush_ms=args.can_flush_ms,
                           car_config_path=(False if args.can_no_car_config else args.can_car_config))
         print(f"    CAN session: {sid}")
+
+        if args.simulate:
+            try:
+                # src/simulator is on sys.path (see bootstrap above), so
+                # import the module name directly.
+                from aim_mxp_simulator import AimMxpSimulator, LapProfile
+                sim = AimMxpSimulator(
+                    interface=args.can_interface, channel=args.can_channel,
+                    bitrate=args.can_bitrate, speed_x=args.simulate_speed,
+                    profile=LapProfile(lap_seconds=args.simulate_lap_seconds),
+                )
+                sim.start()
+                state.simulator = sim
+                print(f"✓  Synthetic simulator running on {args.can_interface}/"
+                      f"{args.can_channel} ({args.simulate_speed:.2f}× speed, "
+                      f"{args.simulate_lap_seconds:.0f}s laps)")
+            except Exception as e:
+                print(f"⚠  Simulator failed to start: {e}")
 
     # 6. Launch
     port = args.port
