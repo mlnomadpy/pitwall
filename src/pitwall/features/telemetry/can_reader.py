@@ -47,6 +47,7 @@ to match. Native BMW PT-CAN is never touched.
 from __future__ import annotations
 
 import argparse
+import collections
 import logging
 import os
 import sys
@@ -76,6 +77,30 @@ except ImportError:
 
 DEFAULT_DBC = ROOT / "data" / "dbc" / "pitwall.dbc"
 DEFAULT_CAR_CONFIG = ROOT / "data" / "cars" / "bmw_e46_m3.yaml"
+
+
+class _BoundedDict(collections.OrderedDict):
+    """OrderedDict with a hard size cap that evicts the oldest entry
+    when full. Used for `_latest` (latest pipeline-emitted values) and
+    `_tall_id_cache` (signal-name → signal_id memoisation) so a config
+    drift, a misbehaving USB adapter, or a flood of novel CAN IDs
+    can't grow either dict without bound.
+
+    Insertion order = recency, so popitem(last=False) evicts the
+    oldest. Updates to an existing key bump its recency.
+    """
+    def __init__(self, *args, maxsize: int = 1024, **kwargs):
+        if maxsize < 1:
+            raise ValueError("maxsize must be >= 1")
+        self._maxsize = maxsize
+        super().__init__(*args, **kwargs)
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
 
 
 @dataclass
@@ -210,7 +235,11 @@ class CanReader:
 
         # Latest-value cache used by the car-config pipeline so cross-
         # signal derives + methods can read any signal's most recent value.
-        self._latest: dict[str, float] = {}
+        # Latest pipeline-emitted values, bounded so a misbehaving adapter
+        # or a config drift that produces novel signal names every frame
+        # can't grow the cache unboundedly. 1024 entries is ~5x the
+        # combined OBD2 + DBC + discovered signal count we expect.
+        self._latest: _BoundedDict[str, float] = _BoundedDict(maxsize=1024)
 
         self._bus: Optional[can.BusABC] = None
         self._stop = threading.Event()
@@ -226,7 +255,7 @@ class CanReader:
 
         # Pre-resolve signal_ids for tall-store names. Populated lazily on
         # first sighting to avoid a round-trip on every frame.
-        self._tall_id_cache: dict[str, int] = {}
+        self._tall_id_cache: _BoundedDict[str, int] = _BoundedDict(maxsize=1024)
 
         # Stats for the Pit Stall Setup screen: rolling frames/sec,
         # unknown CAN IDs (frames whose arbitration_id isn't in any loaded
@@ -482,6 +511,33 @@ class CanReader:
                 self._wide.steering_deg, self._wide.rpm,
                 self._wide.lat, self._wide.lon,
             )
+            wide_snapshot = {
+                # PWA's legacy SSE field names — keep stable for the existing
+                # contract. Don't rename; the PWA reads `speed` not `speed_ms`,
+                # `brake_pressure` not `brake_bar`, etc.
+                "timestamp":      self._wide.timestamp,
+                "distance":       self._wide.distance_m,
+                "speed":          self._wide.speed_ms,
+                "g_lat":          self._wide.g_lat,
+                "g_long":         self._wide.g_long,
+                "combo_g":        self._wide.combo_g,
+                "brake_pressure": self._wide.brake_bar,
+                "throttle":       self._wide.throttle_pct,
+                "steering":       self._wide.steering_deg,
+                "rpm":            self._wide.rpm,
+                "lat":            self._wide.lat,
+                "lon":            self._wide.lon,
+            }
+            # Latest pipeline-emitted values (g_vert, gear_position,
+            # oil_filter_temp_c, fuel_level_l, wheel_speed_*kmh/_ms, …).
+            # Merge after the wide snapshot so the canonical/wide names
+            # win if both sources agree, but PWA pages can also reach the
+            # raw + derived signals by their registry name.
+            extras = {
+                k: v for k, v in self._latest.items()
+                if isinstance(v, (int, float))
+                and k not in wide_snapshot
+            }
             self._frame_idx += 1
             self._last_distance_m = self._wide.distance_m
 
@@ -496,6 +552,16 @@ class CanReader:
                 )
             finally:
                 conn.close()
+
+        # Fan out to SSE subscribers (/telemetry/stream). Lazy import
+        # to avoid loading the realtime blueprint when the reader is
+        # used standalone in tests, and so a missing bus never breaks
+        # the DB write path above.
+        try:
+            from pitwall.features.realtime.bp_realtime import telemetry_bus
+            telemetry_bus.publish(self.session_id, {**wide_snapshot, **extras})
+        except Exception:
+            pass
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────
