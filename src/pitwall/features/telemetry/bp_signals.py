@@ -13,23 +13,48 @@ bp = Blueprint("signals", __name__)
 
 @bp.route("/session/<sid>/capabilities", methods=["GET"])
 def session_capabilities_get(sid: str):
-    """ADR-015 Phase 3: per-session capability envelope."""
+    """ADR-015 Phase 3: per-session capability envelope.
+
+    If the `session_capabilities` table has no row for this session
+    yet but raw telemetry exists, compute on the fly. This makes the
+    endpoint useful for live sessions (especially `_live`) without
+    requiring the caller to POST /capabilities/recompute first.
+    """
     if not state.has_duckdb:
         return jsonify({"error": "duckdb not available"}), 503
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        rows = conn.execute(
-            """SELECT sr.name, sc.n_samples, sc.mean_hz, sr.min_useful_hz,
-                      sc.t_start, sc.t_end
-               FROM session_capabilities sc
-               JOIN signal_registry sr USING(signal_id)
-               WHERE sc.session_id = ?
-               ORDER BY sr.name""", [sid]).fetchall()
-        conn.close()
+
+    def _fetch():
+        with state.db_lock:
+            conn = get_db()
+            if conn is None:
+                return None
+            try:
+                return conn.execute(
+                    """SELECT sr.name, sc.n_samples, sc.mean_hz, sr.min_useful_hz,
+                              sc.t_start, sc.t_end
+                       FROM session_capabilities sc
+                       JOIN signal_registry sr USING(signal_id)
+                       WHERE sc.session_id = ?
+                       ORDER BY sr.name""", [sid]).fetchall()
+            finally:
+                conn.close()
+
+    rows = _fetch()
+    if rows is None:
+        return jsonify({"error": "duckdb not available"}), 503
+
     if not rows:
-        return jsonify({"error": "session not found", "session_id": sid}), 404
+        # Session has no precomputed capabilities — try a lazy compute
+        # from whatever raw telemetry is already in the tall + wide
+        # stores. Returns the number of rows it wrote.
+        try:
+            n = compute_capabilities(sid)
+        except Exception as e:
+            return jsonify({"error": f"capabilities compute failed: {e}",
+                            "session_id": sid}), 500
+        if n == 0:
+            return jsonify({"error": "session not found", "session_id": sid}), 404
+        rows = _fetch() or []
     signals = []
     caps_by_name: dict = {}
     t_starts: list = []
