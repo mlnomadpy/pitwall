@@ -16,14 +16,18 @@ Usage unchanged:
 
 import argparse
 import atexit
+import logging
 import os
 import signal
 import subprocess
 import sys
 import threading
+import time
 
 from flask import Flask
 from flask_cors import CORS
+
+log = logging.getLogger("pitwall.main")
 
 # ── Bootstrap path so pitwall/ can find src/simulator + src/pitwall ─────────────
 SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -57,23 +61,23 @@ def _shutdown(reason: str = "exit"):
     if _shutdown_done.is_set():
         return
     _shutdown_done.set()
-    print(f"\n⏻  shutdown ({reason})")
+    log.info("⏻  shutdown (%s)", reason)
 
     sim = getattr(state, "simulator", None)
     if sim is not None:
         try:
             sim.stop(timeout=2.0)
-            print("   simulator stopped")
+            log.info("   simulator stopped")
         except Exception as e:
-            print(f"   simulator stop failed: {e}")
+            log.warning("   simulator stop failed: %s", e)
 
     reader = getattr(state, "can_reader", None)
     if reader is not None:
         try:
             reader.stop(timeout=2.0)
-            print("   CAN reader stopped")
+            log.info("   CAN reader stopped")
         except Exception as e:
-            print(f"   CAN reader stop failed: {e}")
+            log.warning("   CAN reader stop failed: %s", e)
 
     if getattr(state, "has_duckdb", False):
         try:
@@ -82,11 +86,11 @@ def _shutdown(reason: str = "exit"):
                 if conn is not None:
                     try:
                         conn.execute("CHECKPOINT")
-                        print("   DuckDB CHECKPOINT ok")
+                        log.info("   DuckDB CHECKPOINT ok")
                     finally:
                         conn.close()
         except Exception as e:
-            print(f"   DuckDB CHECKPOINT failed: {e}")
+            log.warning("   DuckDB CHECKPOINT failed: %s", e)
 
     # Release Termux wake-lock if one was acquired. termux-wake-unlock is a
     # no-op if no lock is held; safe to call unconditionally.
@@ -113,11 +117,16 @@ atexit.register(_shutdown, "atexit")
 
 def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths,
                       flush_ms, car_config_path=None):
-    """Start a CanReader thread that pumps CAN frames into pitwall's stores."""
+    """Start a CanReader thread that pumps CAN frames into pitwall's stores.
+
+    Also records the start args on `state.can_reader_args` so the watchdog
+    can restart the reader with the same configuration if it gets stuck
+    (USB unplug/re-plug, kernel transient).
+    """
     try:
         from pitwall.features.telemetry.can_reader import CanReader
     except ImportError as e:
-        print(f"⚠  CAN reader unavailable ({e}); install python-can + cantools")
+        log.warning("CAN reader unavailable (%s); install python-can + cantools", e)
         return None
     try:
         # CanReader needs the top-level `pitwall` package as `bridge` so it
@@ -132,11 +141,114 @@ def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths,
         )
         reader.start()
         state.can_reader = reader
-        print(f"✓  CAN reader started (interface={interface} channel={channel} session={session_id})")
+        # Watchdog needs these to spawn a replacement reader with the same
+        # configuration. Store the kwargs verbatim so the restart path is
+        # an obvious one-line _start_can_reader(**state.can_reader_args).
+        state.can_reader_args = dict(
+            session_id=session_id, interface=interface, channel=channel,
+            bitrate=bitrate, dbc_paths=dbc_paths, flush_ms=flush_ms,
+            car_config_path=car_config_path,
+        )
+        log.info("✓  CAN reader started (interface=%s channel=%s session=%s)",
+                 interface, channel, session_id)
         return reader
     except Exception as e:
-        print(f"⚠  CAN reader failed to start: {e}")
+        log.warning("CAN reader failed to start: %s", e)
         return None
+
+
+# ── Background monitors ───────────────────────────────────────────────────────
+#
+# Two daemon threads that observe the bridge's runtime health.
+#   _rss_monitor:   logs the bridge process RSS every 60 s. Flags growth
+#                   above the alert threshold so memory leaks surface in
+#                   logs instead of as OOM kills on the phone.
+#   _can_watchdog:  if the CAN reader is "loaded" but reports zero fps for
+#                   > 30 s, restart it. Recovers from USB unplug/replug
+#                   without bridge restart.
+# Both threads are daemon=True so they never block process exit; both
+# defer-import their heavy deps so a missing module degrades gracefully.
+
+_RSS_ALERT_GROWTH_MB_PER_MIN = 10.0
+_CAN_WATCHDOG_STUCK_S = 30.0
+
+
+def _rss_monitor():
+    try:
+        import psutil
+    except ImportError:
+        log.info("psutil not installed; skipping RSS monitor")
+        return
+    proc = psutil.Process()
+    last_rss_mb = None
+    last_t = time.monotonic()
+    while True:
+        time.sleep(60.0)
+        try:
+            rss_mb = proc.memory_info().rss / (1024 * 1024)
+        except Exception as e:
+            log.warning("RSS monitor read failed: %s", e)
+            continue
+        now = time.monotonic()
+        if last_rss_mb is None:
+            log.info("RSS baseline: %.1f MB", rss_mb)
+        else:
+            dt_min = (now - last_t) / 60.0 or 1.0
+            growth_per_min = (rss_mb - last_rss_mb) / dt_min
+            level = (logging.WARNING
+                     if growth_per_min > _RSS_ALERT_GROWTH_MB_PER_MIN
+                     else logging.INFO)
+            log.log(level, "RSS: %.1f MB (Δ %+.1f MB/min over %.0f s)",
+                    rss_mb, growth_per_min, dt_min * 60.0)
+        last_rss_mb = rss_mb
+        last_t = now
+
+
+def _can_watchdog():
+    log.info("CAN watchdog started (restart if fps=0 for >%.0fs)",
+             _CAN_WATCHDOG_STUCK_S)
+    while True:
+        time.sleep(15.0)
+        reader = getattr(state, "can_reader", None)
+        args = getattr(state, "can_reader_args", None)
+        if reader is None or args is None:
+            continue
+        try:
+            snap = reader.state()
+        except Exception as e:
+            log.warning("watchdog: reader.state() failed: %s", e)
+            continue
+        if not snap.get("loaded"):
+            continue
+        last_age = snap.get("last_frame_age_s")
+        fps      = snap.get("frames_per_second", 0.0) or 0.0
+        if fps > 0:
+            continue
+        if last_age is None or last_age < _CAN_WATCHDOG_STUCK_S:
+            continue
+        # Stuck: alive but no frames in >30s. Restart with the same config.
+        log.error(
+            "CAN reader appears stuck (fps=%.1f, last_frame_age=%.1fs); "
+            "restarting on %s/%s", fps, last_age, args["interface"], args["channel"],
+        )
+        try:
+            reader.stop(timeout=2.0)
+        except Exception as e:
+            log.warning("watchdog: reader.stop failed: %s", e)
+        state.can_reader = None
+        try:
+            _start_can_reader(**args)
+        except Exception as e:
+            log.error("watchdog: reader restart failed: %s", e)
+
+
+def _spawn_monitors(*, with_watchdog: bool):
+    """Launch the daemon monitor threads. Idempotent at startup."""
+    threading.Thread(target=_rss_monitor, name="pitwall-rss-monitor",
+                     daemon=True).start()
+    if with_watchdog:
+        threading.Thread(target=_can_watchdog, name="pitwall-can-watchdog",
+                         daemon=True).start()
 
 
 def main():
@@ -168,7 +280,23 @@ def main():
                         help="simulator speed multiplier (1.0 = real time)")
     parser.add_argument("--simulate-lap-seconds", type=float, default=60.0,
                         help="duration of one synthetic lap in seconds")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=("DEBUG", "INFO", "WARNING", "ERROR"),
+                        help="logging level for the bridge process")
+    parser.add_argument("--no-watchdog", action="store_true",
+                        help="skip the CAN reader watchdog (don't auto-restart on stuck)")
     args = parser.parse_args()
+
+    # 0. Logging — set up first so every subsequent step can log.
+    #    The bridge prints to stdout (Termux's runit/svlogd captures it),
+    #    so a single-line format with %(asctime)s + %(levelname)s + %(name)s
+    #    survives the trip through log rotation. Keep the unicode badges
+    #    (✓/⚠/⏻) in messages where they're load-bearing context.
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s %(levelname)-7s %(name)s  %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
 
     # 1. Initialize imports (feature flags, coach engine, etc.)
     state.init_imports()
@@ -177,9 +305,10 @@ def main():
     if state.has_sonic and os.path.exists(args.track):
         try:
             state.track = state.load_track(args.track)
-            print(f"✓  Track: {state.track.name} ({len(state.track.corners)} corners)")
+            log.info("✓  Track: %s (%d corners)",
+                     state.track.name, len(state.track.corners))
         except Exception as e:
-            print(f"⚠  Track load failed: {e}")
+            log.warning("Track load failed: %s", e)
 
     # 3. Wire LLM friction logger
     if state.has_coach and state.set_friction_logger:
@@ -190,9 +319,10 @@ def main():
         try:
             from pitwall.db import REGISTRY_SEED_PATH
             n = seed_signal_registry()
-            print(f"✓  signal_registry seeded ({n} entries from {os.path.relpath(REGISTRY_SEED_PATH)})")
+            log.info("✓  signal_registry seeded (%d entries from %s)",
+                     n, os.path.relpath(REGISTRY_SEED_PATH))
         except Exception as e:
-            print(f"⚠  signal_registry seed skipped: {e}")
+            log.warning("signal_registry seed skipped: %s", e)
 
     # 5. CAN reader (+ optional synthetic simulator)
     if args.simulate and not args.can_channel:
@@ -211,7 +341,7 @@ def main():
         _start_can_reader(session_id=sid, interface=args.can_interface, channel=args.can_channel,
                           bitrate=args.can_bitrate, dbc_paths=args.can_dbc, flush_ms=args.can_flush_ms,
                           car_config_path=(False if args.can_no_car_config else args.can_car_config))
-        print(f"    CAN session: {sid}")
+        log.info("CAN session: %s", sid)
 
         if args.simulate:
             try:
@@ -225,22 +355,30 @@ def main():
                 )
                 sim.start()
                 state.simulator = sim
-                print(f"✓  Synthetic simulator running on {args.can_interface}/"
-                      f"{args.can_channel} ({args.simulate_speed:.2f}× speed, "
-                      f"{args.simulate_lap_seconds:.0f}s laps)")
+                log.info("✓  Synthetic simulator running on %s/%s "
+                         "(%.2f× speed, %ds laps)",
+                         args.can_interface, args.can_channel,
+                         args.simulate_speed, int(args.simulate_lap_seconds))
             except Exception as e:
-                print(f"⚠  Simulator failed to start: {e}")
+                log.warning("Simulator failed to start: %s", e)
 
-    # 6. Launch
+    # 6. Background monitors (RSS + CAN watchdog).
+    # Spawn after the reader is up so the watchdog sees a real state().
+    _spawn_monitors(with_watchdog=(args.can_channel is not None
+                                   and not args.no_watchdog))
+
+    # 7. Launch
     port = args.port
     db_path = state.db_path
-    print(f"\n🏁  Pitwall Bridge v2 on http://127.0.0.1:{port}")
-    print(f"    Engine: {'sonic_model (real cues)' if state.has_sonic else 'rule fallback'}")
-    print(f"    DuckDB: {'enabled → ' + db_path if state.has_duckdb else 'disabled'}")
+    log.info("🏁  Pitwall Bridge v2 on http://127.0.0.1:%d", port)
+    log.info("    Engine: %s",
+             "sonic_model (real cues)" if state.has_sonic else "rule fallback")
+    log.info("    DuckDB: %s",
+             ("enabled → " + db_path) if state.has_duckdb else "disabled")
     if args.can_channel:
-        print(f"    CAN:    {args.can_interface}/{args.can_channel}")
-    print(f"\n    Emulator tunnel:")
-    print(f"    ~/Library/Android/sdk/platform-tools/adb reverse tcp:{port} tcp:{port}\n")
+        log.info("    CAN:    %s/%s", args.can_interface, args.can_channel)
+    log.info("    Emulator tunnel: ~/Library/Android/sdk/platform-tools/adb "
+             "reverse tcp:%d tcp:%d", port, port)
 
     if args.dev:
         # Dev path: Flask's built-in server. Re-prints the production
@@ -257,8 +395,8 @@ def main():
         try:
             from waitress import serve
         except ImportError:
-            print("⚠  waitress not installed — falling back to Flask dev server.")
-            print("   `pip install waitress` to silence this and serve production-ready.")
+            log.warning("waitress not installed — falling back to Flask dev server. "
+                        "pip install waitress for production-ready serving")
             try:
                 app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
             finally:

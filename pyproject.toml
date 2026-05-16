@@ -32,6 +32,9 @@ can = [
     "python-can>=4.3",
     "cantools>=39.0",
 ]
+ops = [
+    "psutil>=5.9",            # used by the bridge's RSS monitor thread
+]
 ml = [
     "torch>=2.2",
 ]
@@ -43,7 +46,7 @@ dev = [
     "pytest-cov>=5.0",
 ]
 all = [
-    "pitwall[can,ml,adk,dev]",
+    "pitwall[can,ops,ml,adk,dev]",
 ]
 
 [project.scripts]
