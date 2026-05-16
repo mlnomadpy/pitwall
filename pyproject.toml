@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "flask>=3.0",
     "flask-cors>=4.0",
+    "waitress>=3.0",
     "duckdb>=1.0",
     "numpy>=1.26",
 ]

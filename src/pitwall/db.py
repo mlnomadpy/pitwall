@@ -386,20 +386,99 @@ def reset_live_session():
     Called on bridge boot when the CAN reader is launched without an
     explicit `--can-session-id`. Keeps stale values from a previous run
     out of the Pit Stall Setup live-state view.
+
+    DuckDB occasionally surfaces a "Failed to delete all rows from
+    index" FatalException when a prior bridge process crashed mid-write
+    and left orphan unique-index entries. Once that fires, the entire
+    DB is marked "invalidated" and no further query on this file works
+    — even from a fresh process — until the file is rebuilt. We handle
+    that by rotating the corrupted file aside and letting the next
+    get_db() recreate the schema fresh.
     """
     if not state.has_duckdb:
         return
+    tables = [
+        "telemetry",
+        "telemetry_signals",
+        "session_capabilities",
+        "coaching_notes",
+    ]
+    import duckdb as _ddb
+    fatal = getattr(_ddb, "FatalException", Exception)
+    rotated = False
     with state.db_lock:
         conn = get_db()
         if conn is None:
             return
         try:
-            conn.execute("DELETE FROM telemetry            WHERE session_id = ?", ["_live"])
-            conn.execute("DELETE FROM telemetry_signals    WHERE session_id = ?", ["_live"])
-            conn.execute("DELETE FROM session_capabilities WHERE session_id = ?", ["_live"])
-            conn.execute("DELETE FROM coaching_notes       WHERE session_id = ?", ["_live"])
-        finally:
-            conn.close()
+            for tbl in tables:
+                try:
+                    conn.execute(
+                        f"DELETE FROM {tbl} WHERE session_id = ?", ["_live"],
+                    )
+                except fatal as e:
+                    # Index corruption — every further query on this DB
+                    # will now fail. Close the connection, rotate the
+                    # file aside, and let the next caller rebuild.
+                    print(f"⚠  DuckDB corruption detected on {tbl}: {e!s}"[:200])
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    _rotate_corrupted_db()
+                    rotated = True
+                    break
+            if not rotated:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            raise
+    if rotated:
+        # Re-seed the registry on the fresh DB so the bridge has the
+        # expected static_obd2 / static_dbc entries before any CAN frame
+        # arrives. `seed_signal_registry` is idempotent.
+        try:
+            seed_signal_registry()
+        except Exception as e:
+            print(f"⚠  registry re-seed after DB rotation failed: {e}")
+
+
+def _rotate_corrupted_db():
+    """Move the current DuckDB file to `.corrupted-<ts>` so the next
+    get_db() creates a fresh one from scratch. Also clears WAL/tmp
+    companion files DuckDB may have left."""
+    import shutil
+    import time
+    src = state.db_path
+    if not src or not os.path.exists(src):
+        print("⚠  DB rotation requested but file does not exist; nothing to do")
+        return
+    ts = time.strftime("%Y%m%dT%H%M%S")
+    dst = f"{src}.corrupted-{ts}"
+    try:
+        shutil.move(src, dst)
+        print(f"   rotated corrupted DB → {os.path.basename(dst)}")
+    except OSError as e:
+        print(f"⚠  rotation failed ({e}); attempting unlink instead")
+        try:
+            os.remove(src)
+        except OSError as e2:
+            print(f"⚠  could not delete corrupted DB: {e2}")
+            return
+    # Sweep WAL/tmp companions left behind by the previous crash
+    for suffix in (".wal", ".tmp"):
+        companion = src + suffix
+        if os.path.exists(companion):
+            try:
+                os.remove(companion)
+            except OSError:
+                pass
 
 
 def ensure_session_row(sid: str, *, driver=None, driver_level=None,
