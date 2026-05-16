@@ -4,8 +4,33 @@ import { bridge } from '@/shared/api/bridge'
 export interface HealthResponse {
   status: string
   version: string
-  can_bridge: boolean
+  can_bridge?: boolean              // legacy field, retained for compat
   active_session_id: string | null
+  engine?: string
+  coach?: string | null
+  driver_level?: string | null
+  duckdb?: boolean
+  // Phase 1.5 / PWA integration: enriched health fields (additive)
+  simulator?: {
+    running: boolean
+    lap_seconds?: number
+    speed_x?: number
+  }
+  can?: {
+    connected: boolean
+    fps?: number
+    frames_total?: number
+    frames_unknown?: number
+    channel?: string
+    bitrate?: number
+    last_frame_age_s?: number | null
+  }
+  litert?: {
+    up: boolean
+    transport?: string
+    http_url?: string
+    http_model?: string
+  }
 }
 
 

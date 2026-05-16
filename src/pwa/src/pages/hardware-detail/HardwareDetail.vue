@@ -29,11 +29,10 @@ interface SignalCapability {
 }
 
 const signals = ref<SignalCapability[]>([])
-const unknownIds = ref([
-  { id: '0x4F1', hz: 3 },
-  { id: '0x523', hz: 1 },
-  { id: '0x6A0', hz: 8 }
-])
+// Unknown CAN IDs reported by the bridge — populated from /signals/registry
+// when the ingest pipeline starts capturing frames whose IDs aren't in the
+// DBC. Empty list = clean (everything decoded) OR no ingest active.
+const unknownIds = ref<{ id: string; hz: number }[]>([])
 
 const searchQuery = ref('')
 const expandedGroups = ref<Record<string, boolean>>({})
@@ -120,10 +119,14 @@ useKeyboard((e: KeyboardEvent) => {
 })
 
 onMounted(async () => {
-  
-  // Try to load real data
+  // Catalog: /signals/registry returns the per-signal metadata. We pair it
+  // with the live telemetry SSE stream so the `LAST` column shows real
+  // values for the signals we know how to extract from the wide frame.
   try {
-    const data = await bridge.get<{ signals: Array<{ signal_id?: number; name: string; units?: string; expected_hz?: number; group?: string; discovery?: string }> }>('/signals/registry')
+    const data = await bridge.get<{
+      signals: Array<{ signal_id?: number; name: string; units?: string; expected_hz?: number; group?: string; discovery?: string }>
+      unknown_can_ids?: Array<{ id?: string; can_id?: string; hz?: number }>
+    }>('/signals/registry')
     signals.value = data.signals.map((s, i) => ({
       id: s.signal_id ?? i,
       name: s.name,
@@ -131,70 +134,134 @@ onMounted(async () => {
       hz: s.expected_hz ?? 10.0,
       group: s.group ?? 'misc',
       dbc: s.discovery ?? 'unknown',
-      last: 0,
+      last: '—',
       baseValue: 0,
-      variance: 0
+      variance: 0,
     }))
-  } catch (_) { /* Bridge may be offline */ }
-  
-  liveTimer = window.setInterval(updateLiveValues, 200) // 5Hz UI update
+    if (Array.isArray(data.unknown_can_ids)) {
+      unknownIds.value = data.unknown_can_ids.map(u => ({
+        id: u.id ?? u.can_id ?? '?',
+        hz: u.hz ?? 0,
+      }))
+    }
+  } catch (_) {
+    // Bridge offline — leave catalog empty so the empty-state renders.
+  }
+
+  // Open the live telemetry stream so updateLiveValues has data to read.
+  // Closes on unmount below.
+  telemetry.open('hardware-detail')
+
+  liveTimer = window.setInterval(updateLiveValues, 200) // 5 Hz UI update
 })
 
 let liveTimer: number | null = null
 
-/** Map telemetry frame data to signal table when available */
-const SIGNAL_MAP: Record<string, (frame: any) => number> = {
-  'rpm': f => f.rpm,
-  'speed': f => f.speed,
-  'throttle': f => f.throttle,
-  'brake_pressure': f => f.brake_pressure,
-  'steering': f => f.steering,
-  'g_lat': f => f.g_lat,
-  'g_long': f => f.g_long,
-  'combo_g': f => f.combo_g,
-  'distance': f => f.distance,
+/**
+ * Map a registry signal name to its live value on the SSE telemetry frame.
+ *
+ * The bridge's wide-row canonical names (`speed_ms`, `brake_bar`,
+ * `throttle_pct`, `steering_deg`, `distance_m`) ship under shorter
+ * legacy field names on the `/telemetry/stream` SSE payload — that's a
+ * historical PWA contract we can't break without coordinating both
+ * sides. The alias table maps registry → frame so the LAST column
+ * lights up for every wide-row canonical, not just the hardcoded list
+ * the original SIGNAL_MAP supported.
+ *
+ * Other registry signals (the 50+ pipeline-derived names like
+ * `g_vert`, `gear_position`, `oil_filter_temp_c`, `fuel_level_l`, the
+ * per-wheel kmh/ms variants…) aren't yet emitted on SSE; their cells
+ * remain '—' until the bridge enriches the stream or this page adds a
+ * low-rate /session/<sid>/signals fetcher.
+ */
+const FRAME_FIELD_ALIASES: Record<string, string> = {
+  speed_ms:     'speed',
+  brake_bar:    'brake_pressure',
+  throttle_pct: 'throttle',
+  steering_deg: 'steering',
+  distance_m:   'distance',
+}
+
+const extractSignal = (frame: Record<string, unknown> | null | undefined, name: string): number | undefined => {
+  if (!frame) return undefined
+  const key = name.toLowerCase()
+  // Direct match wins (rpm, g_lat, g_long, combo_g, lat, lon, plus any
+  // future fields the bridge adds on SSE under their registry names).
+  if (key in frame) {
+    const v = frame[key]
+    return typeof v === 'number' ? v : undefined
+  }
+  const aliased = FRAME_FIELD_ALIASES[key]
+  if (aliased && aliased in frame) {
+    const v = frame[aliased]
+    return typeof v === 'number' ? v : undefined
+  }
+  return undefined
 }
 
 const updateLiveValues = () => {
-  const frame = telemetry.frame
+  // Pulls live values from the SSE telemetry stream (telemetryStore.frame).
+  // For signals we can extract via name or alias, show the real number.
+  // Everything else renders '—' — pre-ADR-015 this was `Math.random() *
+  // variance`, which made the page LIE about live data even when the
+  // bridge was offline.
+  const frame = telemetry.frame as unknown as Record<string, unknown> | null
   signals.value.forEach(s => {
-    const getter = SIGNAL_MAP[s.name.toLowerCase()]
-    if (frame && getter) {
-      try {
-        s.last = getter(frame).toFixed(2)
-      } catch {
-        s.last = (s.baseValue + (Math.random() * s.variance * 2 - s.variance)).toFixed(2)
-      }
-    } else {
-      s.last = (s.baseValue + (Math.random() * s.variance * 2 - s.variance)).toFixed(2)
-    }
+    const v = extractSignal(frame, s.name)
+    s.last = (typeof v === 'number' && Number.isFinite(v)) ? v.toFixed(2) : '—'
   })
 }
 
 onUnmounted(() => {
   if (liveTimer) window.clearInterval(liveTimer)
+  if (histTimer) window.clearInterval(histTimer)
+  telemetry.close()
 })
 
-// Histogram logic
+// Sparkline of the last 30 live samples of the drilled-in signal. Updated
+// at the same 5 Hz cadence as `updateLiveValues`. Previously this was a
+// random-bar generator; now it's a real rolling window of telemetry. When
+// the stream is offline (no telemetry.frame), the buffer drains to '—'.
 const histBars = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█']
 const drillHist = ref('')
+const drillBuffer = ref<number[]>([])
 let histTimer: number | null = null
 
-const generateHist = () => {
-  let s = ''
-  for(let i=0; i<30; i++) {
-    s += histBars[Math.floor(Math.random() * histBars.length)]
+const sampleDrill = () => {
+  const sig = drilling.value
+  if (!sig) return
+  const frame = telemetry.frame
+  const getter = frame ? SIGNAL_MAP[sig.name.toLowerCase()] : null
+  if (frame && getter) {
+    try {
+      const v = getter(frame)
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        drillBuffer.value.push(v)
+        if (drillBuffer.value.length > 30) drillBuffer.value.shift()
+      }
+    } catch { /* skip non-numeric samples */ }
   }
-  drillHist.value = s
+  if (!drillBuffer.value.length) {
+    drillHist.value = '—'.repeat(30)
+    return
+  }
+  const lo = Math.min(...drillBuffer.value)
+  const hi = Math.max(...drillBuffer.value)
+  const range = Math.max(1e-6, hi - lo)
+  drillHist.value = drillBuffer.value
+    .map(v => histBars[Math.min(histBars.length - 1, Math.floor(((v - lo) / range) * (histBars.length - 1)))])
+    .join('')
 }
 
-// Watch drilling to start/stop histogram
 watch(drilling, (n) => {
+  drillBuffer.value = []
+  drillHist.value = ''
   if (n) {
-    generateHist()
-    histTimer = window.setInterval(generateHist, 500)
-  } else {
-    if (histTimer) window.clearInterval(histTimer)
+    sampleDrill()
+    histTimer = window.setInterval(sampleDrill, 200)
+  } else if (histTimer) {
+    window.clearInterval(histTimer)
+    histTimer = null
   }
 })
 
@@ -297,12 +364,12 @@ watch(drilling, (n) => {
           </table>
           
           <CyberBox variant="charcoal" border="none" class="w-1/2 flex flex-col border border-charcoal p-2">
-            <div class="text-slate font-bold mb-1">LAST 50 SAMPLES (live)</div>
+            <div class="text-slate font-bold mb-1">LAST 30 SAMPLES (live)</div>
             <div class="font-mono text-ui-good text-title leading-none mb-2 overflow-hidden whitespace-nowrap">{{ drillHist }}</div>
             <div class="flex justify-between text-small">
-              <span class="text-slate">MIN <span class="text-white font-bold">{{ (drilling.baseValue - drilling.variance).toFixed(1) }}</span></span>
-              <span class="text-slate">AVG <span class="text-white font-bold">{{ drilling.baseValue.toFixed(1) }}</span></span>
-              <span class="text-slate">MAX <span class="text-white font-bold">{{ (drilling.baseValue + drilling.variance).toFixed(1) }}</span></span>
+              <span class="text-slate">MIN <span class="text-white font-bold">{{ drillBuffer.length ? Math.min(...drillBuffer).toFixed(1) : '—' }}</span></span>
+              <span class="text-slate">AVG <span class="text-white font-bold">{{ drillBuffer.length ? (drillBuffer.reduce((a,b)=>a+b,0)/drillBuffer.length).toFixed(1) : '—' }}</span></span>
+              <span class="text-slate">MAX <span class="text-white font-bold">{{ drillBuffer.length ? Math.max(...drillBuffer).toFixed(1) : '—' }}</span></span>
             </div>
           </CyberBox>
         </div>

@@ -8,6 +8,7 @@ import { usePauseStore } from '@/shared/lib/pauseStore'
 import { useKeyboard } from '@/shared/lib/useKeyboard'
 import { useLoadingStore } from '@/shared/api/loadingStore'
 import CyberBadge from '@/shared/ui/core/CyberBadge.vue'
+import SimulatorBadge from '@/shared/ui/core/SimulatorBadge.vue'
 
 const saveStore = useSaveStore()
 const notificationStore = useNotificationsStore()
@@ -165,19 +166,22 @@ onUnmounted(() => {
     </div>
 
 
-    <!-- Right: Notifications + Clock -->
-    <button 
-      class="bar-right bar-btn" 
-      aria-label="Notifications"
-      @click="goToNotifications"
-    >
-      <span v-if="notificationStore.unreadCount > 0" class="notif-badge">{{ notificationStore.unreadCount }}</span>
-      <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
-        <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
-      </svg>
-      <span class="clock font-nums">{{ time }}</span>
-    </button>
+    <!-- Right: Simulator pill + Notifications + Clock -->
+    <div class="bar-right">
+      <SimulatorBadge />
+      <button
+        class="bar-btn"
+        aria-label="Notifications"
+        @click="goToNotifications"
+      >
+        <span v-if="notificationStore.unreadCount > 0" class="notif-badge">{{ notificationStore.unreadCount }}</span>
+        <svg class="bell-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+        </svg>
+        <span class="clock font-nums">{{ time }}</span>
+      </button>
+    </div>
   </nav>
 </template>
 
@@ -229,7 +233,13 @@ onUnmounted(() => {
 
 .bar-left { flex: 1; }
 .bar-center { flex: 0 0 auto; }
-.bar-right { flex: 1; justify-content: flex-end; }
+.bar-right {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: clamp(6px, 1.2vw, 12px);
+}
 
 .driver-name {
   color: var(--color-ui-info);

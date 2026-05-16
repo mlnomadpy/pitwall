@@ -20,16 +20,84 @@ bp = Blueprint("core", __name__)
 
 @bp.route("/health", methods=["GET"])
 def health():
-    """Return bridge status, engine type, and DuckDB availability."""
-    return jsonify({
+    """Return bridge status, engine type, coach + driver level, and DuckDB availability.
+
+    PWA-facing contract — keys are stable across releases. Adding fields is
+    safe; removing or renaming a key requires a coordinated PWA change.
+
+    Extended fields (additive — original keys preserved):
+      - `simulator`: { running, lap_seconds, speed_x } when the AiM MXP
+        synthetic simulator is active in-process (--simulate flag).
+      - `can`:       { connected, fps, frames_total, frames_unknown,
+                       channel, bitrate, last_frame_age_s } from the
+        CanReader's state() snapshot.
+      - `litert`:    { up, transport, http_url, http_model } from the
+        coach engine's own .health().
+
+    The PWA uses these to render status badges and gate UI without
+    polling multiple endpoints.
+    """
+    coach = state.coach
+    response = {
         "status":            "ok",
-        "version":           "2.0",
+        "version":           "2.1",
         "engine":            "sonic_model" if state.has_sonic else "rules",
+        "coach":             getattr(coach, "name", None),
+        "driver_level":      getattr(coach, "driver_level", None),
         "track":             state.track.name if state.track else None,
         "duckdb":            state.has_duckdb,
         "active_session_id": state.active_session_id,
         "timestamp":         datetime.now(timezone.utc).isoformat(),
-    })
+    }
+
+    sim = getattr(state, "simulator", None)
+    if sim is not None:
+        # Read attributes defensively — sim may be a different shape in tests
+        response["simulator"] = {
+            "running":     getattr(sim, "_thread", None) is not None
+                           and sim._thread.is_alive(),
+            "lap_seconds": getattr(getattr(sim, "profile", None), "lap_seconds", None),
+            "speed_x":     getattr(sim, "speed_x", None),
+        }
+    else:
+        response["simulator"] = {"running": False}
+
+    reader = getattr(state, "can_reader", None)
+    if reader is not None:
+        try:
+            s = reader.state()
+            response["can"] = {
+                "connected":         s.get("connected", False),
+                "fps":               s.get("frames_per_second", 0.0),
+                "frames_total":      s.get("frames_total", 0),
+                "frames_unknown":    s.get("frames_unknown", 0),
+                "channel":           s.get("channel"),
+                "bitrate":           s.get("bitrate"),
+                "last_frame_age_s":  s.get("last_frame_age_s"),
+            }
+        except Exception:
+            response["can"] = {"connected": False, "error": "state_unavailable"}
+    else:
+        response["can"] = {"connected": False}
+
+    # LiteRT / LocalLLM status. coach may be a RuleCoach (no .health()) or
+    # a LitertCoach with rich health info.
+    coach_health_fn = getattr(coach, "health", None)
+    if callable(coach_health_fn):
+        try:
+            ch = coach_health_fn()
+            response["litert"] = {
+                "up":         bool(ch.get("loaded", False)),
+                "transport":  ch.get("transport"),
+                "http_url":   ch.get("http_url"),
+                "http_model": ch.get("http_model"),
+            }
+        except Exception:
+            response["litert"] = {"up": False}
+    else:
+        response["litert"] = {"up": False}
+
+    return jsonify(response)
 
 
 
