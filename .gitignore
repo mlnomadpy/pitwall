@@ -26,6 +26,8 @@ htmlcov/
 kaggle_data/
 *.duckdb
 *.duckdb.wal
+*.duckdb.tmp
+*.duckdb.corrupted-*
 
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
