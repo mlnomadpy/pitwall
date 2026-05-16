@@ -41,7 +41,10 @@ class BridgeState:
         self.track = None              # loaded TrackMap (from track_loader)
 
         # ── DuckDB ─────────────────────────────────────────────────────────
-        self.db_lock = threading.Lock()
+        # RLock (not Lock) so nested acquires from one thread don't deadlock.
+        # 42+ acquire sites across db.py + blueprints; non-reentrant Lock
+        # would block silently on any accidental re-entry from a refactor.
+        self.db_lock = threading.RLock()
         self.db_path: str = os.path.abspath(DB_PATH)
 
         # ── Coach engine ───────────────────────────────────────────────────
@@ -51,11 +54,11 @@ class BridgeState:
 
         # ── Session burst accumulator (for /insights) ──────────────────────
         self.session_bursts: list = []
-        self.burst_lock = threading.Lock()
+        self.burst_lock = threading.RLock()
 
         # ── Session analysis bundle cache ──────────────────────────────────
         self.session_bundles: dict[str, dict] = {}
-        self.bundles_lock = threading.Lock()
+        self.bundles_lock = threading.RLock()
 
         # ── CAN reader ─────────────────────────────────────────────────────
         self.can_reader = None
@@ -64,7 +67,7 @@ class BridgeState:
 
         # ── ADK Q&A ───────────────────────────────────────────────────────
         self.qa_histories: dict = {}
-        self.qa_lock = threading.Lock()
+        self.qa_lock = threading.RLock()
         self.adk_orchestrator = None
         self.adk_agent_registry: list = []
         self.run_adk = None

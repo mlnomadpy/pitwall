@@ -15,8 +15,12 @@ Usage unchanged:
 """
 
 import argparse
+import atexit
 import os
+import signal
+import subprocess
 import sys
+import threading
 
 from flask import Flask
 from flask_cors import CORS
@@ -35,6 +39,76 @@ from pitwall import create_app, register_blueprints
 
 
 app = create_app()
+
+
+# ── Graceful shutdown ─────────────────────────────────────────────────────────
+# DuckDB invalidates the whole file when a write is killed mid-flight (we
+# already had to write rotation-recovery for this in db.py::reset_live_session).
+# The right answer is to never let it happen: handle SIGTERM/SIGINT, stop the
+# CAN reader + simulator, CHECKPOINT, release the Termux wake-lock, then exit.
+# Belt and suspenders via atexit in case we're terminated by a path that
+# doesn't go through main()'s normal flow.
+
+_shutdown_done = threading.Event()
+
+
+def _shutdown(reason: str = "exit"):
+    """Idempotent graceful shutdown. Safe to call from signal handler or atexit."""
+    if _shutdown_done.is_set():
+        return
+    _shutdown_done.set()
+    print(f"\n⏻  shutdown ({reason})")
+
+    sim = getattr(state, "simulator", None)
+    if sim is not None:
+        try:
+            sim.stop(timeout=2.0)
+            print("   simulator stopped")
+        except Exception as e:
+            print(f"   simulator stop failed: {e}")
+
+    reader = getattr(state, "can_reader", None)
+    if reader is not None:
+        try:
+            reader.stop(timeout=2.0)
+            print("   CAN reader stopped")
+        except Exception as e:
+            print(f"   CAN reader stop failed: {e}")
+
+    if getattr(state, "has_duckdb", False):
+        try:
+            with state.db_lock:
+                conn = get_db()
+                if conn is not None:
+                    try:
+                        conn.execute("CHECKPOINT")
+                        print("   DuckDB CHECKPOINT ok")
+                    finally:
+                        conn.close()
+        except Exception as e:
+            print(f"   DuckDB CHECKPOINT failed: {e}")
+
+    # Release Termux wake-lock if one was acquired. termux-wake-unlock is a
+    # no-op if no lock is held; safe to call unconditionally.
+    try:
+        subprocess.run(
+            ["termux-wake-unlock"],
+            timeout=2.0, check=False,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
+def _signal_shutdown(signum, _frame):
+    _shutdown(reason=f"signal {signum}")
+    # Re-raise default behavior for SIGINT so Python exits with the right code
+    sys.exit(0 if signum == signal.SIGTERM else 130)
+
+
+signal.signal(signal.SIGTERM, _signal_shutdown)
+signal.signal(signal.SIGINT, _signal_shutdown)
+atexit.register(_shutdown, "atexit")
 
 
 def _start_can_reader(*, session_id, interface, channel, bitrate, dbc_paths,
@@ -83,6 +157,9 @@ def main():
                         help="skip car config; emit raw DBC signal names")
     parser.add_argument("--can-session-id", default=None)
     parser.add_argument("--can-flush-ms", type=int, default=100)
+    parser.add_argument("--dev", action="store_true",
+                        help="serve via Flask's dev server instead of waitress "
+                             "(local debugging only; never use in prod)")
     parser.add_argument("--simulate", action="store_true",
                         help="spawn the AiM MXP synthetic simulator and a "
                              "virtual-bus CanReader so the bridge has live "
@@ -164,11 +241,39 @@ def main():
         print(f"    CAN:    {args.can_interface}/{args.can_channel}")
     print(f"\n    Emulator tunnel:")
     print(f"    ~/Library/Android/sdk/platform-tools/adb reverse tcp:{port} tcp:{port}\n")
-    try:
-        app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
-    finally:
-        if state.can_reader is not None:
-            state.can_reader.stop()
+
+    if args.dev:
+        # Dev path: Flask's built-in server. Re-prints the production
+        # warning at boot — that's the intended signal.
+        try:
+            app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+        finally:
+            _shutdown(reason="dev server stopped")
+    else:
+        # Production path: waitress is a pure-Python WSGI server with
+        # bounded thread pool + per-request channel timeout. No DNS
+        # surprise, no kernel module, runs on Termux. Same `127.0.0.1`
+        # bind as before.
+        try:
+            from waitress import serve
+        except ImportError:
+            print("⚠  waitress not installed — falling back to Flask dev server.")
+            print("   `pip install waitress` to silence this and serve production-ready.")
+            try:
+                app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+            finally:
+                _shutdown(reason="dev fallback stopped")
+        else:
+            try:
+                serve(
+                    app, host="127.0.0.1", port=port,
+                    threads=8,                   # bounded worker pool
+                    channel_timeout=30,          # kill stuck requests
+                    cleanup_interval=10,         # housekeep dead channels
+                    ident="pitwall-bridge",      # appears in Server: header
+                )
+            finally:
+                _shutdown(reason="waitress stopped")
 
 
 if __name__ == "__main__":
