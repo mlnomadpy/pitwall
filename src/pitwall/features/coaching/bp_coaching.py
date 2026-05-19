@@ -1,11 +1,30 @@
 """bridge.bp_coaching — Blueprint: insights, debrief, brief, ask, score, concepts, conversations."""
 
-import json, os, re, time, threading
+import json, logging, os, re, time, threading
 from datetime import datetime
 from flask import Blueprint, request, jsonify, Response, stream_with_context
 from pitwall.state import state, SIM_DIR
-from pitwall.db import get_db
-from pitwall.helpers import new_session_id, load_session_frames, detect_laps
+from pitwall.db import db_conn, DuckDbUnavailable
+
+log = logging.getLogger(__name__)
+
+try:
+    import duckdb as _duckdb
+    _DUCKDB_ERROR: type = _duckdb.Error
+except ImportError:  # duckdb optional — keep broad fallback in that case
+    _DUCKDB_ERROR = Exception
+from pitwall.features.session.laps import new_session_id, detect_laps
+from pitwall.features.session.frames import load_session_frames
+from pitwall.features.coaching.coach_engine import extract_emotion
+from pitwall.features.coaching.adk_agents import (
+    run_adk, stream_adk, get_pending_traces,
+)
+from pitwall.features.session.session_analyzer import analyze_session
+from pitwall.features.session.driver_profile import (
+    ensure_schema as ensure_driver_schema,
+    append_session_events,
+    compute_profile,
+)
 
 bp = Blueprint("coaching", __name__)
 
@@ -22,17 +41,16 @@ def _qa_cleanup_stale():
 def _drain_adk_traces(adk_session_id=None, pitwall_sid=""):
     if not state.has_adk or not state.has_duckdb: return
     try:
-        traces = state.get_adk_traces(adk_session_id)
+        traces = get_pending_traces(adk_session_id)
         if not traces: return
-        with state.db_lock:
-            conn = get_db()
-            if conn is None: return
-            try:
+        try:
+            with db_conn() as conn:
                 for t in traces:
                     conn.execute("INSERT INTO agent_traces (trace_id, pitwall_sid, agent_name, event_type, detail, latency_ms, success) VALUES (?,?,?,?,?,?,?)",
                         [t["trace_id"], pitwall_sid, t["agent_name"], t["event_type"], t["detail"], t["latency_ms"], t["success"]])
-            finally: conn.close()
-    except Exception as e: print(f"⚠  agent_traces write failed: {e}")
+        except DuckDbUnavailable: return
+    except _DUCKDB_ERROR as e:
+        log.warning("agent_traces write failed: %s", e)
 
 def _score_insights(bursts):
     if not bursts: return []
@@ -96,7 +114,7 @@ def coach_debrief():
     else:
         frames = load_session_frames(sid)
         if not frames: return jsonify({"error":"no telemetry — push frames or pass vbo_path","session_id":sid}), 400
-    bundle = state.analyze_session(session_id=sid, frames=frames, coach=state.coach if state.has_coach else None, driver_level=getattr(state.coach,"driver_level","intermediate") if state.coach else "intermediate")
+    bundle = analyze_session(session_id=sid, frames=frames, coach=state.coach if state.has_coach else None, driver_level=getattr(state.coach,"driver_level","intermediate") if state.coach else "intermediate")
     if state.has_adk:
         try:
             adk_prompt = f"Generate a post-session debrief for session '{sid}', driver '{driver_id}'. Query DuckDB for lap times, corner grades, coaching notes. Structure: 1 highlight sentence, then FOCUS list of 3 items."
@@ -109,46 +127,49 @@ def coach_debrief():
                 "temp:highlights_count": len(bundle.get("highlights", [])),
             }
             
-            adk_narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
+            adk_narrative, _adk_sid = run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
             _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid)
 
-            _em = re.search(r"\[EMOTION:(\w+)\]", adk_narrative)
-            if _em: bundle["emotion"]=_em.group(1); adk_narrative=re.sub(r"\[EMOTION:\w+\]\s*","",adk_narrative).strip()
+            adk_narrative, _em_val = extract_emotion(adk_narrative)
+            if _em_val != "neutral": bundle["emotion"] = _em_val
             bundle["narrative"]=adk_narrative; bundle["narrative_source"]="adk"
-        except Exception as _e: print(f"⚠  ADK debrief failed ({type(_e).__name__}: {_e})")
+        except (ConnectionError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as _e:
+            log.warning("ADK debrief failed (%s: %s)", type(_e).__name__, _e)
     with state.bundles_lock: state.session_bundles[sid] = bundle
     if persist and driver_id and state.has_duckdb:
         try:
-            with state.db_lock:
-                conn = get_db()
-                if conn:
-                    state.ensure_driver_schema(conn); state.append_session_events(conn, driver_id, sid, bundle.get("scorecard") or {}); conn.close()
-        except Exception: pass
+            with db_conn() as conn:
+                ensure_driver_schema(conn); append_session_events(conn, driver_id, sid, bundle.get("scorecard") or {})
+        except (DuckDbUnavailable, _DUCKDB_ERROR) as e:
+            log.warning("persist driver events for %s failed: %s", driver_id, e)
     if state.has_duckdb and driver_id and bundle.get("narrative"):
         try:
-            with state.db_lock:
-                conn = get_db()
-                if conn:
-                    conn.execute("INSERT INTO conversations (session_id, driver_id, role, text, focus_items, emotion) VALUES (?,?,'coach_debrief',?,?,?)",
-                        [sid, driver_id, bundle.get("narrative",""), json.dumps(bundle.get("focus") or []), bundle.get("emotion","neutral")]); conn.close()
-        except Exception: pass
+            with db_conn() as conn:
+                conn.execute("INSERT INTO conversations (session_id, driver_id, role, text, focus_items, emotion) VALUES (?,?,'coach_debrief',?,?,?)",
+                    [sid, driver_id, bundle.get("narrative",""), json.dumps(bundle.get("focus") or []), bundle.get("emotion","neutral")])
+        except (DuckDbUnavailable, _DUCKDB_ERROR) as e:
+            log.warning("conversations insert (debrief) failed: %s", e)
     return jsonify(bundle)
 
 @bp.route("/conversations/<sid>", methods=["GET"])
 def conversations_for_session(sid):
     if not state.has_duckdb: return jsonify({"error":"duckdb not available"}), 503
-    with state.db_lock:
-        conn = get_db()
-        rows = conn.execute("SELECT role, text, focus_items, emotion, recorded_at FROM conversations WHERE session_id = ? ORDER BY recorded_at", [sid]).fetchdf().to_dict("records"); conn.close()
+    try:
+        with db_conn() as conn:
+            rows = conn.execute("SELECT role, text, focus_items, emotion, recorded_at FROM conversations WHERE session_id = ? ORDER BY recorded_at", [sid]).fetchdf().to_dict("records")
+    except DuckDbUnavailable:
+        return jsonify({"error":"duckdb not available"}), 503
     return jsonify({"session_id":sid, "turns":rows})
 
 @bp.route("/conversations/driver/<driver_id>", methods=["GET"])
 def conversations_for_driver(driver_id):
     if not state.has_duckdb: return jsonify({"error":"duckdb not available"}), 503
     limit = min(int(request.args.get("limit",20)),200)
-    with state.db_lock:
-        conn = get_db()
-        rows = conn.execute("SELECT session_id, role, text, focus_items, emotion, recorded_at FROM conversations WHERE driver_id = ? AND role IN ('coach_brief','coach_debrief') ORDER BY recorded_at DESC LIMIT ?", [driver_id, limit]).fetchdf().to_dict("records"); conn.close()
+    try:
+        with db_conn() as conn:
+            rows = conn.execute("SELECT session_id, role, text, focus_items, emotion, recorded_at FROM conversations WHERE driver_id = ? AND role IN ('coach_brief','coach_debrief') ORDER BY recorded_at DESC LIMIT ?", [driver_id, limit]).fetchdf().to_dict("records")
+    except DuckDbUnavailable:
+        return jsonify({"error":"duckdb not available"}), 503
     return jsonify({"driver_id":driver_id, "history":rows})
 
 @bp.route("/score", methods=["POST"])
@@ -163,10 +184,11 @@ def llm_score():
     if coach is None or getattr(coach,"name","")!="litert" or getattr(coach,"_engine",None) is None:
         return jsonify({"error":"local Gemma coach not loaded","engine":getattr(coach,"name",None)}), 503
     laps = detect_laps(sid); best_lap_s = min((l["lap_time_s"] for l in laps), default=None)
-    with state.db_lock:
-        conn = get_db()
-        if conn is None: return jsonify({"error":"duckdb not available"}), 503
-        agg = conn.execute("SELECT AVG(speed_ms), MAX(combo_g), MAX(brake_bar), AVG(throttle_pct) FROM telemetry WHERE session_id = ?", [sid]).fetchone(); conn.close()
+    try:
+        with db_conn() as conn:
+            agg = conn.execute("SELECT AVG(speed_ms), MAX(combo_g), MAX(brake_bar), AVG(throttle_pct) FROM telemetry WHERE session_id = ?", [sid]).fetchone()
+    except DuckDbUnavailable:
+        return jsonify({"error":"duckdb not available"}), 503
     avg_speed_ms, max_combo_g, max_brake_bar, avg_throttle = (agg or (0,0,0,0))
     system_prompt = f'You are an expert race coach grading a {driver_level} driver after a Sonoma session. Score 0-100. Respond with ONE JSON object: {{"score": <int>, "why": "<one sentence>"}}.'
     lines = ["Session stats:"]
@@ -215,10 +237,10 @@ def coach_brief():
     profile = {}
     if state.has_analyzer and state.has_duckdb and driver_id:
         try:
-            with state.db_lock:
-                conn = get_db()
-                if conn: profile = state.compute_profile(conn, driver_id); conn.close()
-        except Exception: pass
+            with db_conn() as conn:
+                profile = compute_profile(conn, driver_id)
+        except (DuckDbUnavailable, _DUCKDB_ERROR) as e:
+            log.warning("compute_profile for %s failed: %s", driver_id, e)
     danger_today = [f"{d.id}: {d.description}" for d in sonoma.DANGER_ZONES if (weather_phase.id=="morning_fog" and d.severity in ("high","medium")) or d.severity=="high"]
     emotion = "neutral"; sid_param = (request.args.get("session_id") or "").strip() or None
     HAS_ADK_THIS_REQUEST = False
@@ -234,7 +256,7 @@ def coach_brief():
                 "temp:markers_selected": markers_selected,
             }
             
-            narrative, _adk_sid = state.run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
+            narrative, _adk_sid = run_adk(adk_prompt, user_id=driver_id or "driver", state_overrides=overrides)
             _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=sid_param or "")
 
             
@@ -247,10 +269,11 @@ def coach_brief():
                 if bullets:
                     focus = bullets[:3]
                     
-            _em = re.search(r"\[EMOTION:(\w+)\]", narrative)
-            if _em: emotion=_em.group(1); narrative=re.sub(r"\[EMOTION:\w+\]\s*","",narrative).strip()
+            narrative, _em_val = extract_emotion(narrative)
+            if _em_val != "neutral": emotion = _em_val
             HAS_ADK_THIS_REQUEST = True
-        except Exception as _e: print(f"⚠  ADK brief failed ({_e})")
+        except (ConnectionError, TimeoutError, OSError, RuntimeError, json.JSONDecodeError) as _e:
+            log.warning("ADK brief failed (%s: %s)", type(_e).__name__, _e)
     if not HAS_ADK_THIS_REQUEST:
         if hasattr(state.coach, "brief"):
             try:
@@ -262,10 +285,10 @@ def coach_brief():
         else: narrative, focus = "", markers_selected[:3]
     if state.has_duckdb and driver_id and narrative:
         try:
-            with state.db_lock:
-                conn = get_db()
-                if conn: conn.execute("INSERT INTO conversations (session_id, driver_id, role, text, focus_items, emotion) VALUES (?,'coach_brief',?,?,?)",[sid_param or "", driver_id, narrative, json.dumps(focus), emotion]); conn.close()
-        except Exception: pass
+            with db_conn() as conn:
+                conn.execute("INSERT INTO conversations (session_id, driver_id, role, text, focus_items, emotion) VALUES (?,'coach_brief',?,?,?)",[sid_param or "", driver_id, narrative, json.dumps(focus), emotion])
+        except (DuckDbUnavailable, _DUCKDB_ERROR) as e:
+            log.warning("conversations insert (brief) failed: %s", e)
     return jsonify({"driver_id":driver_id,"date":today,"weather_phase":weather_phase.id,"surface_state":weather_phase.surface_state,"weather_note":weather_phase.coaching_note,"weakest_recent_corner":profile.get("weakest_recent_corner"),"biggest_recent_improvement":profile.get("biggest_improvement"),"danger_zones_today":danger_today,"narrative_md":narrative,"focus":focus,"emotion":emotion})
 
 @bp.route("/coach/ask", methods=["POST"])
@@ -293,12 +316,10 @@ def coach_ask():
     overrides: dict = {}
     if intent_override: overrides["temp:intent_override"] = intent_override
     try:
-        answer, _adk_sid = state.run_adk(prompt, user_id=driver_id or "driver",
-                                         state_overrides=overrides or None)
+        answer, _adk_sid = run_adk(prompt, user_id=driver_id or "driver",
+                                   state_overrides=overrides or None)
         _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=session_id)
-        _em = re.search(r"\[EMOTION:(\w+)\]", answer)
-        emotion = _em.group(1) if _em else "neutral"
-        answer = re.sub(r"\[EMOTION:\w+\]\s*","",answer).strip()
+        answer, emotion = extract_emotion(answer)
         with _qa_lock:
             h = _qa_histories[qa_key]; h.append({"role":"user","text":question}); h.append({"role":"assistant","text":answer,"emotion":emotion}); turn = len(h)//2
         return jsonify({"answer":answer,"emotion":emotion,"qa_key":qa_key,"turn":turn})
@@ -312,19 +333,19 @@ def coach_ask_end():
     with _qa_lock: history = _qa_histories.pop(qa_key, []); _qa_timestamps.pop(qa_key, None)
     if not history or not state.has_duckdb: return jsonify({"flushed":0})
     flushed = 0
-    with state.db_lock:
-        conn = get_db()
-        if conn:
+    try:
+        with db_conn() as conn:
             try:
                 for turn in history: conn.execute("INSERT INTO conversations (session_id, driver_id, role, text, emotion) VALUES (?,?,?,?,?)", [session_id, driver_id, turn["role"], turn["text"], turn.get("emotion","neutral")]); flushed += 1
-            except Exception: pass
-            finally: conn.close()
+            except _DUCKDB_ERROR as e:
+                log.warning("conversations Q&A flush stopped after %d turns: %s", flushed, e)
+    except DuckDbUnavailable: pass
     return jsonify({"flushed":flushed,"qa_key":qa_key})
 
 @bp.route("/coach/ask/stream", methods=["POST"])
 def coach_ask_stream():
     """SSE streaming variant of /coach/ask."""
-    if not state.has_adk or state.stream_adk is None: return jsonify({"error":"ADK streaming unavailable"}), 503
+    if not state.has_adk: return jsonify({"error":"ADK streaming unavailable"}), 503
     data = request.get_json(force=True, silent=True) or {}
     driver_id = data.get("driver_id",""); session_id = data.get("session_id","")
     question = data.get("question","").strip(); intent_override = (data.get("intent") or "").strip().lower()
@@ -343,15 +364,13 @@ def coach_ask_stream():
     def generate():
         accum = ""
         try:
-            for chunk in state.stream_adk(prompt, user_id=driver_id or "driver",
-                                          state_overrides=overrides or None):
+            for chunk in stream_adk(prompt, user_id=driver_id or "driver",
+                                    state_overrides=overrides or None):
                 if not chunk: continue
                 if chunk.startswith(accum) and len(chunk)>len(accum): delta=chunk[len(accum):]; accum=chunk
                 else: delta=chunk; accum+=chunk
                 yield f"data: {json.dumps({'delta':delta})}\n\n"
-            _em = re.search(r"\[EMOTION:(\w+)\]", accum)
-            emotion = _em.group(1) if _em else "neutral"
-            answer = re.sub(r"\[EMOTION:\w+\]\s*","",accum).strip()
+            answer, emotion = extract_emotion(accum)
             with _qa_lock:
                 h = _qa_histories.setdefault(qa_key, []); h.append({"role":"user","text":question}); h.append({"role":"assistant","text":answer,"emotion":emotion})
             yield "data: " + json.dumps({"done":True,"answer":answer,"emotion":emotion,"qa_key":qa_key}) + "\n\n"

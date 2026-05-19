@@ -530,8 +530,12 @@ def test_adk_openai_backend_uses_litellm(monkeypatch):
     local server (Ollama, llama.cpp, vLLM, …)."""
     pytest.importorskip("litellm")
     monkeypatch.setenv("PITWALL_ADK_BACKEND", "openai")
-    monkeypatch.setenv("PITWALL_LITERT_MODEL", "openai/gemma-4-e4b")
-    monkeypatch.setenv("PITWALL_LITERT_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("PITWALL_ADK_OPENAI_MODEL", "openai/gemma-4-e4b")
+    monkeypatch.setenv("PITWALL_ADK_OPENAI_URL", "http://localhost:11434/v1")
+    # Clear legacy names so a deprecation warning from a shell-set legacy
+    # var doesn't bleed into this assertion path.
+    monkeypatch.delenv("PITWALL_LITERT_MODEL", raising=False)
+    monkeypatch.delenv("PITWALL_LITERT_URL", raising=False)
     import importlib
     from pitwall.features.coaching import adk_agents
     importlib.reload(adk_agents)

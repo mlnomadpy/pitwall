@@ -88,7 +88,7 @@ hosts LiteRT-LM and exposes an OpenAI-compatible HTTP server on
 `127.0.0.1:8099/v1`. As of 2026-05-12 it's the **default transport for both
 the warm path** (`LitertCoach.brief()` / `debrief()`) **and the paddock ADK
 tier** — fresh installs need zero env vars. Two opt-out paths remain
-(`PITWALL_LITERT_URL=""` + `PITWALL_ADK_BACKEND=engine` for in-process,
+(`PITWALL_ADK_OPENAI_URL=""` + `PITWALL_ADK_BACKEND=engine` for in-process,
 `PITWALL_ADK_BACKEND=litertlm` for legacy `lit serve`), and the same `openai`
 selector also covers dev workstations running Ollama / LM Studio / llama.cpp
 / vLLM. Every backend dials only `localhost` — no hosted API. See

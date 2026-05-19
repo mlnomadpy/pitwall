@@ -467,26 +467,23 @@ class CanReader:
     def _sink_tall(self, signals: list[tuple[str, float, float]]):
         if not signals:
             return
-        with self._bridge.state.db_lock:
-            conn = self._bridge.db.get_db()
-            if conn is None:
-                return
-            rows = []
-            for name, t, v in signals:
-                sid_id = self._tall_id_cache.get(name)
-                if sid_id is None:
-                    sid_id = self._bridge.db.resolve_signal_id(conn, name)
-                    self._tall_id_cache[name] = sid_id
-                rows.append((self.session_id, sid_id, float(t), float(v)))
-            try:
+        try:
+            with self._bridge.db.db_conn() as conn:
+                rows = []
+                for name, t, v in signals:
+                    sid_id = self._tall_id_cache.get(name)
+                    if sid_id is None:
+                        sid_id = self._bridge.db.resolve_signal_id(conn, name)
+                        self._tall_id_cache[name] = sid_id
+                    rows.append((self.session_id, sid_id, float(t), float(v)))
                 conn.executemany(
                     """INSERT INTO telemetry_signals VALUES (?, ?, ?, ?)
                        ON CONFLICT (session_id, signal_id, t) DO UPDATE SET
                            value = excluded.value""",
                     rows,
                 )
-            finally:
-                conn.close()
+        except self._bridge.db.DuckDbUnavailable:
+            return
 
     # ── wide-table flush ─────────────────────────────────────────────────
 
@@ -541,17 +538,14 @@ class CanReader:
             self._frame_idx += 1
             self._last_distance_m = self._wide.distance_m
 
-        with self._bridge.state.db_lock:
-            conn = self._bridge.db.get_db()
-            if conn is None:
-                return
-            try:
+        try:
+            with self._bridge.db.db_conn() as conn:
                 conn.execute(
                     "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     row,
                 )
-            finally:
-                conn.close()
+        except self._bridge.db.DuckDbUnavailable:
+            return
 
         # Fan out to SSE subscribers (/telemetry/stream). Lazy import
         # to avoid loading the realtime blueprint when the reader is

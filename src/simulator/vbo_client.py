@@ -1,133 +1,45 @@
 """
-Standalone VBO parser for the Pitwall simulator clients.
-Does not import from the backend `pitwall.features` namespace.
-"""
+Backward-compatibility shim.
 
-import math
-from dataclasses import dataclass
+The simulator clients used to ship their own .vbo parser
+(`ClientTelemetryFrame` + `parse_vbo_client`) under the rationale that
+the simulator shouldn't import from the backend `pitwall.features`
+namespace. That was inertia — the simulator ships as part of this
+same repo, and `can_simulator.py` already imports backend modules at
+runtime. There's now exactly one .vbo parser in the tree
+(`pitwall.features.session.vbo_parser.parse_vbo`), and the simulator
+clients delegate to it via `vbo_replay`.
+
+New code should `from vbo_replay import load_frames, TelemetryFrame`
+(or import from `pitwall.features.session.vbo_parser` directly). This
+module is kept only so external scripts that still write `from
+vbo_client import parse_vbo_client` keep working; it will be removed
+in a future cleanup.
+"""
+from __future__ import annotations
+
+import sys
 from pathlib import Path
 
+# Make sibling-module import work whether this file is loaded as
+# `simulator.vbo_client` (namespace-package style, when launched via
+# `python -m simulator.simulator`) or as plain `vbo_client` (when
+# launched via `python simulator.py` from inside src/simulator/).
+_THIS_DIR = Path(__file__).resolve().parent
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
 
-@dataclass
-class ClientTelemetryFrame:
-    timestamp: float
-    lat: float
-    lon: float
-    speed: float
-    heading: float
-    altitude: float
-    g_lat: float
-    g_long: float
-    combo_g: float
-    brake_pressure: float
-    brake_position: float
-    throttle: float
-    steering: float
-    rpm: float
-    coolant_temp: float
-    oil_temp: float
-    fuel_level: float
-    distance: float = 0.0
+from vbo_replay import (  # type: ignore[import-not-found]  # noqa: E402, F401
+    TelemetryFrame,
+    frame_to_payload,
+    load_frames,
+)
 
-    def to_dict(self):
-        return {
-            "timestamp": self.timestamp,
-            "lat": self.lat,
-            "lon": self.lon,
-            "speed": self.speed,
-            "heading": self.heading,
-            "altitude": self.altitude,
-            "g_lat": self.g_lat,
-            "g_long": self.g_long,
-            "combo_g": self.combo_g,
-            "brake_pressure": self.brake_pressure,
-            "brake_position": self.brake_position,
-            "throttle": self.throttle,
-            "steering": self.steering,
-            "rpm": self.rpm,
-            "coolant_temp": self.coolant_temp,
-            "oil_temp": self.oil_temp,
-            "fuel_level": self.fuel_level,
-            "distance": self.distance,
-        }
+# Legacy alias — old code wrote `ClientTelemetryFrame`; both names
+# now resolve to the production TelemetryFrame dataclass.
+ClientTelemetryFrame = TelemetryFrame
 
 
-def _parse_vbo_coord(value: float) -> float:
-    degrees = int(value / 100)
-    minutes = value - (degrees * 100)
-    return degrees + minutes / 60.0
-
-
-def parse_vbo_client(filepath: str) -> list[ClientTelemetryFrame]:
-    filepath = Path(filepath)
-    lines = filepath.read_text(encoding="utf-8", errors="ignore").splitlines()
-
-    sections = {}
-    for i, line in enumerate(lines):
-        if line.strip().startswith("[") and line.strip().endswith("]"):
-            sections[line.strip().strip("[]")] = i
-
-    columns = []
-    if "column names" in sections:
-        columns = lines[sections["column names"] + 1].strip().split()
-
-    if "data" not in sections or not columns:
-        return []
-
-    data_start = sections["data"] + 1
-    frames = []
-    cumulative_distance = 0.0
-    prev_lat = None
-    prev_lon = None
-
-    for line in lines[data_start:]:
-        line = line.strip()
-        if not line or line.startswith("["):
-            break
-
-        parts = line.split()
-        if len(parts) != len(columns):
-            continue
-
-        row = {}
-        for j, col in enumerate(columns):
-            try:
-                row[col] = float(parts[j])
-            except ValueError:
-                row[col] = 0.0
-
-        lat = _parse_vbo_coord(abs(row.get("lat", 0)))
-        lon = -_parse_vbo_coord(abs(row.get("long", 0)))
-
-        if prev_lat is not None:
-            dlat = math.radians(lat - prev_lat)
-            dlon = math.radians(lon - prev_lon)
-            a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(prev_lat)) * math.cos(math.radians(lat)) * math.sin(dlon / 2) ** 2
-            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-            cumulative_distance += 6371000 * c
-
-        prev_lat = lat
-        prev_lon = lon
-
-        frames.append(ClientTelemetryFrame(
-            timestamp=row.get("time", 0),
-            lat=lat,
-            lon=lon,
-            speed=row.get("velocity", 0) / 3.6,
-            heading=row.get("heading", 0),
-            altitude=row.get("height", 0),
-            g_lat=row.get("Indicated_Lateral_Acceleration", 0),
-            g_long=row.get("Indicated_Longitudinal_Acceleration", 0),
-            combo_g=row.get("ComboAcc", 0),
-            brake_pressure=row.get("Brake_Pressure", 0),
-            brake_position=row.get("Brake_Position", 0),
-            throttle=row.get("Throttle_Position", 0),
-            steering=row.get("Steering_Angle", 0),
-            rpm=row.get("Engine_Speed", 0),
-            coolant_temp=row.get("Coolant_Temperature", 0),
-            oil_temp=row.get("Oil_Temperature", 0),
-            fuel_level=row.get("Fuel_Level", 0),
-            distance=cumulative_distance,
-        ))
-
-    return frames
+def parse_vbo_client(filepath):
+    """Deprecated alias for `vbo_replay.load_frames`."""
+    return load_frames(filepath)

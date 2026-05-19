@@ -11,8 +11,13 @@ from datetime import datetime, timezone
 from flask import Blueprint, request, jsonify
 
 from pitwall.state import state
-from pitwall.helpers import (
+from pitwall.features.coaching.cue_renderer import (
     sonic_coaching, rule_coaching, estimate_tts_ms,
+)
+from pitwall.features.coaching.coach_engine import build_context
+from pitwall.features.track.track_loader import (
+    find_nearest_corner,
+    distance_to_corner,
 )
 
 bp = Blueprint("core", __name__)
@@ -148,11 +153,11 @@ def analyze():
         )
 
         distance_m = burst.get("distance_m", 0)
-        nearest = state.find_nearest_corner(state.track, distance_m)
-        dist_to_corner = state.distance_to_corner(state.track, distance_m, nearest) if nearest else 999.0
+        nearest = find_nearest_corner(state.track, distance_m)
+        dist_to_corner = distance_to_corner(state.track, distance_m, nearest) if nearest else 999.0
         in_corner_obj = nearest if burst.get("in_corner", False) else None
 
-        ctx = state.build_context(
+        ctx = build_context(
             driver_level=burst.get("driver_level", "intermediate"),
             track=state.track,
             frame=frame,

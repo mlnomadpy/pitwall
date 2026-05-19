@@ -19,15 +19,18 @@ Model backends (`PITWALL_ADK_BACKEND`)
 
 Environment overrides
 ---------------------
-    PITWALL_ADK_BACKEND      default: "openai"  ({engine | litertlm | openai})
-    PITWALL_LITERT_URL       default: http://localhost:8099/v1  (LocalLLM)
-    PITWALL_LITERT_MODEL     default: gemma3n-e2b   (must match the loaded model)
-    PITWALL_LITERT_API_KEY   default: lit-serve-not-required (openai bearer token)
-    PITWALL_LITERTLM_PATH    .litertlm bundle path (engine backend)
-    PITWALL_LITERTLM_BUDGET  KV-cache char budget per agent (default 30000)
-    PITWALL_ADK_TIMEOUT_S    default: 45  (raises after this many seconds)
-    PITWALL_ADK_CHAR_BUDGET  default: 60000 (rotate ADK session above this)
-    PITWALL_ADK_PROMPT_LOG   default: ""   (empty disables prompt JSONL log)
+    PITWALL_ADK_BACKEND         default: "openai"  ({engine | litertlm | openai})
+    PITWALL_ADK_OPENAI_URL      default: http://localhost:8099/v1  (LocalLLM / OpenAI-shim)
+                                (legacy: PITWALL_LITERT_URL — deprecated)
+    PITWALL_ADK_OPENAI_MODEL    default: gemma3n-e2b   (must match the loaded model)
+                                (legacy: PITWALL_LITERT_MODEL — deprecated)
+    PITWALL_ADK_OPENAI_API_KEY  default: lit-serve-not-required (openai bearer token)
+                                (legacy: PITWALL_LITERT_API_KEY — deprecated)
+    PITWALL_LITERTLM_PATH       .litertlm bundle path (engine backend)
+    PITWALL_LITERTLM_BUDGET     KV-cache char budget per agent (default 30000)
+    PITWALL_ADK_TIMEOUT_S       default: 45  (raises after this many seconds)
+    PITWALL_ADK_CHAR_BUDGET     default: 60000 (rotate ADK session above this)
+    PITWALL_ADK_PROMPT_LOG      default: ""   (empty disables prompt JSONL log)
 
 Public API for pitwall_bridge.py
 --------------------------------
@@ -75,6 +78,7 @@ import time
 from collections import deque
 from typing import AsyncGenerator, Iterable
 
+from pitwall._env import get_env_with_legacy
 from pitwall.adk_tools import (
     query_pitwall_db,
     get_lap_delta,
@@ -204,7 +208,7 @@ def reset_driver_session(user_id: str) -> None:
     try:
         _reset_litertlm_conversations()
     except Exception:
-        pass
+        _log.exception("LiteRT-LM conversation cache reset failed")
 
 
 def get_kv_cache_stats() -> dict:
@@ -308,8 +312,11 @@ else:
     # is the default paddock backend. Override with PITWALL_ADK_BACKEND for
     # legacy lit serve (`litertlm`) or in-process (`engine`) deployments.
     _BACKEND = os.getenv("PITWALL_ADK_BACKEND", "openai").lower()
-    _MODEL_ID = os.getenv("PITWALL_LITERT_MODEL", "gemma3n-e2b")
-    _MODEL_URL = os.getenv("PITWALL_LITERT_URL", "http://localhost:8099/v1")
+    _MODEL_ID = get_env_with_legacy(
+        "PITWALL_ADK_OPENAI_MODEL", "PITWALL_LITERT_MODEL", "gemma3n-e2b")
+    _MODEL_URL = get_env_with_legacy(
+        "PITWALL_ADK_OPENAI_URL", "PITWALL_LITERT_URL",
+        "http://localhost:8099/v1")
 
     if _BACKEND == "engine":
         if not HAS_LITERTLM_MODEL:
@@ -330,7 +337,11 @@ else:
         _model = LiteLlm(
             model=_LITELLM_MODEL,
             api_base=_MODEL_URL,
-            api_key=os.getenv("PITWALL_LITERT_API_KEY", "lit-serve-not-required"),
+            api_key=get_env_with_legacy(
+                "PITWALL_ADK_OPENAI_API_KEY",
+                "PITWALL_LITERT_API_KEY",
+                "lit-serve-not-required",
+            ),
         )
     else:
         # LiteRT-LM via `lit serve` — official ADK doc'd path. Default.
@@ -564,8 +575,8 @@ else:
             override = ""
             try:
                 override = (ctx.session.state.get("temp:intent_override") or "").strip().lower()
-            except Exception:
-                pass
+            except (AttributeError, KeyError, TypeError) as exc:
+                _log.debug("intent_override lookup failed: %s", exc)
             intent = override if override in _VALID_INTENTS else _classify_intent(query)
 
             # Record routing decision as a trace row.
@@ -581,7 +592,7 @@ else:
                         "success":    True,
                     })
             except Exception:
-                pass
+                _log.exception("trace append for intent=%s failed", intent)
 
             if intent == "debrief":
                 async for event in debrief_pipeline.run_async(ctx):
@@ -679,7 +690,7 @@ else:
                 if state is not None:
                     state[f"temp:_agent_start_ms__{name}"] = time.time() * 1000
             except Exception:
-                pass
+                _log.exception("agent-start trace failed")
 
         def _record_agent_end(self, ctx, agent=None) -> None:
             try:
@@ -701,7 +712,7 @@ else:
                         "success":    True,
                     })
             except Exception:
-                pass
+                _log.exception("agent-end trace failed")
 
         def _record_tool(self, tool, tool_context, result, event_type="tool") -> None:
             try:
@@ -717,7 +728,7 @@ else:
                         "success":    _tool_response_ok(result) if event_type == "tool" else True,
                     })
             except Exception:
-                pass
+                _log.exception("tool-trace append failed")
 
         # Plain sync hooks (test entry points)
         def before_agent(self, ctx, agent=None):
@@ -782,8 +793,9 @@ else:
                 }
                 with open(_PROMPT_LOG_PATH, "a") as fh:
                     fh.write(json.dumps(row) + "\n")
-            except Exception:
-                pass
+            except (OSError, TypeError, ValueError) as exc:
+                _log.warning("prompt log write to %s failed: %s",
+                             _PROMPT_LOG_PATH, exc)
             return None
 
 

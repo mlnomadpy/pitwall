@@ -6,10 +6,25 @@ synchroniser (ADR-015 Phase 3).
 """
 
 import json
+import logging
 import os
 import threading
+from contextlib import contextmanager
 
 from pitwall.state import state, SIM_DIR
+
+
+log = logging.getLogger(__name__)
+
+try:
+    import duckdb as _duckdb
+    _DUCKDB_ERROR: type = _duckdb.Error
+except ImportError:  # duckdb is optional; keep broad fallback then
+    _DUCKDB_ERROR = Exception
+
+
+class DuckDbUnavailable(RuntimeError):
+    """Raised when DuckDB isn't installed or the connection can't be opened."""
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -27,15 +42,9 @@ WIDE_SIGNAL_NAMES = (
 )
 
 
-# ── Connection factory ─────────────────────────────────────────────────────────
+# ── Schema DDL ─────────────────────────────────────────────────────────────────
 
-def get_db():
-    """Open a DuckDB connection and ensure all schema tables exist."""
-    if not state.has_duckdb:
-        return None
-    import duckdb
-    conn = duckdb.connect(state.db_path)
-    conn.execute("""
+_SCHEMA_DDL = """
         CREATE SEQUENCE IF NOT EXISTS laps_id_seq;
         CREATE TABLE IF NOT EXISTS laps (
             id            INTEGER PRIMARY KEY DEFAULT nextval('laps_id_seq'),
@@ -190,8 +199,58 @@ def get_db():
             ON agent_traces(trace_id, ts);
         CREATE INDEX IF NOT EXISTS idx_agent_traces_agent
             ON agent_traces(agent_name, ts);
-    """)
-    return conn
+"""
+
+
+# ── Connection factory ─────────────────────────────────────────────────────────
+
+def get_db():
+    """Open a fresh DuckDB connection. Does NOT run DDL — schema must already
+    exist (call `init_schema_once()` at boot, e.g. from BridgeState.init_imports).
+    Returns None if DuckDB isn't available."""
+    if not state.has_duckdb:
+        return None
+    import duckdb
+    return duckdb.connect(state.db_path)
+
+
+def init_schema(conn) -> None:
+    """Idempotently create every table, sequence, and index used by the bridge
+    on the given connection. All statements are `IF NOT EXISTS`, so calling
+    this on an already-initialised DB is a no-op."""
+    conn.execute(_SCHEMA_DDL)
+
+
+def init_schema_once() -> None:
+    """Open a connection once, run all DDL, and close it. Idempotent — DDL
+    statements are all `IF NOT EXISTS`. Safe to call multiple times; silent
+    no-op if DuckDB isn't installed."""
+    if not state.has_duckdb:
+        return
+    conn = get_db()
+    if conn is None:
+        return
+    try:
+        init_schema(conn)
+    finally:
+        conn.close()
+
+
+@contextmanager
+def db_conn():
+    """Acquire DB lock + connection. Raises DuckDbUnavailable if duckdb missing.
+
+    Replaces the old `with state.db_lock: conn = get_db(); if conn is None: ...;
+    try: ...; finally: conn.close()` pattern across every blueprint.
+    """
+    with state.db_lock:
+        conn = get_db()
+        if conn is None:
+            raise DuckDbUnavailable("duckdb not available")
+        try:
+            yield conn
+        finally:
+            conn.close()
 
 
 # ── Signal registry seeding ────────────────────────────────────────────────────
@@ -209,27 +268,27 @@ def seed_signal_registry() -> int:
         seed = json.load(fh)
     rows = seed.get("signals", [])
     inserted = 0
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return 0
-        for s in rows:
-            try:
-                conn.execute(
-                    """INSERT INTO signal_registry
-                       (name, units, semantics, "group", expected_hz,
-                        min_useful_hz, discovery, obd2_pid)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT (name) DO NOTHING""",
-                    [s["name"], s.get("units"), s.get("semantics"),
-                     s.get("group"), s.get("expected_hz"),
-                     s.get("min_useful_hz"), s.get("discovery"),
-                     s.get("obd2_pid")],
-                )
-                inserted += 1
-            except Exception:
-                pass
-        conn.close()
+    try:
+        with db_conn() as conn:
+            for s in rows:
+                try:
+                    conn.execute(
+                        """INSERT INTO signal_registry
+                           (name, units, semantics, "group", expected_hz,
+                            min_useful_hz, discovery, obd2_pid)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                           ON CONFLICT (name) DO NOTHING""",
+                        [s["name"], s.get("units"), s.get("semantics"),
+                         s.get("group"), s.get("expected_hz"),
+                         s.get("min_useful_hz"), s.get("discovery"),
+                         s.get("obd2_pid")],
+                    )
+                    inserted += 1
+                except _DUCKDB_ERROR as e:
+                    log.warning("signal_registry seed of %s failed: %s",
+                                s.get("name"), e)
+    except DuckDbUnavailable:
+        return 0
     return inserted
 
 
@@ -267,59 +326,55 @@ def compute_capabilities(sid: str) -> int:
     """
     if not state.has_duckdb:
         return 0
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return 0
+    rows_written = 0
+    try:
+        with db_conn() as conn:
+            conn.execute("DELETE FROM session_capabilities WHERE session_id = ?", [sid])
 
-        conn.execute("DELETE FROM session_capabilities WHERE session_id = ?", [sid])
+            # 1. Wide-table canonical fields — every present session has all 11.
+            n, t_start, t_end = conn.execute(
+                "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) "
+                "FROM telemetry WHERE session_id = ?",
+                [sid],
+            ).fetchone()
+            if n and n > 0 and t_start is not None and t_end is not None:
+                duration = max(t_end - t_start, 1e-6)
+                mean_hz = n / duration
+                placeholders = ",".join(["?"] * len(WIDE_SIGNAL_NAMES))
+                sigs = conn.execute(
+                    f"SELECT signal_id FROM signal_registry WHERE name IN ({placeholders})",
+                    list(WIDE_SIGNAL_NAMES),
+                ).fetchall()
+                for (sig_id,) in sigs:
+                    conn.execute(
+                        "INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)",
+                        [sid, sig_id, n, mean_hz, t_start, t_end],
+                    )
+                    rows_written += 1
 
-        rows_written = 0
-
-        # 1. Wide-table canonical fields — every present session has all 11.
-        n, t_start, t_end = conn.execute(
-            "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) "
-            "FROM telemetry WHERE session_id = ?",
-            [sid],
-        ).fetchone()
-        if n and n > 0 and t_start is not None and t_end is not None:
-            duration = max(t_end - t_start, 1e-6)
-            mean_hz = n / duration
-            placeholders = ",".join(["?"] * len(WIDE_SIGNAL_NAMES))
-            sigs = conn.execute(
-                f"SELECT signal_id FROM signal_registry WHERE name IN ({placeholders})",
-                list(WIDE_SIGNAL_NAMES),
+            # 2. Tall store — variable rate per signal; tall wins on overlap.
+            tall = conn.execute(
+                """SELECT signal_id, COUNT(*), MIN(t), MAX(t)
+                   FROM telemetry_signals
+                   WHERE session_id = ?
+                   GROUP BY signal_id""",
+                [sid],
             ).fetchall()
-            for (sig_id,) in sigs:
+            for sig_id, ns, ts, te in tall:
+                duration = max((te - ts), 1e-6)
+                hz = ns / duration
                 conn.execute(
-                    "INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)",
-                    [sid, sig_id, n, mean_hz, t_start, t_end],
+                    """INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)
+                       ON CONFLICT (session_id, signal_id) DO UPDATE SET
+                           n_samples = excluded.n_samples,
+                           mean_hz   = excluded.mean_hz,
+                           t_start   = excluded.t_start,
+                           t_end     = excluded.t_end""",
+                    [sid, sig_id, ns, hz, ts, te],
                 )
                 rows_written += 1
-
-        # 2. Tall store — variable rate per signal; tall wins on overlap.
-        tall = conn.execute(
-            """SELECT signal_id, COUNT(*), MIN(t), MAX(t)
-               FROM telemetry_signals
-               WHERE session_id = ?
-               GROUP BY signal_id""",
-            [sid],
-        ).fetchall()
-        for sig_id, ns, ts, te in tall:
-            duration = max((te - ts), 1e-6)
-            hz = ns / duration
-            conn.execute(
-                """INSERT INTO session_capabilities VALUES (?, ?, ?, ?, ?, ?)
-                   ON CONFLICT (session_id, signal_id) DO UPDATE SET
-                       n_samples = excluded.n_samples,
-                       mean_hz   = excluded.mean_hz,
-                       t_start   = excluded.t_start,
-                       t_end     = excluded.t_end""",
-                [sid, sig_id, ns, hz, ts, te],
-            )
-            rows_written += 1
-
-        conn.close()
+    except DuckDbUnavailable:
+        return 0
     return rows_written
 
 
@@ -332,35 +387,31 @@ def log_llm_friction(rec: dict) -> None:
     if not state.has_duckdb:
         return
     try:
-        with state.db_lock:
-            conn = get_db()
-            if conn is None:
-                return
-            try:
-                conn.execute(
-                    """INSERT INTO llm_friction
-                       (session_id, role, mode, backend, prompt_chars,
-                        completion_chars, latency_ms, truncated, fell_back,
-                        error, emotion)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    [
-                        rec.get("session_id"),
-                        rec.get("role", ""),
-                        rec.get("mode", ""),
-                        rec.get("backend", ""),
-                        int(rec.get("prompt_chars") or 0),
-                        int(rec.get("completion_chars") or 0),
-                        float(rec.get("latency_ms") or 0.0),
-                        bool(rec.get("truncated", False)),
-                        bool(rec.get("fell_back", False)),
-                        (rec.get("error") or "")[:512],
-                        rec.get("emotion") or "",
-                    ],
-                )
-            finally:
-                conn.close()
-    except Exception:
-        pass
+        with db_conn() as conn:
+            conn.execute(
+                """INSERT INTO llm_friction
+                   (session_id, role, mode, backend, prompt_chars,
+                    completion_chars, latency_ms, truncated, fell_back,
+                    error, emotion)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                [
+                    rec.get("session_id"),
+                    rec.get("role", ""),
+                    rec.get("mode", ""),
+                    rec.get("backend", ""),
+                    int(rec.get("prompt_chars") or 0),
+                    int(rec.get("completion_chars") or 0),
+                    float(rec.get("latency_ms") or 0.0),
+                    bool(rec.get("truncated", False)),
+                    bool(rec.get("fell_back", False)),
+                    (rec.get("error") or "")[:512],
+                    rec.get("emotion") or "",
+                ],
+            )
+    except (DuckDbUnavailable, _DUCKDB_ERROR) as e:
+        # Sink must never stall inference — log at debug so we can spot a
+        # broken sink in dev without spamming production at warning level.
+        log.debug("llm_friction write failed: %s", e)
 
 
 # ── Session helpers ────────────────────────────────────────────────────────────
@@ -369,14 +420,13 @@ def session_has_telemetry(sid: str) -> bool:
     """Check if a session has any telemetry frames."""
     if not state.has_duckdb:
         return False
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return False
-        n = conn.execute(
-            "SELECT COUNT(*) FROM telemetry WHERE session_id = ?", [sid],
-        ).fetchone()[0]
-        conn.close()
+    try:
+        with db_conn() as conn:
+            n = conn.execute(
+                "SELECT COUNT(*) FROM telemetry WHERE session_id = ?", [sid],
+            ).fetchone()[0]
+    except DuckDbUnavailable:
+        return False
     return bool(n)
 
 
@@ -392,8 +442,8 @@ def reset_live_session():
     and left orphan unique-index entries. Once that fires, the entire
     DB is marked "invalidated" and no further query on this file works
     — even from a fresh process — until the file is rebuilt. We handle
-    that by rotating the corrupted file aside and letting the next
-    get_db() recreate the schema fresh.
+    that by rotating the corrupted file aside and recreating the schema
+    on a fresh DB.
     """
     if not state.has_duckdb:
         return
@@ -406,11 +456,8 @@ def reset_live_session():
     import duckdb as _ddb
     fatal = getattr(_ddb, "FatalException", Exception)
     rotated = False
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return
-        try:
+    try:
+        with db_conn() as conn:
             for tbl in tables:
                 try:
                     conn.execute(
@@ -418,35 +465,28 @@ def reset_live_session():
                     )
                 except fatal as e:
                     # Index corruption — every further query on this DB
-                    # will now fail. Close the connection, rotate the
-                    # file aside, and let the next caller rebuild.
+                    # will now fail. Bail out of the inner with-block,
+                    # rotate the file aside, and rebuild the schema.
                     print(f"⚠  DuckDB corruption detected on {tbl}: {e!s}"[:200])
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-                    _rotate_corrupted_db()
                     rotated = True
                     break
-            if not rotated:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            raise
+    except DuckDbUnavailable:
+        return
     if rotated:
-        # Re-seed the registry on the fresh DB so the bridge has the
-        # expected static_obd2 / static_dbc entries before any CAN frame
-        # arrives. `seed_signal_registry` is idempotent.
+        # Close-and-rotate happens outside the lock-held connection scope;
+        # db_conn() already closed our handle when we left the with-block.
+        _rotate_corrupted_db()
+        # Recreate the schema fresh on the new DB file, then re-seed the
+        # registry so the bridge has the expected static_obd2 / static_dbc
+        # entries before any CAN frame arrives. Both are idempotent.
+        try:
+            init_schema_once()
+        except _DUCKDB_ERROR as e:
+            log.warning("schema init after DB rotation failed: %s", e)
         try:
             seed_signal_registry()
-        except Exception as e:
-            print(f"⚠  registry re-seed after DB rotation failed: {e}")
+        except _DUCKDB_ERROR as e:
+            log.warning("registry re-seed after DB rotation failed: %s", e)
 
 
 def _rotate_corrupted_db():
@@ -488,39 +528,38 @@ def ensure_session_row(sid: str, *, driver=None, driver_level=None,
     if not state.has_duckdb:
         return
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return
-        existing = conn.execute(
-            "SELECT driver, driver_level, track, car, note "
-            "FROM sessions WHERE session_id = ?", [sid],
-        ).fetchone()
-        if existing is None:
-            conn.execute(
-                "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                [sid, driver, driver_level, track, car, note],
-            )
-        else:
-            cur = dict(zip(
-                ["driver", "driver_level", "track", "car", "note"], existing,
-            ))
-            merged = {
-                "driver":       driver       if driver       is not None else cur["driver"],
-                "driver_level": driver_level if driver_level is not None else cur["driver_level"],
-                "track":        track        if track        is not None else cur["track"],
-                "car":          car          if car          is not None else cur["car"],
-                "note":         note         if note         is not None else cur["note"],
-            }
-            conn.execute(
-                """UPDATE sessions SET driver = ?, driver_level = ?,
-                                       track = ?, car = ?, note = ?
-                   WHERE session_id = ?""",
-                [merged["driver"], merged["driver_level"], merged["track"],
-                 merged["car"], merged["note"], sid],
-            )
-        conn.close()
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT driver, driver_level, track, car, note "
+                "FROM sessions WHERE session_id = ?", [sid],
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [sid, driver, driver_level, track, car, note],
+                )
+            else:
+                cur = dict(zip(
+                    ["driver", "driver_level", "track", "car", "note"], existing,
+                ))
+                merged = {
+                    "driver":       driver       if driver       is not None else cur["driver"],
+                    "driver_level": driver_level if driver_level is not None else cur["driver_level"],
+                    "track":        track        if track        is not None else cur["track"],
+                    "car":          car          if car          is not None else cur["car"],
+                    "note":         note         if note         is not None else cur["note"],
+                }
+                conn.execute(
+                    """UPDATE sessions SET driver = ?, driver_level = ?,
+                                           track = ?, car = ?, note = ?
+                       WHERE session_id = ?""",
+                    [merged["driver"], merged["driver_level"], merged["track"],
+                     merged["car"], merged["note"], sid],
+                )
+    except DuckDbUnavailable:
+        return
 
 
 # ── Signal reading + interpolation (ADR-015 Phase 3) ──────────────────────────

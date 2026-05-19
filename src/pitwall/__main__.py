@@ -38,7 +38,10 @@ for p in (SRC_DIR, SIM_DIR):
 
 # ── Pitwall backend package ───────────────────────────────────────────────────
 from pitwall.state import state
-from pitwall.db import get_db, seed_signal_registry, log_llm_friction, reset_live_session, ensure_session_row
+from pitwall.db import (
+    db_conn, DuckDbUnavailable,
+    seed_signal_registry, log_llm_friction, reset_live_session, ensure_session_row,
+)
 from pitwall import create_app, register_blueprints
 
 
@@ -81,14 +84,11 @@ def _shutdown(reason: str = "exit"):
 
     if getattr(state, "has_duckdb", False):
         try:
-            with state.db_lock:
-                conn = get_db()
-                if conn is not None:
-                    try:
-                        conn.execute("CHECKPOINT")
-                        log.info("   DuckDB CHECKPOINT ok")
-                    finally:
-                        conn.close()
+            with db_conn() as conn:
+                conn.execute("CHECKPOINT")
+                log.info("   DuckDB CHECKPOINT ok")
+        except DuckDbUnavailable:
+            pass
         except Exception as e:
             log.warning("   DuckDB CHECKPOINT failed: %s", e)
 
@@ -304,15 +304,17 @@ def main():
     # 2. Load track
     if state.has_sonic and os.path.exists(args.track):
         try:
-            state.track = state.load_track(args.track)
+            from pitwall.features.track.track_loader import load_track
+            state.track = load_track(args.track)
             log.info("✓  Track: %s (%d corners)",
                      state.track.name, len(state.track.corners))
         except Exception as e:
             log.warning("Track load failed: %s", e)
 
     # 3. Wire LLM friction logger
-    if state.has_coach and state.set_friction_logger:
-        state.set_friction_logger(log_llm_friction)
+    if state.has_coach:
+        from pitwall.features.coaching.coach_engine import set_friction_logger
+        set_friction_logger(log_llm_friction)
 
     # 4. Seed signal registry
     if state.has_duckdb:

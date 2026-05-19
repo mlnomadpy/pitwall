@@ -219,16 +219,16 @@ pip install 'google-adk[litellm]'
 #    github.com/mlnomadpy/localllm). Open it, download a Gemma 4 .litertlm
 #    from its in-app catalog, copy the bearer token from Settings.
 # 2. From Termux on the same phone:
-PITWALL_LITERT_API_KEY="<paste-LocalLLM-token>" python3 -m src.pitwall
-# Defaults: PITWALL_LITERT_URL=http://localhost:8099/v1
-#           PITWALL_LITERT_MODEL=gemma3n-e2b
+PITWALL_ADK_OPENAI_API_KEY="<paste-LocalLLM-token>" python3 -m src.pitwall
+# Defaults: PITWALL_ADK_OPENAI_URL=http://localhost:8099/v1
+#           PITWALL_ADK_OPENAI_MODEL=gemma3n-e2b
 #           PITWALL_ADK_BACKEND=openai
 ```
 
 **B. Opt-out — in-process LiteRT (no LocalLLM, no second APK):**
 
 ```bash
-PITWALL_LITERT_URL="" \
+PITWALL_ADK_OPENAI_URL="" \
 PITWALL_ADK_BACKEND=engine \
 PITWALL_LITERTLM_PATH=~/storage/shared/Pitwall/models/gemma-4-E2B-it.litertlm \
 python3 -m src.pitwall
@@ -238,7 +238,7 @@ python3 -m src.pitwall
 
 ```bash
 lit pull gemma-4-e4b && lit serve --port 8001   # separate terminal
-PITWALL_LITERT_URL=http://localhost:8001 \
+PITWALL_ADK_OPENAI_URL=http://localhost:8001 \
 PITWALL_ADK_BACKEND=litertlm \
 python3 -m src.pitwall
 ```
@@ -246,18 +246,27 @@ python3 -m src.pitwall
 **D. Dev workstation — Ollama / LM Studio / llama.cpp / vLLM:**
 
 ```bash
-PITWALL_LITERT_URL=http://localhost:11434/v1 \
-PITWALL_LITERT_MODEL=gemma2:2b \
+PITWALL_ADK_OPENAI_URL=http://localhost:11434/v1 \
+PITWALL_ADK_OPENAI_MODEL=gemma2:2b \
 python3 -m src.pitwall
 # (Default PITWALL_ADK_BACKEND=openai already routes via LiteLlm.)
 ```
 
-| Var                       | Default                        | Purpose                                            |
-| ------------------------- | ------------------------------ | -------------------------------------------------- |
-| `PITWALL_ADK_BACKEND`     | `openai`                       | `engine` \| `litertlm` \| `openai`                 |
-| `PITWALL_LITERT_URL`      | `http://localhost:8099/v1`     | HTTP base for **both** warm path and paddock; empty string falls back to in-process |
-| `PITWALL_LITERT_MODEL`    | `gemma3n-e2b`                  | model id (must match what the server has loaded)   |
-| `PITWALL_LITERT_API_KEY`  | `lit-serve-not-required`       | LocalLLM's signed bearer token                     |
+| Var                            | Default                        | Purpose                                            |
+| ------------------------------ | ------------------------------ | -------------------------------------------------- |
+| `PITWALL_ADK_BACKEND`          | `openai`                       | `engine` \| `litertlm` \| `openai`                 |
+| `PITWALL_ADK_OPENAI_URL`       | `http://localhost:8099/v1`     | HTTP base for **both** warm path and paddock; empty string falls back to in-process |
+| `PITWALL_ADK_OPENAI_MODEL`     | `gemma3n-e2b`                  | model id (must match what the server has loaded)   |
+| `PITWALL_ADK_OPENAI_API_KEY`   | `lit-serve-not-required`       | LocalLLM's signed bearer token                     |
+| `PITWALL_LITERT_SIDECAR_URL`   | `http://127.0.0.1:8080`        | LiteRT-LM Kotlin sidecar URL (engine backend only) |
+| `PITWALL_LITERT_SIDECAR_MODEL` | `gemma-4-e2b`                  | LiteRT-LM Kotlin sidecar model id                  |
+
+> **Deprecated aliases (still honoured, emit a `DeprecationWarning`):**
+> `PITWALL_LITERT_URL` → `PITWALL_ADK_OPENAI_URL`,
+> `PITWALL_LITERT_MODEL` → `PITWALL_ADK_OPENAI_MODEL`,
+> `PITWALL_LITERT_API_KEY` → `PITWALL_ADK_OPENAI_API_KEY`,
+> `PITWALL_LITERTLM_URL` → `PITWALL_LITERT_SIDECAR_URL`,
+> `PITWALL_LITERTLM_MODEL` → `PITWALL_LITERT_SIDECAR_MODEL`.
 
 All backends are **local** — no hosted LLM is ever called.
 

@@ -1,6 +1,7 @@
 import pytest
 import pitwall as br
-from pitwall.helpers import estimate_tts_ms, detect_laps, quantile
+from pitwall.features.coaching.cue_renderer import estimate_tts_ms
+from pitwall.features.session.laps import detect_laps, quantile
 from pitwall.db import log_llm_friction
 from pitwall.features.realtime.bp_realtime import cue_bus
 

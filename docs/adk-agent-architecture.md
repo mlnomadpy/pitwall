@@ -41,7 +41,9 @@ point of view.
     **The warm path is on the same transport.** `LitertCoach.brief()` and
     `LitertCoach.debrief()` ([coach_engine.py](coaching-engine.md)) also
     default to HTTP-to-LocalLLM as of ADR-022 — every LLM call in pitwall
-    goes through `127.0.0.1`. Set `PITWALL_LITERT_URL=""` (empty) to opt
+    goes through `127.0.0.1`. Set `PITWALL_ADK_OPENAI_URL=""` (empty;
+    legacy alias `PITWALL_LITERT_URL` still works with a
+    `DeprecationWarning`) to opt
     back into the in-process `litert_lm.Engine` for the warm path.
 
 4. **Two runtimes, one ecosystem:**
@@ -289,9 +291,12 @@ client is selected at process start by `PITWALL_ADK_BACKEND`. The default is
 
 ```python
 # adk_agents.py — module load
-_BACKEND  = os.getenv("PITWALL_ADK_BACKEND", "litertlm").lower()
-_MODEL_ID = os.getenv("PITWALL_LITERT_MODEL", "gemma3n-e2b")
-_MODEL_URL = os.getenv("PITWALL_LITERT_URL", "http://localhost:8001")
+_BACKEND  = os.getenv("PITWALL_ADK_BACKEND", "openai").lower()
+_MODEL_ID = get_env_with_legacy(
+    "PITWALL_ADK_OPENAI_MODEL", "PITWALL_LITERT_MODEL", "gemma3n-e2b")
+_MODEL_URL = get_env_with_legacy(
+    "PITWALL_ADK_OPENAI_URL", "PITWALL_LITERT_URL",
+    "http://localhost:8099/v1")
 
 if _BACKEND == "engine":
     _model = LitertLmModel(model=_MODEL_ID)               # in-process
@@ -299,7 +304,9 @@ elif _BACKEND == "openai":
     _model = LiteLlm(                                      # OpenAI-compatible HTTP
         model=_MODEL_ID,
         api_base=_MODEL_URL,
-        api_key=os.getenv("PITWALL_LITERT_API_KEY", "lit-serve-not-required"),
+        api_key=get_env_with_legacy(
+            "PITWALL_ADK_OPENAI_API_KEY", "PITWALL_LITERT_API_KEY",
+            "lit-serve-not-required"),
     )
 else:                                                      # default: lit serve
     _model = Gemini(model=_MODEL_ID, base_url=_MODEL_URL)
@@ -307,19 +314,28 @@ else:                                                      # default: lit serve
 
 ### Environment variables
 
-| Variable                  | Default                              | Used by                          |
-| ------------------------- | ------------------------------------ | -------------------------------- |
-| `PITWALL_ADK_BACKEND`     | `openai`                             | selector (`engine` \| `litertlm` \| `openai`) |
-| `PITWALL_LITERT_URL`      | `http://localhost:8099/v1`           | `litertlm`, `openai` (HTTP base); shared with the warm-path `LitertCoach` |
-| `PITWALL_LITERT_MODEL`    | `gemma3n-e2b`                        | model id (must match what LocalLLM has loaded) |
-| `PITWALL_LITERT_API_KEY`  | `lit-serve-not-required`             | `openai` — set to LocalLLM's signed bearer token |
-| `PITWALL_LITERTLM_PATH`   | *(unset)*                            | `engine` (`.litertlm` bundle path) |
-| `PITWALL_LITERTLM_BUDGET` | `30000`                              | `engine` (KV-cache char budget)  |
-| `PITWALL_LITERT_HTTP_TIMEOUT_S` | `30`                           | warm-path HTTP client timeout    |
+| Variable                       | Default                              | Used by                          |
+| ------------------------------ | ------------------------------------ | -------------------------------- |
+| `PITWALL_ADK_BACKEND`          | `openai`                             | selector (`engine` \| `litertlm` \| `openai`) |
+| `PITWALL_ADK_OPENAI_URL`       | `http://localhost:8099/v1`           | `litertlm`, `openai` (HTTP base); shared with the warm-path `LitertCoach`. Legacy: `PITWALL_LITERT_URL` |
+| `PITWALL_ADK_OPENAI_MODEL`     | `gemma3n-e2b`                        | model id (must match what LocalLLM has loaded). Legacy: `PITWALL_LITERT_MODEL` |
+| `PITWALL_ADK_OPENAI_API_KEY`   | `lit-serve-not-required`             | `openai` — set to LocalLLM's signed bearer token. Legacy: `PITWALL_LITERT_API_KEY` |
+| `PITWALL_LITERT_SIDECAR_URL`   | `http://127.0.0.1:8080`              | LiteRT-LM Kotlin sidecar URL (`engine` backend). Legacy: `PITWALL_LITERTLM_URL` |
+| `PITWALL_LITERT_SIDECAR_MODEL` | `gemma-4-e2b`                        | LiteRT-LM Kotlin sidecar model id. Legacy: `PITWALL_LITERTLM_MODEL` |
+| `PITWALL_LITERTLM_PATH`        | *(unset)*                            | `engine` (`.litertlm` bundle path) |
+| `PITWALL_LITERTLM_BUDGET`      | `30000`                              | `engine` (KV-cache char budget)  |
+| `PITWALL_LITERT_HTTP_TIMEOUT_S` | `30`                                | warm-path HTTP client timeout    |
+
+> **Legacy aliases (`PITWALL_LITERT_URL`, `PITWALL_LITERT_MODEL`,
+> `PITWALL_LITERT_API_KEY`, `PITWALL_LITERTLM_URL`, `PITWALL_LITERTLM_MODEL`)
+> are still read for backward compatibility — they emit a `DeprecationWarning`
+> on first use.** The rename clarifies that the `PITWALL_ADK_OPENAI_*` family
+> configures the ADK→OpenAI-compatible HTTP shim, while the
+> `PITWALL_LITERT_SIDECAR_*` family configures the Kotlin LiteRT-LM sidecar.
 
 > **Default flipped 2026-05-12 (ADR-022).** Defaults now point at LocalLLM
 > (`:8099/v1`). To restore the previous `lit serve` behaviour explicitly:
-> `PITWALL_ADK_BACKEND=litertlm PITWALL_LITERT_URL=http://localhost:8001`.
+> `PITWALL_ADK_BACKEND=litertlm PITWALL_ADK_OPENAI_URL=http://localhost:8001`.
 
 ### Choosing a backend
 
@@ -500,11 +516,13 @@ and let the bridge in Termux speak to it over `127.0.0.1`.
 
 # In a Termux shell — pip install 'google-adk[litellm]' once, then:
 PITWALL_ADK_BACKEND=openai \
-PITWALL_LITERT_URL=http://localhost:8099/v1 \
-PITWALL_LITERT_MODEL=gemma-4-e2b-it \
-PITWALL_LITERT_API_KEY="<paste-token-from-LocalLLM-Settings>" \
+PITWALL_ADK_OPENAI_URL=http://localhost:8099/v1 \
+PITWALL_ADK_OPENAI_MODEL=gemma-4-e2b-it \
+PITWALL_ADK_OPENAI_API_KEY="<paste-token-from-LocalLLM-Settings>" \
 python3 -m src.pitwall \
     --litert-model ~/storage/shared/Pitwall/models/gemma-4-E2B-it.litertlm
+# Legacy aliases still work: PITWALL_LITERT_URL / PITWALL_LITERT_MODEL /
+# PITWALL_LITERT_API_KEY — they emit a DeprecationWarning on first use.
 ```
 
 The bridge sends `POST /v1/chat/completions` to LocalLLM with the bearer
@@ -551,13 +569,14 @@ authoring prompts on a laptop without installing LocalLLM:
 ```bash
 # Ollama (macOS)
 PITWALL_ADK_BACKEND=openai \
-PITWALL_LITERT_URL=http://localhost:11434/v1 \
-PITWALL_LITERT_MODEL=gemma2:2b \
+PITWALL_ADK_OPENAI_URL=http://localhost:11434/v1 \
+PITWALL_ADK_OPENAI_MODEL=gemma2:2b \
 python3 -m src.pitwall
 
-# LM Studio:    PITWALL_LITERT_URL=http://localhost:1234/v1
-# llama.cpp:    PITWALL_LITERT_URL=http://localhost:8080/v1
-# vLLM:         PITWALL_LITERT_URL=http://localhost:8000/v1
+# LM Studio:    PITWALL_ADK_OPENAI_URL=http://localhost:1234/v1
+# llama.cpp:    PITWALL_ADK_OPENAI_URL=http://localhost:8080/v1
+# vLLM:         PITWALL_ADK_OPENAI_URL=http://localhost:8000/v1
+# (Legacy PITWALL_LITERT_URL still honoured with a DeprecationWarning.)
 ```
 
 Every backend dials only `localhost`. No hosted LLM is involved at any point.

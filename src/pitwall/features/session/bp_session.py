@@ -13,9 +13,10 @@ from datetime import datetime
 from flask import Blueprint, request, jsonify, Response
 
 from pitwall.state import state, SIM_DIR
-from pitwall.db import get_db, compute_capabilities, ensure_session_row
-from pitwall.helpers import (
-    new_session_id, frames_to_rows, rows_to_frames, load_session_frames,
+from pitwall.db import db_conn, DuckDbUnavailable, compute_capabilities, ensure_session_row
+from pitwall.features.session.laps import new_session_id
+from pitwall.features.session.frames import (
+    frames_to_rows, rows_to_frames, load_session_frames,
 )
 from pitwall.features.realtime.bp_realtime import telemetry_bus
 
@@ -50,39 +51,38 @@ def session_frames(sid: str):
         note=data.get("note"),
     )
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"saved": False, "error": "duckdb not available"}), 503
-        existing = conn.execute(
-            "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
-            [sid],
-        ).fetchone()[0]
-        next_idx = (existing if existing is not None else -1) + 1
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
+                [sid],
+            ).fetchone()[0]
+            next_idx = (existing if existing is not None else -1) + 1
 
-        rows = []
-        for j, f in enumerate(raw_frames):
-            rows.append((
-                sid, next_idx + j,
-                float(f.get("timestamp", 0)),
-                float(f.get("distance", 0)),
-                float(f.get("speed", 0)),
-                float(f.get("g_lat", 0)),
-                float(f.get("g_long", 0)),
-                float(f.get("combo_g", 0)),
-                float(f.get("brake_pressure", 0)),
-                float(f.get("throttle", 0)),
-                float(f.get("steering", 0)),
-                float(f.get("rpm", 0)),
-                float(f.get("lat", 0)),
-                float(f.get("lon", 0)),
-            ))
-        conn.executemany(
-            "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            rows,
-        )
-        conn.close()
-        
+            rows = []
+            for j, f in enumerate(raw_frames):
+                rows.append((
+                    sid, next_idx + j,
+                    float(f.get("timestamp", 0)),
+                    float(f.get("distance", 0)),
+                    float(f.get("speed", 0)),
+                    float(f.get("g_lat", 0)),
+                    float(f.get("g_long", 0)),
+                    float(f.get("combo_g", 0)),
+                    float(f.get("brake_pressure", 0)),
+                    float(f.get("throttle", 0)),
+                    float(f.get("steering", 0)),
+                    float(f.get("rpm", 0)),
+                    float(f.get("lat", 0)),
+                    float(f.get("lon", 0)),
+                ))
+            conn.executemany(
+                "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
+    except DuckDbUnavailable:
+        return jsonify({"saved": False, "error": "duckdb not available"}), 503
+
     for f in raw_frames:
         telemetry_bus.publish(sid, f)
         
@@ -120,15 +120,14 @@ def session_video_frames(sid: str):
         )
         for f in raws
     ]
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"saved": False, "error": "duckdb not available"}), 503
-        conn.executemany(
-            "INSERT INTO video_frames VALUES (?,?,?,?,?,?,?)",
-            rows,
-        )
-        conn.close()
+    try:
+        with db_conn() as conn:
+            conn.executemany(
+                "INSERT INTO video_frames VALUES (?,?,?,?,?,?,?)",
+                rows,
+            )
+    except DuckDbUnavailable:
+        return jsonify({"saved": False, "error": "duckdb not available"}), 503
     return jsonify({"saved": True, "session_id": sid, "n_appended": len(raws)})
 
 
@@ -165,13 +164,12 @@ def session_sync(sid: str):
         "ORDER BY t.frame_idx"
     )
     params = [win, win, sid] + ([t_from, t_to] if t_to > 0 else [])
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        rows = conn.execute(sql, params).fetchall()
-        cols = [d[0] for d in conn.description]
-        conn.close()
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            cols = [d[0] for d in conn.description]
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     return jsonify({
         "session_id": sid,
         "rows": [dict(zip(cols, r)) for r in rows],
@@ -212,11 +210,8 @@ def session_export_parquet(sid: str):
     tmp.close()
 
     try:
-        with state.db_lock:
-            conn = get_db()
-            if conn is None:
-                return jsonify({"error": "duckdb not available"}), 503
-            try:
+        try:
+            with db_conn() as conn:
                 if table == "capabilities":
                     select_sql = (
                         "SELECT sc.session_id, sr.name AS signal_name, "
@@ -241,8 +236,8 @@ def session_export_parquet(sid: str):
                     f"COPY ({select_sql}) TO '{tmp_path}' (FORMAT PARQUET)",
                     [sid],
                 )
-            finally:
-                conn.close()
+        except DuckDbUnavailable:
+            return jsonify({"error": "duckdb not available"}), 503
 
         with open(tmp_path, "rb") as f:
             data = f.read()
@@ -299,34 +294,32 @@ def session_import():
     except Exception as e:
         return jsonify({"error": f"parse_vbo failed: {e}"}), 500
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        existing = conn.execute(
-            "SELECT count(*) FROM telemetry WHERE session_id = ?",
-            [sid],
-        ).fetchone()[0]
-        if existing > 0:
-            conn.close()
-            return jsonify({
-                "error": f"session {sid} already has {existing} frames",
-                "session_id": sid,
-            }), 409
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT count(*) FROM telemetry WHERE session_id = ?",
+                [sid],
+            ).fetchone()[0]
+            if existing > 0:
+                return jsonify({
+                    "error": f"session {sid} already has {existing} frames",
+                    "session_id": sid,
+                }), 409
 
-        conn.execute(
-            "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            [sid, driver, level,
-             state.track.name if state.track else "Sonoma Raceway",
-             meta.device_type or "", note],
-        )
-        rows = frames_to_rows(sid, frames)
-        conn.executemany(
-            "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            rows,
-        )
-        conn.close()
+            conn.execute(
+                "INSERT INTO sessions (session_id, driver, driver_level, track, car, note) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [sid, driver, level,
+                 state.track.name if state.track else "Sonoma Raceway",
+                 meta.device_type or "", note],
+            )
+            rows = frames_to_rows(sid, frames)
+            conn.executemany(
+                "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
 
     duration_s = frames[-1].timestamp - frames[0].timestamp
     distance_m = frames[-1].distance - frames[0].distance
@@ -368,7 +361,8 @@ def session_start():
         note=data.get("note"),
     )
     if state.has_adk and driver_id:
-        state.reset_adk_session(driver_id)
+        from pitwall.features.coaching.adk_agents import reset_driver_session
+        reset_driver_session(driver_id)
     return jsonify({"started": True, "session_id": sid})
 
 
@@ -377,25 +371,24 @@ def session_end(sid: str):
     """Stamp `ended_at = now()` on a session. Idempotent."""
     if not state.has_duckdb:
         return jsonify({"error": "duckdb not available"}), 503
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        existing = conn.execute(
-            "SELECT 1 FROM sessions WHERE session_id = ?", [sid],
-        ).fetchone()
-        if existing is None:
-            conn.execute(
-                "INSERT INTO sessions (session_id, ended_at) VALUES (?, now())",
-                [sid],
-            )
-        else:
-            conn.execute(
-                "UPDATE sessions SET ended_at = now() "
-                "WHERE session_id = ? AND ended_at IS NULL",
-                [sid],
-            )
-        conn.close()
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ?", [sid],
+            ).fetchone()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO sessions (session_id, ended_at) VALUES (?, now())",
+                    [sid],
+                )
+            else:
+                conn.execute(
+                    "UPDATE sessions SET ended_at = now() "
+                    "WHERE session_id = ? AND ended_at IS NULL",
+                    [sid],
+                )
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     return jsonify({"ended": True, "session_id": sid})
 
 
@@ -410,41 +403,40 @@ def sessions_list():
         return jsonify({"error": "limit must be an integer"}), 400
     active_only = (request.args.get("active_only", "false").lower() == "true")
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"sessions": []})
-        sql = ("SELECT session_id, driver, driver_level, track, car, "
-               "started_at, ended_at, note FROM sessions")
-        params: list = []
-        if active_only:
-            sql += " WHERE ended_at IS NULL"
-        sql += " ORDER BY started_at DESC LIMIT ?"
-        params.append(limit)
-        sess_rows = conn.execute(sql, params).fetchall()
+    sessions_out: list = []
+    try:
+        with db_conn() as conn:
+            sql = ("SELECT session_id, driver, driver_level, track, car, "
+                   "started_at, ended_at, note FROM sessions")
+            params: list = []
+            if active_only:
+                sql += " WHERE ended_at IS NULL"
+            sql += " ORDER BY started_at DESC LIMIT ?"
+            params.append(limit)
+            sess_rows = conn.execute(sql, params).fetchall()
 
-        sessions_out: list = []
-        for r in sess_rows:
-            sid = r[0]
-            lap_row = conn.execute(
-                "SELECT COUNT(*), MIN(lap_time_s) FROM laps WHERE session_id = ?",
-                [sid],
-            ).fetchone()
-            lap_count = int(lap_row[0]) if lap_row else 0
-            best_lap_s = float(lap_row[1]) if lap_row and lap_row[1] is not None else None
-            sessions_out.append({
-                "session_id":   r[0],
-                "driver":       r[1],
-                "driver_level": r[2],
-                "track":        r[3],
-                "car":          r[4],
-                "started_at":   r[5].isoformat() if r[5] else None,
-                "ended_at":     r[6].isoformat() if r[6] else None,
-                "note":         r[7],
-                "lap_count":    lap_count,
-                "best_lap_s":   best_lap_s,
-            })
-        conn.close()
+            for r in sess_rows:
+                sid = r[0]
+                lap_row = conn.execute(
+                    "SELECT COUNT(*), MIN(lap_time_s) FROM laps WHERE session_id = ?",
+                    [sid],
+                ).fetchone()
+                lap_count = int(lap_row[0]) if lap_row else 0
+                best_lap_s = float(lap_row[1]) if lap_row and lap_row[1] is not None else None
+                sessions_out.append({
+                    "session_id":   r[0],
+                    "driver":       r[1],
+                    "driver_level": r[2],
+                    "track":        r[3],
+                    "car":          r[4],
+                    "started_at":   r[5].isoformat() if r[5] else None,
+                    "ended_at":     r[6].isoformat() if r[6] else None,
+                    "note":         r[7],
+                    "lap_count":    lap_count,
+                    "best_lap_s":   best_lap_s,
+                })
+    except DuckDbUnavailable:
+        return jsonify({"sessions": []})
     return jsonify({"sessions": sessions_out, "count": len(sessions_out)})
 
 
@@ -453,33 +445,31 @@ def session_detail(sid: str):
     """Full session detail: row + laps + recent coaching_notes."""
     if not state.has_duckdb:
         return jsonify({"error": "duckdb not available"}), 503
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        sess_row = conn.execute(
-            "SELECT session_id, driver, driver_level, track, car, "
-            "started_at, ended_at, note FROM sessions WHERE session_id = ?",
-            [sid],
-        ).fetchone()
-        if sess_row is None:
-            conn.close()
-            return jsonify({"error": "session not found", "session_id": sid}), 404
+    try:
+        with db_conn() as conn:
+            sess_row = conn.execute(
+                "SELECT session_id, driver, driver_level, track, car, "
+                "started_at, ended_at, note FROM sessions WHERE session_id = ?",
+                [sid],
+            ).fetchone()
+            if sess_row is None:
+                return jsonify({"error": "session not found", "session_id": sid}), 404
 
-        lap_rows = conn.execute(
-            "SELECT lap_number, lap_time_s, best_sector, avg_speed_kmh, "
-            "max_combo_g, coast_pct, recorded_at FROM laps "
-            "WHERE session_id = ? ORDER BY lap_number ASC",
-            [sid],
-        ).fetchall()
+            lap_rows = conn.execute(
+                "SELECT lap_number, lap_time_s, best_sector, avg_speed_kmh, "
+                "max_combo_g, coast_pct, recorded_at FROM laps "
+                "WHERE session_id = ? ORDER BY lap_number ASC",
+                [sid],
+            ).fetchall()
 
-        note_rows = conn.execute(
-            "SELECT burst_id, distance_m, text, source, recorded_at "
-            "FROM coaching_notes WHERE session_id = ? "
-            "ORDER BY recorded_at DESC LIMIT 50",
-            [sid],
-        ).fetchall()
-        conn.close()
+            note_rows = conn.execute(
+                "SELECT burst_id, distance_m, text, source, recorded_at "
+                "FROM coaching_notes WHERE session_id = ? "
+                "ORDER BY recorded_at DESC LIMIT 50",
+                [sid],
+            ).fetchall()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
 
     laps = [
         {"lap_number":    int(r[0]) if r[0] is not None else None,
@@ -540,37 +530,35 @@ def session_frame(sid: str):
         track=f.get("track"),
     )
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        existing = conn.execute(
-            "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
-            [sid],
-        ).fetchone()[0]
-        next_idx = (existing if existing is not None else -1) + 1
-        try:
-            conn.execute(
-                "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (sid, next_idx,
-                 float(f.get("timestamp", 0)),
-                 float(f.get("distance", 0)),
-                 float(f.get("speed", 0)),
-                 float(f.get("g_lat", 0)),
-                 float(f.get("g_long", 0)),
-                 float(f.get("combo_g", 0)),
-                 float(f.get("brake_pressure", 0)),
-                 float(f.get("throttle", 0)),
-                 float(f.get("steering", 0)),
-                 float(f.get("rpm", 0)),
-                 float(f.get("lat", 0)),
-                 float(f.get("lon", 0))),
-            )
-        except (TypeError, ValueError) as e:
-            conn.close()
-            return jsonify({"error": f"invalid frame: {e}"}), 400
-        conn.close()
-        
+    try:
+        with db_conn() as conn:
+            existing = conn.execute(
+                "SELECT COALESCE(MAX(frame_idx), -1) FROM telemetry WHERE session_id = ?",
+                [sid],
+            ).fetchone()[0]
+            next_idx = (existing if existing is not None else -1) + 1
+            try:
+                conn.execute(
+                    "INSERT INTO telemetry VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (sid, next_idx,
+                     float(f.get("timestamp", 0)),
+                     float(f.get("distance", 0)),
+                     float(f.get("speed", 0)),
+                     float(f.get("g_lat", 0)),
+                     float(f.get("g_long", 0)),
+                     float(f.get("combo_g", 0)),
+                     float(f.get("brake_pressure", 0)),
+                     float(f.get("throttle", 0)),
+                     float(f.get("steering", 0)),
+                     float(f.get("rpm", 0)),
+                     float(f.get("lat", 0)),
+                     float(f.get("lon", 0))),
+                )
+            except (TypeError, ValueError) as e:
+                return jsonify({"error": f"invalid frame: {e}"}), 400
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
+
     telemetry_bus.publish(sid, f)
     return jsonify({"saved": True, "session_id": sid, "frame_idx": next_idx})
 

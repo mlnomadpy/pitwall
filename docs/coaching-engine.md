@@ -143,7 +143,8 @@ For off-track interactions (briefings, debriefs, multi-turn Q&A), the system use
 
 All three are local — there is no hosted-LLM fallback. **The warm path
 (`LitertCoach.brief()` / `debrief()`) is on the same transport** — its
-constructor reads the same `PITWALL_LITERT_URL` env and defaults to
+constructor reads the same `PITWALL_ADK_OPENAI_URL` env (legacy alias
+`PITWALL_LITERT_URL` is still honoured with a `DeprecationWarning`) and defaults to
 HTTP-to-LocalLLM. Every LLM request pitwall makes goes through `127.0.0.1`.
 See [ADK Agent Architecture → Model backend selector](adk-agent-architecture.md#model-backend-selector) for the full topology and the per-backend startup recipes.
 

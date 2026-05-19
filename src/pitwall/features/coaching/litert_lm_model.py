@@ -8,8 +8,10 @@ and the KV cache.
 
 Environment
 -----------
-    PITWALL_LITERTLM_URL   URL of the Kotlin sidecar (default: http://127.0.0.1:8080)
-    PITWALL_LITERTLM_MODEL Model name to request (default: gemma-4-e2b)
+    PITWALL_LITERT_SIDECAR_URL    URL of the Kotlin sidecar (default: http://127.0.0.1:8080)
+                                  (legacy: PITWALL_LITERTLM_URL — deprecated)
+    PITWALL_LITERT_SIDECAR_MODEL  Model name to request (default: gemma-4-e2b)
+                                  (legacy: PITWALL_LITERTLM_MODEL — deprecated)
 """
 import asyncio
 import json
@@ -20,12 +22,18 @@ from typing import Any, AsyncGenerator, Optional
 
 import aiohttp
 
+from pitwall._env import get_env_with_legacy
+
 _log = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-_SIDECAR_URL = os.getenv("PITWALL_LITERTLM_URL", "http://127.0.0.1:8080")
-_MODEL_NAME  = os.getenv("PITWALL_LITERTLM_MODEL", "gemma-4-e2b")
+_SIDECAR_URL = get_env_with_legacy(
+    "PITWALL_LITERT_SIDECAR_URL", "PITWALL_LITERTLM_URL",
+    "http://127.0.0.1:8080")
+_MODEL_NAME  = get_env_with_legacy(
+    "PITWALL_LITERT_SIDECAR_MODEL", "PITWALL_LITERTLM_MODEL",
+    "gemma-4-e2b")
 _TIMEOUT_S   = 60.0
 
 # ── Tool injection + parsing (Preserved from old implementation) ──────────────

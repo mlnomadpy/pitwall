@@ -1,7 +1,8 @@
 import pytest
 import pitwall as br
 from conftest import _start_session, _frames_to_payload
-from pitwall.helpers import estimate_tts_ms, detect_laps, quantile
+from pitwall.features.coaching.cue_renderer import estimate_tts_ms
+from pitwall.features.session.laps import detect_laps, quantile
 from pitwall.db import log_llm_friction
 from pitwall.features.realtime.bp_realtime import cue_bus
 
@@ -168,7 +169,8 @@ def test_sync_returns_rows_when_telemetry_present(client, make_frame_fn):
 # ─── Helpers (frame round-trip + session-id generator) ───────────────────────
 
 
-from pitwall.helpers import frames_to_rows, rows_to_frames, new_session_id
+from pitwall.features.session.frames import frames_to_rows, rows_to_frames
+from pitwall.features.session.laps import new_session_id
 
 def test_frames_to_rows_round_trip(make_frame_fn):
     frames = [make_frame_fn(t=i * 0.1, distance=i * 5.0,
