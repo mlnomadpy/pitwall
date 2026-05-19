@@ -1,5 +1,7 @@
 # Pitwall Backend Audit — 2026-04-28
 
+> **Historical snapshot.** File paths below reflect the layout as of 2026-04-28. Since then PR #30 reorganised `src/pitwall/features/coaching/` (split `coach_engine.py` into 6 modules behind a back-compat shim) and promoted helpers from the now-deleted `helpers.py` into `features/session/laps.py`, `features/session/frames.py`, `features/coaching/cue_renderer.py`, and `features/track/track_json.py`. See `internal_architecture.md` for the current module map.
+
 Audit of all Python code shipped in this work cycle (`src/pitwall/features/`, `tools/`). Catalogs:
 
 - **Bugs** — incorrect behaviour observed or trivially provable.
