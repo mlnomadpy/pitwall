@@ -142,10 +142,34 @@ def session_signals_get(sid: str):
             if r and r[0] is not None:
                 bounds.append((float(r[0]), float(r[1])))
             if bounds:
-                if t_from is None:
-                    t_from = min(b[0] for b in bounds)
-                if t_to is None:
+                # If only one bound is missing, fill it from the data extent.
+                # If BOTH are missing and rate_hz>0 (resampling requested),
+                # clamp the window to the last 60 s to avoid serialising
+                # multi-million-row sessions through a single fetch. Callers
+                # that want the full session set t_from/t_to explicitly.
+                if t_from is None and t_to is None and rate_hz > 0:
                     t_to = max(b[1] for b in bounds)
+                    t_from = t_to - 60.0
+                else:
+                    if t_from is None:
+                        t_from = min(b[0] for b in bounds)
+                    if t_to is None:
+                        t_to = max(b[1] for b in bounds)
+        # Reject windows that would synth >10000 samples — protects the
+        # bridge from OOM on a 1-hour session × 70 Hz × many signals
+        # call. The PWA can narrow the window or drop rate_hz.
+        MAX_RESAMPLE_POINTS = 10_000
+        if rate_hz > 0 and t_from is not None and t_to is not None:
+            est_points = max(0, int((t_to - t_from) * rate_hz))
+            if est_points > MAX_RESAMPLE_POINTS:
+                conn.close()
+                return jsonify({
+                    "error": "window too large",
+                    "hint": (f"rate_hz × (t_to - t_from) = {est_points} "
+                             f"exceeds the {MAX_RESAMPLE_POINTS}-point cap; "
+                             f"narrow the time window or lower rate_hz."),
+                    "max_points": MAX_RESAMPLE_POINTS,
+                }), 413
         signal_data = {nm: read_signal(conn, sid, nm, t_from, t_to) for nm in names}
         if rate_hz > 0:
             if t_from is None or t_to is None or t_to <= t_from:

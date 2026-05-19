@@ -8,10 +8,13 @@ The singleton is initialised lazily by the entry-point after CLI parsing —
 Blueprints just read from it.
 """
 
+import logging
 import os
 import sys
 import threading
 from typing import Optional
+
+log = logging.getLogger("pitwall.state")
 
 
 # ── Path setup ─────────────────────────────────────────────────────────────────
@@ -117,9 +120,9 @@ class BridgeState:
             self.find_nearest_corner = find_nearest_corner
             self.distance_to_corner = distance_to_corner
             self.has_sonic = True
-            print("✓  sonic_model loaded")
+            log.info("✓  sonic_model loaded")
         except ImportError as e:
-            print(f"⚠  sonic_model not available ({e}) — falling back to rule engine")
+            log.warning("sonic_model not available (%s) — falling back to rule engine", e)
 
         # ── coach_engine ───────────────────────────────────────────────────
         try:
@@ -131,9 +134,9 @@ class BridgeState:
             self.build_context = build_context
             self.set_friction_logger = set_friction_logger
             self.has_coach = True
-            print(f"✓  coach_engine loaded ({self.coach.name})")
+            log.info("✓  coach_engine loaded (%s)", self.coach.name)
         except ImportError as e:
-            print(f"⚠  coach_engine not available ({e})")
+            log.warning("coach_engine not available (%s)", e)
 
         # ── session_analyzer + driver_profile ──────────────────────────────
         try:
@@ -149,17 +152,17 @@ class BridgeState:
             self.append_session_events = append_session_events
             self.compute_profile = compute_profile
             self.has_analyzer = True
-            print("✓  session_analyzer + driver_profile loaded")
+            log.info("✓  session_analyzer + driver_profile loaded")
         except ImportError as e:
             self.has_analyzer = False
-            print(f"⚠  session_analyzer not available ({e}) — debrief disabled")
+            log.warning("session_analyzer not available (%s) — debrief disabled", e)
 
         # ── DuckDB ─────────────────────────────────────────────────────────
         try:
             import duckdb  # noqa: F401
             self.has_duckdb = True
         except ImportError:
-            print("⚠  duckdb not installed — lap history disabled. pip3 install duckdb")
+            log.warning("duckdb not installed — lap history disabled. pip3 install duckdb")
 
         # ── ADK multi-agent backend ────────────────────────────────────────
         try:
@@ -179,11 +182,12 @@ class BridgeState:
             self.reset_adk_session = reset_driver_session
             self.has_adk = _adk_loaded and coach_orchestrator is not None
             if self.has_adk:
-                print(f"✓  ADK coach_orchestrator loaded — {len(AGENT_REGISTRY)} agents (LiteRT-LM E4B)")
+                log.info("✓  ADK coach_orchestrator loaded — %d agents (LiteRT-LM E4B)",
+                         len(AGENT_REGISTRY))
             else:
-                print("⚠  adk_agents imported but google-adk not installed — ADK disabled")
+                log.warning("adk_agents imported but google-adk not installed — ADK disabled")
         except ImportError as e:
-            print(f"⚠  adk_agents not importable ({e}) — ADK disabled")
+            log.warning("adk_agents not importable (%s) — ADK disabled", e)
 
         # If we don't have sonoma loaded yet (e.g. session_analyzer failed
         # but we still want track constants), try a standalone import.
