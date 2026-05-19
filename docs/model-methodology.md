@@ -2,6 +2,8 @@
 
 How we built the sequence predictor, what we tried, what worked, and why.
 
+> **Historical record.** The training scripts referenced here (`lstm_predictor.py`, `lstm_predictor_v3.py`, `sequence_predictor.py`, `sonic_model_v2.py`) were removed as dead code in PR #30 once the three-tier coach architecture (ADR-017) committed to canonical phrases on the hot path. The model methodology and results below remain accurate for the era; the trained `.pt` artifacts are still on disk for future revival, but the training pipeline itself is no longer wired in. Real-time cueing now goes through `features/coaching/sonic_model.py` (rule-based) and `features/coaching/rule_coach.py`.
+
 ---
 
 ## Problem Statement
@@ -333,7 +335,9 @@ models/
 
 ## How It Drives Coaching
 
-The sonic model v2 uses the LSTM v3 predictions to generate continuous audio cues:
+> Historical: at the time of writing, the sonic model v2 consumed LSTM v3 predictions. After ADR-017 (three-tier coach) and PR #30, the LSTM path was retired and the production sonic model is rule-driven (`features/coaching/sonic_model.py`).
+
+Originally `sonic_model_v2` used the LSTM v3 predictions to generate continuous audio cues:
 
 ```
 Every 0.5 seconds:
@@ -355,17 +359,20 @@ The tone is continuous — its pitch IS the delta. The driver doesn't need to de
 
 ## Reproducibility
 
+The training entry points (`lstm_predictor_v3.py`, `sequence_predictor.py`) were removed in PR #30. The recipe is preserved here for historical reference; reviving it requires restoring those files from git history.
+
 ```bash
+# Historical — files no longer in the tree as of PR #30
 cd pitwall-sprint/src/pitwall/features
 
 # Build track definition from VBO files
 python3 track_builder.py /path/to/vbo/*.vbo -n "Track Name" -o track.json
 
-# Train the model
+# Train the model (file deleted in PR #30 — recover from git history if reviving)
 python3 lstm_predictor_v3.py train /path/to/data/ --track track.json --output models/
 
-# Run the simulator with LSTM-driven sonic model
+# Run the simulator (sonic model is now rule-based at features/coaching/sonic_model.py)
 python3 simulator.py session.vbo --track track.json --speed 3
 ```
 
-**Requirements:** Python 3.9+, PyTorch 2.x, scikit-learn 1.x, numpy
+**Requirements at time of training:** Python 3.9+, PyTorch 2.x, scikit-learn 1.x, numpy

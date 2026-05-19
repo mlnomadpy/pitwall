@@ -121,7 +121,7 @@ The system stores AJ's (pro driver) reference lap at Sonoma as a per-corner `Gol
 
 ### System Prompt Design
 
-All system prompts are owned by the backend (`coach_engine.py`). The LLM receives:
+All system prompts are owned by the backend (`src/pitwall/features/coaching/prompts.py` — also re-exported from the legacy `coach_engine` import path). The LLM receives:
 
 - **Base prompt:** Rally co-driver persona grounded in Ross Bentley's Speed Secrets curriculum
 - **Level-specific prompt:** Beginner (full sentences, 8-12 words), Intermediate (rally shorthand, 6-12 words), Pro (terse, 3-7 words)
@@ -211,4 +211,4 @@ The 3-pod structure means each driver level gets different coaching:
 | Oversteer | "The back is sliding! Ease off!" | "Rear stepping out. Look where you want to go, ease throttle." | "Rear slip 0.9. Modulate." |
 | Understeer | "Turn the wheel less!" | "Front washing. Ease throttle, unwind steering slightly." | "Front saturated. Reduce input." |
 
-This mapping is driven by the `driver_level` field in the session configuration and the per-level system prompt in `coach_engine.py`.
+This mapping is driven by the `driver_level` field in the session configuration and the per-level system prompt in `src/pitwall/features/coaching/prompts.py`. The split-out modules — `engine_base.py`, `prompts.py`, `pedagogy.py`, `rule_coach.py`, `litert_coach.py`, `arbiter.py` — replaced the monolithic `coach_engine.py` in PR #30; the original module name remains as a re-export shim so existing imports keep working.

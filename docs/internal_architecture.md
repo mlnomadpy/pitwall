@@ -30,7 +30,7 @@ flowchart LR
     ANALYTICS[analytics.py<br/>13 analysers]
     HIGHLIGHTER[highlight_finder.py<br/>7 Sonoma categories]
     ANALYZER[session_analyzer.py<br/>orchestrator]
-    COACH[coach_engine.py<br/>RuleCoach + LitertCoach]
+    COACH[coaching/<br/>rule_coach + litert_coach +<br/>arbiter + prompts]
     GOLD[(gold_standard.py<br/>per-corner reference)]
     PROFILE[(driver_profile.py<br/>event-sourced)]
   end
@@ -95,25 +95,37 @@ flowchart LR
 
 ## Module dependency graph (`src/pitwall/features/`)
 
+The `coaching/` slice was split into focused modules in PR #30. `coach_engine` is now a back-compat re-export shim — old imports (`from pitwall.features.coaching.coach_engine import …`) keep working.
+
 ```mermaid
 graph TD
-  sonoma[sonoma.py<br/>constants + lore]
-  vbo[vbo_parser.py<br/>VBO → frames]
-  track[track_loader.py<br/>JSON → TrackMap]
-  gold[gold_standard.py<br/>per-corner reference]
-  grader[corner_grader.py<br/>A-F + time-loss]
-  analytics[analytics.py<br/>smoothness / friction / etc.]
-  hl[highlight_finder.py<br/>moments]
-  profile[driver_profile.py<br/>events]
-  analyzer[session_analyzer.py<br/>orchestrator]
-  coach[coach_engine.py<br/>RuleCoach / LitertCoach]
-  sonic[sonic_model_v2.py<br/>LSTM-driven cues]
-  app[pitwall_app.py<br/>TUI / replay]
+  sonoma[track/sonoma.py<br/>constants + lore]
+  vbo[session/vbo_parser.py<br/>VBO → frames]
+  track[track/track_loader.py<br/>JSON → TrackMap]
+  trackjson[track/track_json.py<br/>raw JSON loader + corner bounds]
+  gold[track/gold_standard.py<br/>per-corner reference]
+  grader[session/corner_grader.py<br/>A-F + time-loss]
+  analytics[session/analytics.py<br/>smoothness / friction / etc.]
+  hl[session/highlight_finder.py<br/>moments]
+  profile[session/driver_profile.py<br/>events]
+  laps[session/laps.py<br/>detect_laps + sectors + new_session_id]
+  frames[session/frames.py<br/>frames↔rows + load_session_frames]
+  analyzer[session/session_analyzer.py<br/>orchestrator]
+  enginebase[coaching/engine_base.py<br/>CoachContext / CoachEngine / friction sink]
+  prompts[coaching/prompts.py<br/>system + user prompt builders]
+  pedagogy[coaching/pedagogy.py<br/>Bentley concept matcher + rule registry]
+  rule[coaching/rule_coach.py<br/>templated zero-dep coach]
+  litert[coaching/litert_coach.py<br/>HTTP + in-process LiteRT-LM]
+  arbiter[coaching/arbiter.py<br/>P1/P2/P3 cooldown gate]
+  cuerender[coaching/cue_renderer.py<br/>sonic cues → coaching string]
+  sonic[coaching/sonic_model.py<br/>rule-driven cues]
 
   vbo --> gold
   track --> gold
   vbo --> analyzer
   track --> analyzer
+  frames --> analyzer
+  laps --> analyzer
   sonoma --> grader
   gold --> grader
   grader --> analyzer
@@ -125,20 +137,40 @@ graph TD
   gold --> hl
   hl --> analyzer
   profile --> analyzer
-  analyzer --> coach
-  coach --> sonoma
-  app --> coach
-  app --> sonic
-  app --> track
-  app --> vbo
+  analyzer --> rule
+  analyzer --> litert
+  enginebase --> rule
+  enginebase --> litert
+  prompts --> litert
+  prompts --> rule
+  pedagogy --> rule
+  pedagogy --> litert
+  arbiter --> rule
+  arbiter --> litert
+  cuerender --> sonic
+  sonoma -.imported via.-> rule
+  trackjson --> grader
 
   classDef hot fill:#5d2a1a,stroke:#8a4e3a,color:#e0e0e0
   classDef warm fill:#1a4a5d,stroke:#3a6e8a,color:#e0e0e0
   classDef data fill:#1a3a52,stroke:#4a6e8a,color:#e0e0e0
-  class coach,grader,hl,analytics warm
-  class sonic,sonoma hot
-  class profile,gold,track,vbo data
+  class rule,litert,grader,hl,analytics,arbiter warm
+  class sonic,sonoma,cuerender hot
+  class profile,gold,track,trackjson,vbo,laps,frames data
 ```
+
+Removed in PR #30 (dead code): `audio_engine.py`, `lstm_predictor.py`, `lstm_predictor_v3.py`, `sequence_predictor.py`, `sonic_model_v2.py`, `track_map.py`, and the top-level `helpers.py`. The promoted home of every helper:
+
+| Old | New |
+|---|---|
+| `helpers.py:_detect_laps` | `features/session/laps.py:detect_laps` |
+| `helpers.py:_lap_sectors` | `features/session/laps.py:lap_sectors` |
+| `helpers.py:_new_session_id` | `features/session/laps.py:new_session_id` |
+| `helpers.py:_quantile` | `features/session/laps.py:quantile` |
+| `helpers.py:_frames_to_rows` / `_rows_to_frames` | `features/session/frames.py:frames_to_rows` / `rows_to_frames` |
+| `helpers.py:_load_session_frames` | `features/session/frames.py:load_session_frames` |
+| `helpers.py:_cues_to_coaching` / `_sonic_coaching` / `_rule_coaching` / `_estimate_tts_ms` | `features/coaching/cue_renderer.py:cues_to_coaching` / `sonic_coaching` / `rule_coaching` / `estimate_tts_ms` |
+| `helpers.py:_load_track_json` / `_corner_bounds_from_track` | `features/track/track_json.py:load_track_json` / `corner_bounds_from_track` |
 
 ---
 
@@ -267,7 +299,7 @@ flowchart TB
     POST_GR --> POST_EVENTS
   end
 
-  SHARED[(coach_engine<br/>build_system_prompt<br/>+ build_user_prompt<br/>+ sonoma.SYSTEM_PROMPT_LORE)]:::shared
+  SHARED[(coaching/prompts.py<br/>build_system_prompt<br/>+ build_user_prompt<br/>+ sonoma.SYSTEM_PROMPT_LORE)]:::shared
   PRE_LLM -.uses.-> SHARED
   DUR_PROPOSE -.uses.-> SHARED
   POST_LLM -.uses.-> SHARED
@@ -509,11 +541,15 @@ pitwall/
 ├── src/
 │   ├── pitwall/
 │   │   ├── __main__.py                (Flask app, 56 endpoints)
+│   │   ├── db.py                      (db_conn() context mgr + DuckDbUnavailable; init_schema_once() at boot)
+│   │   ├── state.py                   (process-state holder; no longer stores function pointers — callers import directly)
 │   │   └── features/                  (Feature-Sliced Design)
 │   │       ├── telemetry/             (can_reader, signals API)
-│   │       ├── session/               (analyzer, profiles, debrief)
-│   │       ├── coaching/              (ADK agents, coach engine, LiteRT)
-│   │       ├── track/                 (sonoma, track loaders)
+│   │       ├── session/               (analyzer, profiles, debrief, laps.py, frames.py)
+│   │       ├── coaching/              (engine_base, prompts, pedagogy, rule_coach, litert_coach,
+│   │       │                           arbiter, cue_renderer, ADK agents — coach_engine.py is a
+│   │       │                           back-compat shim re-exporting public symbols)
+│   │       ├── track/                 (sonoma, track_loader, track_json, gold_standard)
 │   │       └── realtime/              (live cue streaming via SSE)
 │   └── simulator/
 │       ├── pitwall_app.py             (TUI / replay)
@@ -828,9 +864,8 @@ flowchart TB
     S_HL[highlight_finder.py]:::sim
     S_PROF[driver_profile.py]:::sim
     S_ANALYZER[session_analyzer.py]:::sim
-    S_COACH[coach_engine.py<br/>RuleCoach / LitertCoach]:::sim
-    S_AUDIO[audio_engine.py]:::sim
-    S_SONIC[sonic_model_v2.py]:::sim
+    S_COACH[coaching/<br/>engine_base + rule_coach +<br/>litert_coach + arbiter +<br/>prompts + pedagogy]:::sim
+    S_SONIC[coaching/sonic_model.py]:::sim
     S_APP[pitwall_app.py]:::sim
     S_LAPDET[lap_detector<br/>NEW]:::sim
     S_PEDAL[pedal_classifier<br/>NEW]:::sim
@@ -895,6 +930,9 @@ flowchart TB
   S_TRACK -.reads.-> D_TRACKS & D_REAL
   S_APP --> S_COACH & S_SONIC & S_TRACK & S_VBO
 
+  %% (audio_engine.py, sonic_model_v2.py, lstm_predictor*.py, sequence_predictor.py,
+  %%  track_map.py, helpers.py — all deleted as dead code in PR #30)
+
   BRG_QUERY --> UI_HUD & UI_PADDOCK & UI_CHART & UI_MAP
   BRG_PROFILE --> UI_EVOL
   D_THUMB --> UI_MAP
@@ -954,7 +992,7 @@ flowchart LR
 ## Key invariants the architecture enforces
 
 1. **Backend owns inference** ([ADR-013](adr/013-frontend-backend-boundary.md)). Frontend never imports `mediapipe`, never builds prompts, never grades a corner.
-2. **One source of truth** for system prompts: `coach_engine.build_system_prompt(driver_level, track, mode)`. Every coach (RuleCoach, LitertCoach, future GeminiCoach) consumes the same composer.
+2. **One source of truth** for system prompts: `coaching/prompts.py:build_system_prompt(driver_level, track, mode)` (also re-exported from the legacy `coach_engine` shim). Every coach (RuleCoach, LitertCoach, future GeminiCoach) consumes the same composer.
 3. **Sonoma is the product** ([ADR-014](adr/014-sonoma-as-the-product.md)). `sonoma.py` is hardcoded; track JSON is the only data file the bridge needs at runtime.
 4. **DuckDB is the source-of-truth store** for sessions, laps, telemetry, video metadata, coaching notes, and driver events. `session_id` is the universal join key. `timestamp` (epoch seconds) is the universal clock.
 5. **Markers carry both anonymized and real GPS** so analytics that join against the dataset's anonymized frame and frontend that renders on a real-world map both work without conflict.

@@ -15,7 +15,9 @@ The verbal coach must run **on-device** with no cloud dependency, because cellul
 
 ## Decision
 
-`src/pitwall/features/coach_engine.py` defines two implementations behind one interface:
+> Updated 2026-05 (PR #30): the monolithic `coach_engine.py` was split into focused modules — `engine_base.py`, `prompts.py`, `pedagogy.py`, `rule_coach.py`, `litert_coach.py`, `arbiter.py` — all under `src/pitwall/features/coaching/`. The `coach_engine` import path remains as a re-export shim; existing call sites keep working.
+
+`src/pitwall/features/coaching/coach_engine.py` (the back-compat shim, or the split-out modules above) defines two implementations behind one interface:
 
 ```python
 class CoachEngine:

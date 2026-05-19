@@ -46,8 +46,9 @@ Three additional rules:
 
 ## Gemma prompt contract
 
-Every system prompt that uses the LLM coach (in `coach_engine.py`)
-must instruct the model to emit an emotion tag. Format:
+Every system prompt that uses the LLM coach (in
+`src/pitwall/features/coaching/prompts.py`, re-exported via the
+`coach_engine` shim) must instruct the model to emit an emotion tag. Format:
 
 ```
 At the START of your reply, emit one tag in the form
@@ -77,7 +78,7 @@ First sub-1:48. Stack up another one — break the next plateau.
 ```
 
 The system prompt update lives in
-`src/pitwall/features/coach_engine.py:build_system_prompt`. The change is
+`src/pitwall/features/coaching/prompts.py:build_system_prompt`. The change is
 small (~5 lines added per mode) and additive — older clients that
 don't know about `[EMOTION: ...]` keep working because the tag is
 just text they can ignore.
@@ -124,7 +125,11 @@ on the on-track HUD's mini-coach-badge.
 
 ## Coach-engine implementation
 
-In `src/pitwall/features/coach_engine.py`:
+In `src/pitwall/features/coaching/engine_base.py` (the dataclass + emotion
+extractor) and `src/pitwall/features/coaching/litert_coach.py` (the
+brief/debrief callers). Both are re-exported from the legacy
+`src/pitwall/features/coaching/coach_engine.py` shim — `extract_emotion`
+is now public (was `_extract_emotion`).
 
 ```python
 @dataclass
@@ -209,7 +214,7 @@ Where each emotion shows up in the PWA:
 ## Pre-tagged canonical phrase library
 
 Every entry in
-`src/pitwall/features/sonoma.py:TROD_VOICE` and the per-coach pre-rendered
+`src/pitwall/features/track/sonoma.py:TROD_VOICE` and the per-coach pre-rendered
 TTS phrase library (`pitwall-web/data/voices/<coach>-phrases.json`)
 carries an emotion tag:
 

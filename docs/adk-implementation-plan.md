@@ -28,8 +28,8 @@
 
 | File | Lines | Purpose |
 |---|---|---|
-| `tools/adk_tools.py` | ~750 | 15 `@_adk_tool` functions + `write_conversation` helper |
-| `tools/adk_agents.py` | ~570 | 18 agents + `PitwallOrchestrator` + `Runner` + tracing |
+| `src/pitwall/adk_tools.py` | ~750 | 15 `@_adk_tool` functions + `write_conversation` helper |
+| `src/pitwall/features/coaching/adk_agents.py` | ~570 | 18 agents + `PitwallOrchestrator` + `Runner` + tracing |
 | `tools/audio_cache/` | directory | TTS phrase cache written by `save_voice_scripts` |
 
 ### Agents shipped (18 total)
@@ -80,21 +80,21 @@
 
 | Finding | Fix | File |
 |---|---|---|
-| LLM orchestrator routing 17 agents | `PitwallOrchestrator(BaseAgent)` + `_classify_intent()` | `adk_agents.py` |
-| No workflow agents | `SequentialAgent` + `ParallelAgent` for debrief/brief | `adk_agents.py` |
-| NarrativeAgent data-blind | `output_key` + `{template}` instruction injection | `adk_agents.py` |
-| No SQL safety | `LIMIT 500` auto-inject, non-SELECT rejected | `adk_tools.py` |
-| Dead `track_loader` import | Removed | `adk_tools.py` |
-| VoiceScriptAgent scripts disappear | `save_voice_scripts` tool + audio cache dir | `adk_tools.py` |
-| 150-word agent descriptions | All trimmed to ~25–30 words | `adk_agents.py` |
+| LLM orchestrator routing 17 agents | `PitwallOrchestrator(BaseAgent)` + `_classify_intent()` | `features/coaching/adk_agents.py` |
+| No workflow agents | `SequentialAgent` + `ParallelAgent` for debrief/brief | `features/coaching/adk_agents.py` |
+| NarrativeAgent data-blind | `output_key` + `{template}` instruction injection | `features/coaching/adk_agents.py` |
+| No SQL safety | `LIMIT 500` auto-inject, non-SELECT rejected | `adk_tools.py` (at `src/pitwall/adk_tools.py`) |
+| Dead `track_loader` import | Removed | `adk_tools.py` (at `src/pitwall/adk_tools.py`) |
+| VoiceScriptAgent scripts disappear | `save_voice_scripts` tool + audio cache dir | `adk_tools.py` (at `src/pitwall/adk_tools.py`) |
+| 150-word agent descriptions | All trimmed to ~25–30 words | `features/coaching/adk_agents.py` |
 
 ### ADR-021 audit fixes (all shipped)
 
 | Finding | Fix | File |
 |---|---|---|
-| `BaseAgent.run()` doesn't exist | `Runner` + `run_adk()` helper | `adk_agents.py` |
-| `save_voice_scripts` TOCTOU race | `fcntl.flock(LOCK_EX)` + `os.replace()` | `adk_tools.py` |
-| Shared `narrative_agent` across pipelines | 3 separate instances per pipeline | `adk_agents.py` |
+| `BaseAgent.run()` doesn't exist | `Runner` + `run_adk()` helper | `features/coaching/adk_agents.py` |
+| `save_voice_scripts` TOCTOU race | `fcntl.flock(LOCK_EX)` + `os.replace()` | `adk_tools.py` (at `src/pitwall/adk_tools.py`) |
+| Shared `narrative_agent` across pipelines | 3 separate instances per pipeline | `features/coaching/adk_agents.py` |
 | `_qa_histories` memory leak | `_qa_timestamps` TTL + `_qa_cleanup_stale()` | `pitwall_bridge.py` |
 | No agent observability | `PitwallTracingPlugin` + `agent_traces` DuckDB table | `adk_agents.py`, `pitwall_bridge.py` |
 | No KV cache reuse | Persistent sessions per driver + `reset_driver_session()` | `adk_agents.py`, `pitwall_bridge.py` |
@@ -156,13 +156,14 @@ These were identified in ADR-021 as Tier 1/2 features — not yet implemented.
 ## Startup sequence (Termux, Pixel 10)
 
 ```bash
-# Terminal 1 — E4B model server for ADK paddock agents
+# Terminal 1 — E4B model server for ADK paddock agents (legacy `litertlm` backend;
+# default is now `openai` → LocalLLM, see ADR-022)
 lit pull gemma-4-e4b
 lit serve --port 8001
 
 # Terminal 2 — Pitwall bridge (E2B in-process for hot path)
-cd ~/pitwall/tools
-python3 pitwall_bridge.py --coach litert \
+cd ~/pitwall
+python3 -m pitwall --coach litert \
     --litert-model ~/storage/shared/Pitwall/models/gemma-4-E2B-it.litertlm
 ```
 

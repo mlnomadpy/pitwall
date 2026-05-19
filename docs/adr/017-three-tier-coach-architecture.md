@@ -40,7 +40,7 @@ reliable* — not freshly LLM-generated each time.
 | **In-drive** | On-track, mid-stint | < 100 ms | RuleCoach (canonical phrases) + a future pre-rendered audio cache, keyed by `(corner_id, phase, bentley_concept)` |
 | **Post-session debrief** | Paddock, post-session | 8–15 s OK | LiteRT-LM Gemma 4 E2B (`coach_engine.LitertCoach.debrief()`) |
 
-Concretely, in `coach_engine.py`:
+Concretely, in `coach_engine.py` (now split across `features/coaching/litert_coach.py` and `features/coaching/rule_coach.py` per PR #30; the `coach_engine` import path is preserved as a shim):
 
 - `LitertCoach.brief()` and `LitertCoach.debrief()` keep their current
   shape — they call `_generate(system_prompt, user_prompt)` which goes

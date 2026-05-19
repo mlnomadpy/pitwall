@@ -144,9 +144,9 @@ best = find_marker_for_next_corner(track, distance_m=350, kind="brake_ref")
 # Same as above but biased to markers attached to the upcoming corner first.
 ```
 
-`build_context()` in `coach_engine.py` automatically populates `CoachContext.next_brake_marker_label` and `next_apex_marker_label` from the upcoming corner's authored markers, so any coach that consumes `CoachContext` gets marker-aware phrasing for free.
+`build_context()` (now in `features/coaching/coach_engine.py` — a shim that re-exports from `features/coaching/engine_base.py`) automatically populates `CoachContext.next_brake_marker_label` and `next_apex_marker_label` from the upcoming corner's authored markers, so any coach that consumes `CoachContext` gets marker-aware phrasing for free.
 
-`RuleCoach._render()` prefers marker labels when present:
+`RuleCoach._render()` (in `features/coaching/rule_coach.py`) prefers marker labels when present:
 
 - **Beginner**: `Turn 2 in 185 meters, brake at the bridge`
 - **Intermediate**: `185, left 6, brake at the bridge, uphill`

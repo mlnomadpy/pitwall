@@ -5,6 +5,12 @@
 **Scope:** `src/pitwall/` Flask bridge + CAN ingest path + DB layer, with a deployment lens on Termux on a Pixel 10.
 **Branch:** `aim-mxp-yaml-pipeline` (commit `ec3b93a`)
 
+> **Post-audit update (PR #30):** Several findings below have moved or shipped.
+> - Finding #3 (non-reentrant `db_lock`): shipped — `state.db_lock`, `burst_lock`, `bundles_lock` are now `threading.RLock()`. `qa_lock` was removed entirely (callers no longer share it).
+> - The path `coach_engine.py:936-944` referenced in finding #13 now lives in `src/pitwall/features/coaching/litert_coach.py` (the monolith was split into 6 focused modules; `coach_engine.py` is now a re-export shim).
+> - `state.py` no longer holds function-pointer attributes (`state.compute_cues`, `state.load_track`, `state.run_adk`, etc.) or `state.has_genai` / `state.qa_histories` — callers import the relevant function directly.
+> - DDL is now run once at boot via `db.init_schema_once()`; `db_conn()` is the context-manager entry point.
+
 This audit catalogs concrete improvements grouped by severity. Each finding cites the relevant file:line and gives a recommended action sized to the work.
 
 ---

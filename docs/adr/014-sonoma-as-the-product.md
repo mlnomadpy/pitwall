@@ -45,6 +45,8 @@ Three bodies of work land under this ADR:
 
 ### `src/pitwall/features/sonoma.py` (NEW)
 
+> Updated 2026-05 (PR #30): module relocated to `src/pitwall/features/track/sonoma.py` as part of the feature-sliced reorganisation.
+
 A module of hardcoded Sonoma constants — not data-driven, not parameterised. The things we *know* about this track:
 
 ```python

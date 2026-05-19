@@ -52,7 +52,7 @@ testing; that should not happen twice.
 |---|---|---|---|
 | 1.1 | SIGTERM + SIGINT handler → `can_reader.stop()` → `simulator.stop()` → DuckDB `CHECKPOINT;` → `sys.exit(0)` | 30 min | `src/pitwall/__main__.py` |
 | 1.2 | Mirror the same body in an `atexit` handler (belt + suspenders) | 5 min | `src/pitwall/__main__.py` |
-| 1.3 | `state.db_lock = threading.Lock()` → `threading.RLock()`; same for `burst_lock`, `bundles_lock`, `qa_lock` | 5 min | `src/pitwall/state.py:44,54,58,67` |
+| 1.3 | `state.db_lock = threading.Lock()` → `threading.RLock()`; same for `burst_lock`, `bundles_lock` (`qa_lock` was removed entirely in PR #30) | 5 min | `src/pitwall/state.py` — **shipped: locks are now `RLock()` at lines 57/66/70** |
 | 1.4 | Swap Flask dev server for **waitress**: `waitress.serve(app, host="127.0.0.1", port=port, threads=8, channel_timeout=30)` | 1 h | `src/pitwall/__main__.py:168` + `pyproject.toml` deps |
 | 1.5 | Add `--dev` flag that keeps the Flask dev server path for local debugging | 10 min | `src/pitwall/__main__.py` |
 | 1.6 | Release Termux wake-lock on graceful stop via `subprocess.run(["termux-wake-unlock"], check=False)` | 5 min | shutdown handler from 1.1 |
@@ -130,7 +130,7 @@ recovers from common transient failures without manual intervention.
 | 3.1 | Structured logging: top-of-`main()` `logging.basicConfig` with `%(asctime)s %(levelname)s %(name)s %(message)s`; replace `print(...)` calls throughout `__main__.py` and blueprints; add `--log-level` CLI | 1 h | `__main__.py`, all `bp_*.py` |
 | 3.2 | Cap `/session/<sid>/signals` window: reject if `rate_hz × (t_to − t_from) > 10_000` with HTTP 413 and a "narrow your window" message; default to last 60s if neither bound given | 15 min | `bp_signals.py:111-123` |
 | 3.3 | Periodic RSS log line every 60s; flag if growth > 10 MB/min | 30 min | `__main__.py` background task |
-| 3.4 | LocalLLM fast health probe: `HEAD /v1/models` with 2s timeout before every `/coach/brief` call; on failure return rules-only response immediately, log warn, expose `state.litert_up` in `/health` | 1 h | `coach_engine.py` |
+| 3.4 | LocalLLM fast health probe: `HEAD /v1/models` with 2s timeout before every `/coach/brief` call; on failure return rules-only response immediately, log warn, expose `state.litert_up` in `/health` | 1 h | `src/pitwall/features/coaching/litert_coach.py` (was in monolithic `coach_engine.py` pre PR #30) |
 | 3.5 | Watchdog thread that detects a stuck reader: if `frames_per_second == 0` AND `last_frame_age_s > 30` AND `loaded == True`, log error and restart the reader | 1 h | `__main__.py` |
 | 3.6 | `_latest` and `_tall_id_cache` bounded to 1000 entries each (LRU via `collections.OrderedDict`) | 15 min | `can_reader.py` |
 | 3.7 | `/health` extended with `can.fps`, `can.connected`, `litert.up`, `simulator.running`, `wide_rows.last_5min`, `tall_rows.last_5min` — a single curl tells the operator everything | 30 min | `__init__.py` or `bp_diagnostics.py` |
@@ -229,7 +229,7 @@ without dropping frames or smearing coaching latency.
 |---|---|---|---|
 | 6.1 | `cProfile` capture of `_consume` over a 60-s 350 fps simulator run; flag anything > 100 µs/frame | 2 h | profiling |
 | 6.2 | Cross-derived dedupe: skip evaluating a `derived:` entry if all `bind:` inputs have identical values to last call | 1 h | `car_config.py` |
-| 6.3 | Lazy-load ADK agents: keep only the active "intent" agent in RAM; spawn others on demand | 4 h | `coaching/adk_agents.py` |
+| 6.3 | Lazy-load ADK agents: keep only the active "intent" agent in RAM; spawn others on demand | 4 h | `src/pitwall/features/coaching/adk_agents.py` |
 | 6.4 | Batch tall-store inserts across multiple frames (50 ms window) instead of per-frame `executemany` | 2 h | `can_reader.py` |
 | 6.5 | Move DuckDB writes into a dedicated thread fed by a `queue.Queue` from the reader; reader never blocks on the DB lock | 4 h | `can_reader.py` |
 | 6.6 | Re-measure all numbers after each change; commit a `docs/reports/perf-baseline.md` with the before/after | 1 h | docs |
