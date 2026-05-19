@@ -10,11 +10,25 @@ import os
 from flask import Blueprint, request, jsonify
 
 from pitwall.state import state, SIM_DIR
-from pitwall.db import get_db
-from pitwall.helpers import (
-    detect_laps, lap_sectors, quantile, laps_or_400,
-    load_track_json, corner_bounds_from_track,
-)
+from pitwall.db import db_conn, DuckDbUnavailable, session_has_telemetry
+from pitwall.features.session.laps import detect_laps, lap_sectors, quantile
+from pitwall.features.track.track_json import load_track_json, corner_bounds_from_track
+
+
+def _laps_or_400(sid: str):
+    """Resolve laps for a session; returns (laps, error_response).
+
+    Inlined from pitwall.helpers.laps_or_400 — Flask-coupled, used only here.
+    """
+    if not session_has_telemetry(sid):
+        return None, (jsonify({"error": "session not found", "session_id": sid}), 404)
+    laps = detect_laps(sid)
+    if not laps:
+        return None, (jsonify({
+            "error":      "no complete laps detected",
+            "session_id": sid,
+        }), 400)
+    return laps, None
 
 bp = Blueprint("analysis", __name__)
 
@@ -150,7 +164,7 @@ def session_clips(sid: str):
 def session_lap_time_table(sid: str):
     """Per-lap times + sector splits, with best-lap and best-sector flags."""
     sonoma = state.sonoma
-    laps, err = laps_or_400(sid)
+    laps, err = _laps_or_400(sid)
     if err:
         return err
 
@@ -195,7 +209,7 @@ def session_lap_time_table(sid: str):
 @bp.route("/session/<sid>/lap_time_distribution", methods=["GET"])
 def session_lap_time_distribution(sid: str):
     """Tukey box-plot statistics over the session's lap times."""
-    laps, err = laps_or_400(sid)
+    laps, err = _laps_or_400(sid)
     if err:
         return err
     times = sorted(l["lap_time_s"] for l in laps)
@@ -237,7 +251,7 @@ def session_lap_time_distribution(sid: str):
 def session_ideal_lap(sid: str):
     """Theoretical fastest lap = sum of best per-sector times."""
     sonoma = state.sonoma
-    laps, err = laps_or_400(sid)
+    laps, err = _laps_or_400(sid)
     if err:
         return err
     sectors_per_lap = [lap_sectors(sid, l) for l in laps]
@@ -275,7 +289,7 @@ def session_ideal_lap(sid: str):
 def session_sector_times(sid: str):
     """Thinner per-lap-per-sector view: just S1/S2/S3 numbers."""
     sonoma = state.sonoma
-    laps, err = laps_or_400(sid)
+    laps, err = _laps_or_400(sid)
     if err:
         return err
     sectors_per_lap = [lap_sectors(sid, l) for l in laps]
@@ -310,15 +324,14 @@ def session_pedal_behavior(sid: str):
     except ValueError:
         return jsonify({"error": "thresholds must be numbers"}), 400
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        rows = conn.execute(
-            "SELECT timestamp, throttle_pct, brake_bar FROM telemetry "
-            "WHERE session_id = ? ORDER BY timestamp", [sid],
-        ).fetchall()
-        conn.close()
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT timestamp, throttle_pct, brake_bar FROM telemetry "
+                "WHERE session_id = ? ORDER BY timestamp", [sid],
+            ).fetchall()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     if not rows:
         return jsonify({"error": "session not found"}), 404
 
@@ -372,41 +385,40 @@ def session_throttle_corner_box(sid: str):
     laps = detect_laps(sid)
     n_passes_default = max(len(laps), 1)
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        out: list = []
-        for c in corner_bounds:
-            rows = conn.execute(
-                "SELECT throttle_pct FROM telemetry "
-                "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
-                [sid, c["entry_m"], c["exit_m"]],
-            ).fetchall()
-            samples = sorted(float(r[0]) for r in rows if r[0] is not None)
-            if not samples:
+    out: list = []
+    try:
+        with db_conn() as conn:
+            for c in corner_bounds:
+                rows = conn.execute(
+                    "SELECT throttle_pct FROM telemetry "
+                    "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
+                    [sid, c["entry_m"], c["exit_m"]],
+                ).fetchall()
+                samples = sorted(float(r[0]) for r in rows if r[0] is not None)
+                if not samples:
+                    out.append({
+                        "name":       c["name"],
+                        "n_passes":   0,
+                        "n_samples":  0,
+                        "min_pct":    None, "q1_pct": None,
+                        "median_pct": None, "q3_pct": None,
+                        "max_pct":    None, "mean_pct": None,
+                    })
+                    continue
+                mean = sum(samples) / len(samples)
                 out.append({
                     "name":       c["name"],
-                    "n_passes":   0,
-                    "n_samples":  0,
-                    "min_pct":    None, "q1_pct": None,
-                    "median_pct": None, "q3_pct": None,
-                    "max_pct":    None, "mean_pct": None,
+                    "n_passes":   n_passes_default,
+                    "n_samples":  len(samples),
+                    "min_pct":    round(samples[0], 2),
+                    "q1_pct":     round(quantile(samples, 0.25), 2),
+                    "median_pct": round(quantile(samples, 0.50), 2),
+                    "q3_pct":     round(quantile(samples, 0.75), 2),
+                    "max_pct":    round(samples[-1], 2),
+                    "mean_pct":   round(mean, 2),
                 })
-                continue
-            mean = sum(samples) / len(samples)
-            out.append({
-                "name":       c["name"],
-                "n_passes":   n_passes_default,
-                "n_samples":  len(samples),
-                "min_pct":    round(samples[0], 2),
-                "q1_pct":     round(quantile(samples, 0.25), 2),
-                "median_pct": round(quantile(samples, 0.50), 2),
-                "q3_pct":     round(quantile(samples, 0.75), 2),
-                "max_pct":    round(samples[-1], 2),
-                "mean_pct":   round(mean, 2),
-            })
-        conn.close()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     return jsonify({"session_id": sid, "corners": out})
 
 
@@ -429,29 +441,28 @@ def session_corner_classification(sid: str):
     bands = {"low_speed": [], "med_speed": [], "high_speed": []}
     apex_speeds_by_band: dict = {"low_speed": [], "med_speed": [], "high_speed": []}
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        for c in corner_bounds:
-            row = conn.execute(
-                "SELECT MIN(speed_ms) FROM telemetry "
-                "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
-                [sid, c["entry_m"], c["exit_m"]],
-            ).fetchone()
-            min_ms = row[0] if row else None
-            if min_ms is None:
-                continue
-            apex_kmh = float(min_ms) * 3.6
-            if apex_kmh < low_max:
-                band = "low_speed"
-            elif apex_kmh < med_max:
-                band = "med_speed"
-            else:
-                band = "high_speed"
-            bands[band].append(c["name"])
-            apex_speeds_by_band[band].append(apex_kmh)
-        conn.close()
+    try:
+        with db_conn() as conn:
+            for c in corner_bounds:
+                row = conn.execute(
+                    "SELECT MIN(speed_ms) FROM telemetry "
+                    "WHERE session_id = ? AND distance_m >= ? AND distance_m <= ?",
+                    [sid, c["entry_m"], c["exit_m"]],
+                ).fetchone()
+                min_ms = row[0] if row else None
+                if min_ms is None:
+                    continue
+                apex_kmh = float(min_ms) * 3.6
+                if apex_kmh < low_max:
+                    band = "low_speed"
+                elif apex_kmh < med_max:
+                    band = "med_speed"
+                else:
+                    band = "high_speed"
+                bands[band].append(c["name"])
+                apex_speeds_by_band[band].append(apex_kmh)
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
 
     out = []
     for band_name in ("low_speed", "med_speed", "high_speed"):
@@ -479,45 +490,43 @@ def session_straight_line_speed(sid: str):
     laps = detect_laps(sid)
     track_len = float(getattr(sonoma, "TRACK_LENGTH_M", 4258))
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-
-        out = []
-        for st in sonoma.STRAIGHTS:
-            if st.start_m <= st.end_m:
-                where = "distance_m >= ? AND distance_m <= ?"
-                params = [sid, st.start_m, st.end_m]
-            else:
-                where = "(distance_m >= ? OR distance_m <= ?)"
-                params = [sid, st.start_m, st.end_m]
-            row = conn.execute(
-                f"SELECT timestamp, speed_ms, distance_m FROM telemetry "
-                f"WHERE session_id = ? AND {where} "
-                f"ORDER BY speed_ms DESC LIMIT 1",
-                params,
-            ).fetchone()
-            if row is None:
+    out = []
+    try:
+        with db_conn() as conn:
+            for st in sonoma.STRAIGHTS:
+                if st.start_m <= st.end_m:
+                    where = "distance_m >= ? AND distance_m <= ?"
+                    params = [sid, st.start_m, st.end_m]
+                else:
+                    where = "(distance_m >= ? OR distance_m <= ?)"
+                    params = [sid, st.start_m, st.end_m]
+                row = conn.execute(
+                    f"SELECT timestamp, speed_ms, distance_m FROM telemetry "
+                    f"WHERE session_id = ? AND {where} "
+                    f"ORDER BY speed_ms DESC LIMIT 1",
+                    params,
+                ).fetchone()
+                if row is None:
+                    out.append({
+                        "name": st.name, "start_m": st.start_m, "end_m": st.end_m,
+                        "top_speed_kmh": None, "from_lap": None,
+                    })
+                    continue
+                t_top, top_ms, _d = row
+                from_lap = None
+                for l in laps:
+                    if l["t_start"] <= t_top <= l["t_end"]:
+                        from_lap = l["lap_number"]
+                        break
                 out.append({
-                    "name": st.name, "start_m": st.start_m, "end_m": st.end_m,
-                    "top_speed_kmh": None, "from_lap": None,
+                    "name":          st.name,
+                    "start_m":       st.start_m,
+                    "end_m":         st.end_m,
+                    "top_speed_kmh": round(float(top_ms) * 3.6, 1),
+                    "from_lap":      from_lap,
                 })
-                continue
-            t_top, top_ms, _d = row
-            from_lap = None
-            for l in laps:
-                if l["t_start"] <= t_top <= l["t_end"]:
-                    from_lap = l["lap_number"]
-                    break
-            out.append({
-                "name":          st.name,
-                "start_m":       st.start_m,
-                "end_m":         st.end_m,
-                "top_speed_kmh": round(float(top_ms) * 3.6, 1),
-                "from_lap":      from_lap,
-            })
-        conn.close()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     return jsonify({"session_id": sid, "track_length_m": track_len, "straights": out})
 
 
@@ -536,15 +545,14 @@ def session_brake_acceleration(sid: str):
     laps = detect_laps(sid)
     n_passes = max(len(laps), 1)
 
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        rows = conn.execute(
-            "SELECT timestamp, distance_m, brake_bar, throttle_pct, g_long, speed_ms "
-            "FROM telemetry WHERE session_id = ? ORDER BY timestamp", [sid],
-        ).fetchall()
-        conn.close()
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT timestamp, distance_m, brake_bar, throttle_pct, g_long, speed_ms "
+                "FROM telemetry WHERE session_id = ? ORDER BY timestamp", [sid],
+            ).fetchall()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
 
     def nearest_corner(d):
         if d is None:

@@ -169,6 +169,10 @@ python3 pitwall_bridge.py --coach litert \
 Environment variable overrides:
 
 ```bash
-PITWALL_LITERT_URL=localhost:8001    # default
-PITWALL_LITERT_MODEL=gemma-4-e4b    # default
+PITWALL_ADK_OPENAI_URL=localhost:8001    # default (legacy: PITWALL_LITERT_URL)
+PITWALL_ADK_OPENAI_MODEL=gemma-4-e4b     # default (legacy: PITWALL_LITERT_MODEL)
 ```
+
+Legacy names (`PITWALL_LITERT_URL`, `PITWALL_LITERT_MODEL`,
+`PITWALL_LITERT_API_KEY`) are still honoured for backward compatibility and
+emit a `DeprecationWarning` on first read.

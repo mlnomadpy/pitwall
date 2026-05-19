@@ -3,7 +3,7 @@
 import json
 from flask import Blueprint, request, jsonify
 from pitwall.state import state
-from pitwall.db import get_db
+from pitwall.db import db_conn, DuckDbUnavailable
 
 bp = Blueprint("diagnostics", __name__)
 
@@ -32,11 +32,8 @@ def diagnostics_llm_friction():
     if since_min > 0:
         where.append("ts >= now() - INTERVAL (?) MINUTE"); params.append(since_min)
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-    with state.db_lock:
-        conn = get_db()
-        if conn is None:
-            return jsonify({"error": "duckdb not available"}), 503
-        try:
+    try:
+        with db_conn() as conn:
             rows = conn.execute(
                 f"""SELECT id, session_id, role, mode, backend,
                           prompt_chars, completion_chars, latency_ms,
@@ -55,8 +52,8 @@ def diagnostics_llm_friction():
                        AVG(CASE WHEN fell_back THEN 1.0 ELSE 0.0 END)
                    FROM llm_friction {where_sql} GROUP BY role ORDER BY role""",
                 params).fetchall()
-        finally:
-            conn.close()
+    except DuckDbUnavailable:
+        return jsonify({"error": "duckdb not available"}), 503
     out_rows = [
         {"id": r[0], "session_id": r[1], "role": r[2], "mode": r[3],
          "backend": r[4], "prompt_chars": r[5], "completion_chars": r[6],

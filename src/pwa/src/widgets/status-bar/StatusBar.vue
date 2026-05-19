@@ -210,7 +210,10 @@ onUnmounted(() => {
 }
 
 
-/* Shared button reset for all tappable zones */
+/* Shared button reset for all tappable zones.
+   Bar is visually 32px tall; we extend the hit area via a transparent
+   pseudo-element so taps register on a full 44px target without
+   visually growing the chip. */
 .bar-btn {
   background: none;
   border: none;
@@ -218,13 +221,26 @@ onUnmounted(() => {
   cursor: pointer;
   color: inherit;
   font: inherit;
-  padding: 0;
+  padding: 0 clamp(4px, 1vw, 8px);
   display: flex;
   align-items: center;
   gap: clamp(4px, 1vw, 10px);
   z-index: 2;
   -webkit-tap-highlight-color: transparent;
   transition: opacity var(--duration-fast, 150ms) ease;
+  position: relative;
+  min-height: 100%;
+}
+
+.bar-btn::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--touch-target-min);
+  transform: translateY(-50%);
+  /* Invisible — only expands hit-test region */
 }
 
 .bar-btn:active {
@@ -339,10 +355,24 @@ onUnmounted(() => {
   color: var(--color-slate);
   font: inherit;
   font-size: 0.85em;
-  padding: 0;
+  padding: 0 clamp(4px, 1vw, 6px);
   white-space: nowrap;
   -webkit-tap-highlight-color: transparent;
   transition: color var(--duration-fast) ease;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 100%;
+}
+
+.crumb-btn::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: var(--touch-target-min);
+  transform: translateY(-50%);
 }
 
 .crumb-btn:active {

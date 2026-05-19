@@ -7,15 +7,11 @@ Usage:
 """
 
 import argparse
-import json
-import os
 import sys
-import threading
 import time
 
 try:
     import requests
-    import sseclient
 except ImportError:
     print("Dependencies missing! Please install: pip install requests sseclient-py")
     sys.exit(1)
@@ -23,28 +19,38 @@ except ImportError:
 # Check for textual
 try:
     from textual.app import App, ComposeResult
-    from textual.widgets import Button, Header, Footer, Static
+    from textual.widgets import Button, Static
     from textual.containers import Horizontal
     from textual import work
     HAS_TEXTUAL = True
 except ImportError:
     HAS_TEXTUAL = False
 
-from vbo_client import parse_vbo_client
+from vbo_replay import SSEListener, frame_to_payload, load_frames
 
 
 class BackendClient:
-    """Handles HTTP communication with the Pitwall backend."""
-    
+    """Handles HTTP communication with the Pitwall backend.
+
+    Thin wrapper over `requests` + the shared `SSEListener`. Holds the
+    session id, posts frames, and exposes the incoming-cue queue.
+    """
+
     def __init__(self, backend_url, driver="sim-driver", track="Sonoma Raceway"):
         self.backend_url = backend_url
         self.driver = driver
         self.track = track
         self.session_id = None
-        self._sse_thread = None
-        self.running = False
-        self.cues = []
+        self._listener: SSEListener | None = None
         self.on_cue_received = None
+
+    @property
+    def cues(self) -> list:
+        return self._listener.cues if self._listener else []
+
+    @property
+    def running(self) -> bool:
+        return bool(self._listener and self._listener.running)
 
     def start_session(self):
         r = requests.post(f"{self.backend_url}/api/session/start", json={
@@ -54,46 +60,32 @@ class BackendClient:
         })
         r.raise_for_status()
         self.session_id = r.json().get("session_id")
-        
-        self.running = True
-        self._sse_thread = threading.Thread(target=self._listen_sse, daemon=True)
-        self._sse_thread.start()
+
+        self._listener = SSEListener(
+            self.backend_url,
+            self.session_id,
+            on_cue=lambda d: self.on_cue_received(d) if self.on_cue_received else None,
+        )
+        self._listener.start()
         return self.session_id
 
     def post_frame(self, frame_dict):
         if not self.session_id:
             return
         try:
-            requests.post(f"{self.backend_url}/api/session/{self.session_id}/frame", 
+            requests.post(f"{self.backend_url}/api/session/{self.session_id}/frame",
                           json=frame_dict, timeout=0.5)
         except requests.RequestException:
             pass  # silently drop if overloaded
 
     def stop_session(self):
-        self.running = False
+        if self._listener:
+            self._listener.stop()
         if self.session_id:
             try:
                 requests.post(f"{self.backend_url}/api/session/{self.session_id}/end", timeout=2)
-            except:
+            except Exception:
                 pass
-
-    def _listen_sse(self):
-        url = f"{self.backend_url}/api/cues/stream?session_id={self.session_id}"
-        try:
-            response = requests.get(url, stream=True, headers={'Accept': 'text/event-stream'})
-            client = sseclient.SSEClient(response)
-            for event in client.events():
-                if not self.running:
-                    break
-                if event.event == "cue":
-                    data = json.loads(event.data)
-                    self.cues.insert(0, data)
-                    if len(self.cues) > 5:
-                        self.cues.pop()
-                    if self.on_cue_received:
-                        self.on_cue_received(data)
-        except Exception as e:
-            pass # Connection lost
 
 
 def run_simple(args):
@@ -101,19 +93,18 @@ def run_simple(args):
     print("Pitwall — Simple Terminal Mode (HTTP Client)")
     print("=" * 60)
     
-    frames = parse_vbo_client(args.replay)
+    frames = load_frames(args.replay)
     if not frames:
         print("No frames parsed!")
         return
-        
+
     client = BackendClient(args.backend, track="Simulator Track")
     sid = client.start_session()
     print(f"Session started: {sid}")
 
-    start_ts = frames[0].timestamp
     try:
         for i, f in enumerate(frames):
-            client.post_frame(f.to_dict())
+            client.post_frame(frame_to_payload(f))
             
             speed_mph = f.speed * 2.237
             lines = []
@@ -181,7 +172,7 @@ if HAS_TEXTUAL:
 
         def on_mount(self):
             if self.replay_path:
-                self.frames = parse_vbo_client(self.replay_path)
+                self.frames = load_frames(self.replay_path)
                 self.query_one("#status_bar").update(f"Loaded {len(self.frames)} frames")
 
         def on_button_pressed(self, event: Button.Pressed):
@@ -211,12 +202,11 @@ if HAS_TEXTUAL:
             
             self.client.on_cue_received = update_cues
 
-            start_ts = self.frames[0].timestamp
             for i, f in enumerate(self.frames):
                 if not self.playing:
                     break
 
-                self.client.post_frame(f.to_dict())
+                self.client.post_frame(frame_to_payload(f))
 
                 speed_mph = f.speed * 2.237
                 self.call_from_thread(

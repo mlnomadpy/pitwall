@@ -50,9 +50,8 @@ DEFAULT_DBC = ROOT / "data" / "dbc" / "pitwall.dbc"
 
 def _vbo_frames(vbo_path: str):
     """Yield TelemetryFrame objects from a VBO file."""
-    from vbo_client import parse_vbo_client
-    frames = parse_vbo_client(vbo_path)
-    return frames
+    from vbo_replay import load_frames
+    return load_frames(vbo_path)
 
 
 def _synthetic_frames(n_laps: int = 3, fps: int = 10):

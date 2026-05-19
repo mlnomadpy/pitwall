@@ -1,6 +1,6 @@
 site_name: Pitwall Sprint — Trustable AI Racing Coach
 site_url: https://www.tahabouhsine.com/pitwall/
-site_description: Split-brain AI coaching for Sonoma Raceway, powered by Gemma 4 + Gemini 3 + Antigravity
+site_description: Real-time on-device AI coaching for Sonoma Raceway — built with Antigravity, Gemini CLI, Android Studio, Jetpack Compose, Google ADK, and Gemma 4 via LiteRT-LM.
 repo_url: https://github.com/mlnomadpy/pitwall
 repo_name: mlnomadpy/pitwall
 edit_uri: edit/master/docs/
@@ -17,6 +17,12 @@ theme:
     - navigation.top
     - content.code.copy
     - toc.integrate
+  font:
+    text: Google Sans
+    code: Roboto Mono
+
+extra_css:
+  - stylesheets/extra.css
 
 markdown_extensions:
   - pymdownx.superfences:
@@ -45,6 +51,7 @@ extra_javascript:
 
 nav:
   - Home: index.md
+  - Built with Google: stack.md
   - Architecture: architecture.md
   - Internal Architecture: internal_architecture.md
   - Audit Report: AUDIT.md
@@ -155,5 +162,6 @@ nav:
       - "019: ADK Multi-Agent Backend": adr/019-adk-multi-agent-backend.md
       - "020: ADK Agent Architecture Refactor": adr/020-adk-agent-architecture-refactor.md
       - "021: ADK Second Audit — Runner, Concurrency, Feature Gaps": adr/021-adk-second-audit.md
+      - "022: On-Phone LocalLLM Server (OpenAI-Compatible)": adr/022-openai-compatible-backend-selector.md
   - ADK Agent Architecture: adk-agent-architecture.md
   - ADK Implementation Plan: adk-implementation-plan.md

@@ -6,6 +6,13 @@ into a single file.
 
 The singleton is initialised lazily by the entry-point after CLI parsing —
 Blueprints just read from it.
+
+NOTE — this is a STATE container, not a service locator. First-party
+functions (compute_cues, load_track, build_context, analyze_session,
+run_adk, …) are imported at their call sites, not stashed here. Only
+genuinely-mutable runtime state (track, coach, can_reader, caches, locks,
+feature flags) and namespace handles (sonoma, adk_orchestrator) live on
+this object.
 """
 
 import logging
@@ -53,7 +60,6 @@ class BridgeState:
         # ── Coach engine ───────────────────────────────────────────────────
         self.coach = None              # CoachEngine instance (LitertCoach / RuleCoach)
         self.arbiter = None            # CoachArbiter instance
-        self.set_friction_logger = None  # coach_engine.set_friction_logger
 
         # ── Session burst accumulator (for /insights) ──────────────────────
         self.session_bursts: list = []
@@ -69,14 +75,12 @@ class BridgeState:
 
 
         # ── ADK Q&A ───────────────────────────────────────────────────────
-        self.qa_histories: dict = {}
-        self.qa_lock = threading.RLock()
+        # `adk_orchestrator` is the root LlmAgent instance (a namespace handle,
+        # not a wrapper). Module-level run_adk / stream_adk / get_pending_traces /
+        # reset_driver_session are imported directly at call sites from
+        # `pitwall.features.coaching.adk_agents`.
         self.adk_orchestrator = None
         self.adk_agent_registry: list = []
-        self.run_adk = None
-        self.stream_adk = None
-        self.get_adk_traces = None
-        self.reset_adk_session = None
 
         # ── Feature flags ──────────────────────────────────────────────────
         self.has_sonic: bool = False
@@ -84,102 +88,84 @@ class BridgeState:
         self.has_analyzer: bool = False
         self.has_duckdb: bool = False
         self.has_adk: bool = False
-        self.has_genai: bool = False    # always False — kept for short-circuit
 
-        # ── Module references (set during init) ────────────────────────────
-        self.compute_cues = None       # sonic_model.compute_cues
-        self.AudioCue = None           # sonic_model.AudioCue
-        self.Pattern = None            # sonic_model.Pattern
-        self.load_track = None         # track_loader.load_track
-        self.find_nearest_corner = None  # track_loader.find_nearest_corner
-        self.distance_to_corner = None   # track_loader.distance_to_corner
-        self.build_context = None      # coach_engine.build_context
-        self.analyze_session = None    # session_analyzer.analyze_session
-        self.ensure_driver_schema = None  # driver_profile.ensure_driver_schema
-        self.append_session_events = None  # driver_profile.append_session_events
-        self.compute_profile = None    # driver_profile.compute_profile
+        # ── Namespace handles (set during init) ────────────────────────────
+        # `sonoma` is a module handle — callers do `state.sonoma.DANGER_ZONES`.
+        # This is legitimate state because the active track namespace can swap.
         self.sonoma = None             # sonoma module
 
         # ── Constants ──────────────────────────────────────────────────────
         self.sim_dir: str = SIM_DIR
 
     def init_imports(self):
-        """Attempt to import optional dependencies and set feature flags.
+        """Probe optional third-party dependencies and set feature flags.
 
-        Called once at startup. Failures are logged but non-fatal — each
-        feature degrades gracefully when its flag is False.
+        Called once at startup. First-party imports are NOT wrapped in
+        try/except — a typo in `pitwall.features.*` should crash startup
+        rather than silently degrade to "feature unavailable". Only
+        genuinely-optional THIRD-PARTY deps (duckdb, google.adk, …) are
+        probed defensively.
+
+        All five of (sonic_model, track_loader, coach_engine,
+        session_analyzer, driver_profile) are pure stdlib + first-party —
+        no third-party probe needed; their import is the smoke test.
         """
-        # ── sonic_model ────────────────────────────────────────────────────
-        try:
-            from pitwall.features.coaching.sonic_model import compute_cues, AudioCue, Pattern
-            from pitwall.features.track.track_loader import load_track, find_nearest_corner, distance_to_corner
-            self.compute_cues = compute_cues
-            self.AudioCue = AudioCue
-            self.Pattern = Pattern
-            self.load_track = load_track
-            self.find_nearest_corner = find_nearest_corner
-            self.distance_to_corner = distance_to_corner
-            self.has_sonic = True
-            log.info("✓  sonic_model loaded")
-        except ImportError as e:
-            log.warning("sonic_model not available (%s) — falling back to rule engine", e)
+        # ── sonic_model + track_loader (pure stdlib + first-party) ─────────
+        import pitwall.features.coaching.sonic_model  # noqa: F401
+        import pitwall.features.track.track_loader    # noqa: F401
+        self.has_sonic = True
+        log.info("✓  sonic_model + track_loader loaded")
 
-        # ── coach_engine ───────────────────────────────────────────────────
-        try:
-            from pitwall.features.coaching.coach_engine import (
-                make_coach, CoachArbiter, build_context, set_friction_logger,
-            )
-            self.coach = make_coach(kind="auto")
-            self.arbiter = CoachArbiter()
-            self.build_context = build_context
-            self.set_friction_logger = set_friction_logger
-            self.has_coach = True
-            log.info("✓  coach_engine loaded (%s)", self.coach.name)
-        except ImportError as e:
-            log.warning("coach_engine not available (%s)", e)
+        # ── coach_engine (pure stdlib + first-party) ───────────────────────
+        # make_coach() may probe LiteRT-LM internally, but it returns a
+        # RuleCoach fallback rather than raising — so this is non-fatal.
+        from pitwall.features.coaching.coach_engine import make_coach, CoachArbiter
+        self.coach = make_coach(kind="auto")
+        self.arbiter = CoachArbiter()
+        self.has_coach = True
+        log.info("✓  coach_engine loaded (%s)", self.coach.name)
 
-        # ── session_analyzer + driver_profile ──────────────────────────────
-        try:
-            import pitwall.features.track.sonoma as _sonoma                        # noqa: F401
-            from pitwall.features.session.session_analyzer import analyze_session
-            from pitwall.features.session.driver_profile import (
-                ensure_schema as ensure_driver_schema,
-                append_session_events, compute_profile,
-            )
-            self.sonoma = _sonoma
-            self.analyze_session = analyze_session
-            self.ensure_driver_schema = ensure_driver_schema
-            self.append_session_events = append_session_events
-            self.compute_profile = compute_profile
-            self.has_analyzer = True
-            log.info("✓  session_analyzer + driver_profile loaded")
-        except ImportError as e:
-            self.has_analyzer = False
-            log.warning("session_analyzer not available (%s) — debrief disabled", e)
+        # ── session_analyzer + driver_profile + sonoma ─────────────────────
+        # Pure stdlib + first-party. A bug here is a first-party crash.
+        import pitwall.features.track.sonoma as _sonoma
+        import pitwall.features.session.session_analyzer  # noqa: F401
+        import pitwall.features.session.driver_profile    # noqa: F401
+        self.sonoma = _sonoma
+        self.has_analyzer = True
+        log.info("✓  session_analyzer + driver_profile loaded")
 
-        # ── DuckDB ─────────────────────────────────────────────────────────
+        # ── DuckDB (genuinely optional third-party) ────────────────────────
         try:
             import duckdb  # noqa: F401
             self.has_duckdb = True
         except ImportError:
             log.warning("duckdb not installed — lap history disabled. pip3 install duckdb")
 
-        # ── ADK multi-agent backend ────────────────────────────────────────
+        # ── Schema init (DDL once at boot, not per connection) ─────────────
+        # Hoist DDL out of get_db()'s hot path. All bridge tables are
+        # `CREATE TABLE IF NOT EXISTS`, so this is idempotent across restarts.
+        # Silent no-op when duckdb isn't installed — has_duckdb gates the
+        # call site, db.init_schema_once() guards again internally.
+        if self.has_duckdb:
+            try:
+                from pitwall.db import init_schema_once
+                init_schema_once()
+                log.info("✓  DuckDB schema initialised")
+            except Exception as e:
+                log.warning("DuckDB schema init failed: %s", e)
+
+        # ── ADK multi-agent backend (google-adk is genuinely optional) ─────
+        # adk_agents imports google.adk at module top; an ImportError here
+        # means the SDK isn't installed. First-party bugs in adk_agents
+        # itself will still crash because the module body executes on import.
         try:
             from pitwall.features.coaching.adk_agents import (
                 coach_orchestrator,
                 HAS_ADK as _adk_loaded,
                 AGENT_REGISTRY,
-                run_adk, stream_adk,
-                get_pending_traces,
-                reset_driver_session,
             )
             self.adk_orchestrator = coach_orchestrator
             self.adk_agent_registry = AGENT_REGISTRY
-            self.run_adk = run_adk
-            self.stream_adk = stream_adk
-            self.get_adk_traces = get_pending_traces
-            self.reset_adk_session = reset_driver_session
             self.has_adk = _adk_loaded and coach_orchestrator is not None
             if self.has_adk:
                 log.info("✓  ADK coach_orchestrator loaded — %d agents (LiteRT-LM E4B)",
@@ -188,15 +174,6 @@ class BridgeState:
                 log.warning("adk_agents imported but google-adk not installed — ADK disabled")
         except ImportError as e:
             log.warning("adk_agents not importable (%s) — ADK disabled", e)
-
-        # If we don't have sonoma loaded yet (e.g. session_analyzer failed
-        # but we still want track constants), try a standalone import.
-        if self.sonoma is None:
-            try:
-                import pitwall.features.track.sonoma as _sonoma
-                self.sonoma = _sonoma
-            except ImportError:
-                pass
 
 
 # Module-level singleton — all Blueprints import this.

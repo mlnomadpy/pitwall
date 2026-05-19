@@ -131,15 +131,53 @@ def test_corner_bounds_falls_back_when_json_missing(monkeypatch, tmp_path):
 # ─── adk_agents._classify_intent: regex router ─────────────────────────────
 
 
-def test_intent_classifier_corner_before_brief():
-    """Audit issue: 'brief me on T6' should route to corner, not brief."""
+def test_intent_classifier_whole_flow_beats_corner():
+    """Audit fix 2026-05-12: whole-flow intents (brief / debrief / voice_script)
+    are matched BEFORE the corner pattern so 'brief me on T6' routes to the
+    BriefPipeline, not CornerCoachAgent. The earlier behaviour treated any
+    mention of a corner as terminal — which broke briefs/debriefs/voice
+    scripts that happened to name a corner.
+    """
     import pitwall.features.coaching.adk_agents as adk_agents
     classify = adk_agents._classify_intent if hasattr(adk_agents, "_classify_intent") else None
     if classify is None:
         pytest.skip("ADK not loaded; classifier lives in HAS_ADK branch")
-    assert classify("brief me on T6") == "corner"
-    assert classify("review my T11 line") == "corner"
+    # Whole-flow intents win when they appear alongside a corner reference.
+    assert classify("brief me on T6") == "brief"
+    assert classify("debrief at Turn 5") == "debrief"
+    assert classify("voice script for T3") == "voice_script"
+    # Pure brief / debrief / voice still routes correctly.
     assert classify("brief me before I go out") == "brief"
+    assert classify("debrief the session") == "debrief"
+    assert classify("generate cue scripts") == "voice_script"
+    # A query that names a corner WITHOUT a whole-flow keyword still goes to corner.
+    assert classify("review my T11 line") == "corner"
+    assert classify("how am I doing at the Carousel") == "corner"
+
+
+def test_intent_classifier_mental_map_covers_consistency():
+    """Audit fix 2026-05-12: the mental_map pattern was too narrow, missing
+    'consistency' (noun), 'repeatability', and 'stable'. Widening this is
+    important because those are the natural phrasings drivers reach for."""
+    import pitwall.features.coaching.adk_agents as adk_agents
+    classify = adk_agents._classify_intent if hasattr(adk_agents, "_classify_intent") else None
+    if classify is None:
+        pytest.skip("ADK not loaded")
+    for phrase in (
+        "how's my consistency?",
+        "consistency through corners",
+        "what's my repeatability score",
+        "where am I most variance",
+        "show my mental map",
+        "I'm inconsistent today",
+        "am I stable lap-to-lap",
+    ):
+        assert classify(phrase) == "mental_map", \
+            f"phrase {phrase!r} should route to mental_map, got {classify(phrase)!r}"
+    # When the query explicitly names a corner, corner-specific routing wins
+    # — the CornerCoachAgent can still answer consistency questions per corner.
+    assert classify("am I repeatable at T10?") == "corner"
+    assert classify("how stable am I through the Carousel") == "corner"
 
 
 def test_intent_classifier_word_boundaries():
@@ -297,8 +335,11 @@ def bridge_app(monkeypatch, tmp_path):
             pitwall.state.stream_adk = value
             
     mock_bridge = MockBridge()
-    # Mocking the HAS_ADK flag that tests mutate
-    mock_bridge.HAS_ADK = pitwall.features.coaching.adk_agents.HAS_ADK
+    # Mocking the HAS_ADK flag that tests mutate. Importing the submodule
+    # explicitly because Python doesn't auto-load child modules just from
+    # the parent package being imported.
+    from pitwall.features.coaching import adk_agents as _adk
+    mock_bridge.HAS_ADK = _adk.HAS_ADK
     return mock_bridge
 
 
@@ -342,12 +383,17 @@ def test_coach_ask_validates_question_present(bridge_app, monkeypatch):
 
 
 def test_coach_ask_uses_intent_override(bridge_app, monkeypatch):
-    """Explicit `intent` body field must reach the model prompt as
-    [intent_override:...] so the orchestrator can honour it."""
+    """Explicit `intent` body field must reach the orchestrator via
+    `state_overrides["temp:intent_override"]` (not as `[intent_override:X]`
+    text embedded in the prompt — which the orchestrator never reads).
+    Audit fix 2026-05-13: the previous version asserted the broken
+    behaviour and let the bug ship.
+    """
     captured = {}
-    def fake_run(prompt, user_id="driver"):
+    def fake_run(prompt, user_id="driver", state_overrides=None):
         captured["prompt"] = prompt
         captured["user_id"] = user_id
+        captured["state_overrides"] = state_overrides
         return ("ok answer [EMOTION:focused]", "fake-sid")
     monkeypatch.setattr(bridge_app, "HAS_ADK", True)
     monkeypatch.setattr(bridge_app, "_run_adk", fake_run)
@@ -362,8 +408,31 @@ def test_coach_ask_uses_intent_override(bridge_app, monkeypatch):
     body = resp.get_json()
     assert body["answer"] == "ok answer"
     assert body["emotion"] == "focused"
-    assert "[intent_override:corner]" in captured["prompt"]
+    # The override flows through state, not the prompt text. Assert both.
+    assert captured["state_overrides"] == {"temp:intent_override": "corner"}
+    assert "[intent_override:" not in captured["prompt"], \
+        "intent must NOT leak into the prompt text — orchestrator reads session.state"
     assert captured["user_id"] == "u1"
+
+
+def test_coach_ask_no_intent_passes_no_overrides(bridge_app, monkeypatch):
+    """When the request body omits `intent`, the bridge must NOT pass an
+    empty/dict state_overrides — it should pass None so the orchestrator's
+    fallback regex routing is exercised exactly as before."""
+    captured = {}
+    def fake_run(prompt, user_id="driver", state_overrides=None):
+        captured["state_overrides"] = state_overrides
+        return ("ok [EMOTION:neutral]", "sid")
+    monkeypatch.setattr(bridge_app, "HAS_ADK", True)
+    monkeypatch.setattr(bridge_app, "_run_adk", fake_run)
+    monkeypatch.setattr(bridge_app, "_drain_adk_traces", lambda **kw: None)
+    client = bridge_app.app.test_client()
+    resp = client.post("/coach/ask", json={
+        "driver_id": "u1", "session_id": "s1",
+        "question": "what about T6",
+    })
+    assert resp.status_code == 200
+    assert captured["state_overrides"] is None
 
 
 def test_coach_ask_drain_filters_by_adk_session(bridge_app, monkeypatch):
@@ -461,8 +530,12 @@ def test_adk_openai_backend_uses_litellm(monkeypatch):
     local server (Ollama, llama.cpp, vLLM, …)."""
     pytest.importorskip("litellm")
     monkeypatch.setenv("PITWALL_ADK_BACKEND", "openai")
-    monkeypatch.setenv("PITWALL_LITERT_MODEL", "openai/gemma-4-e4b")
-    monkeypatch.setenv("PITWALL_LITERT_URL", "http://localhost:11434/v1")
+    monkeypatch.setenv("PITWALL_ADK_OPENAI_MODEL", "openai/gemma-4-e4b")
+    monkeypatch.setenv("PITWALL_ADK_OPENAI_URL", "http://localhost:11434/v1")
+    # Clear legacy names so a deprecation warning from a shell-set legacy
+    # var doesn't bleed into this assertion path.
+    monkeypatch.delenv("PITWALL_LITERT_MODEL", raising=False)
+    monkeypatch.delenv("PITWALL_LITERT_URL", raising=False)
     import importlib
     from pitwall.features.coaching import adk_agents
     importlib.reload(adk_agents)

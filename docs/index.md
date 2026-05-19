@@ -78,8 +78,21 @@ graph TB
 | Tier | Engine | Latency | When | What |
 |------|--------|---------|------|------|
 | 🔴 Hot | `sonic_model` + `RuleCoach` | <50 ms | Every frame (10 Hz) | Reflexive tone cues, threshold alerts, canonical pace notes |
-| 🟡 Warm | `LitertCoach` (Gemma 4 E2B) | <100 ms | On straights, debounced | Rally-style pace notes, Bentley pedagogy, T-Rod voice |
-| 🟢 Paddock | 18 ADK agents (Gemma 4 E4B) | 2–15 s | Off-track only | Pre-briefs, post-session debriefs, multi-turn Q&A |
+| 🟡 Warm | `LitertCoach` (Gemma 4 E2B, in-process) | <100 ms | On straights, debounced | Rally-style pace notes, Bentley pedagogy, T-Rod voice |
+| 🟢 Paddock | 18 ADK agents (Gemma 4 E4B, **pluggable local-LLM backend**) | 2–15 s | Off-track only | Pre-briefs, post-session debriefs, multi-turn Q&A |
+
+**Every LLM call goes to [LocalLLM](https://www.tahabouhsine.com/localllm/) over local HTTP** ([ADR-022](adr/022-openai-compatible-backend-selector.md)).
+LocalLLM is a sibling Apache-2.0 Android APK
+([github.com/mlnomadpy/localllm](https://github.com/mlnomadpy/localllm)) that
+hosts LiteRT-LM and exposes an OpenAI-compatible HTTP server on
+`127.0.0.1:8099/v1`. As of 2026-05-12 it's the **default transport for both
+the warm path** (`LitertCoach.brief()` / `debrief()`) **and the paddock ADK
+tier** — fresh installs need zero env vars. Two opt-out paths remain
+(`PITWALL_ADK_OPENAI_URL=""` + `PITWALL_ADK_BACKEND=engine` for in-process,
+`PITWALL_ADK_BACKEND=litertlm` for legacy `lit serve`), and the same `openai`
+selector also covers dev workstations running Ollama / LM Studio / llama.cpp
+/ vLLM. Every backend dials only `localhost` — no hosted API. See
+[ADK Agent Architecture → Model backend selector](adk-agent-architecture.md#model-backend-selector).
 
 ## What's Different from Pitwall Open Source
 

@@ -7,18 +7,30 @@ interface Props {
   animation: string
   scale?: number
   paused?: boolean
+  /** Disable integer-scale snapping (default: snap on, for crisp pixel art) */
+  smooth?: boolean
 }
 
 const props = withDefaults(defineProps<Props>(), {
   scale: 1,
-  paused: false
+  paused: false,
+  smooth: false,
 })
 
 const store = useSpriteStore()
 
+// Pixel art blurs at non-integer upscale. When scale >= 1, snap to the
+// nearest integer so we always sample on whole pixels. Sub-1 scales
+// (e.g. tiny avatars in lists) pass through unchanged.
+const effectiveScale = computed(() => {
+  if (props.smooth) return props.scale
+  if (props.scale < 1) return props.scale
+  return Math.max(1, Math.round(props.scale))
+})
+
 const style = computed(() => {
   return store.cssFor(props.sheet, props.animation, {
-    scale: props.scale,
+    scale: effectiveScale.value,
     paused: props.paused
   })
 })

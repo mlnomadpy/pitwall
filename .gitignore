@@ -17,6 +17,11 @@ coverage.xml
 htmlcov/
 *.profraw
 
+# Playwright e2e — generated artifacts only, never source
+src/pwa/test-results/
+src/pwa/playwright-report/
+src/pwa/playwright/.cache/
+
 # ── Data & Model artifacts ───────────────────────────────────────────────────
 *.vbo
 *.mp4

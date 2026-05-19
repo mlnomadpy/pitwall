@@ -42,6 +42,25 @@ export interface ConversationTurn {
   role: 'user' | 'assistant' | 'coach_brief' | 'coach_debrief'
   text: string
   emotion?: string
+  recorded_at?: string | null
+}
+
+/** Shape of an item in /coach/agents (the AGENT_REGISTRY). */
+export interface AgentRegistryEntry {
+  name: string
+  role: string
+  example_questions?: string[]
+}
+
+/** Pinia-friendly representation of /conversations/driver/{id}. */
+export interface ConversationRow {
+  session_id: string
+  driver_id: string
+  role: 'user' | 'assistant' | 'coach_brief' | 'coach_debrief'
+  text: string
+  focus_items?: string | null
+  emotion?: string | null
+  recorded_at: string | null
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
@@ -69,6 +88,16 @@ export const useCoachStore = defineStore('coach', {
     // Streaming Q&A
     streamingText: '',
     isStreaming: false,
+
+    // /coach/agents — AGENT_REGISTRY mirror for the intent-picker UI.
+    agents: [] as AgentRegistryEntry[],
+    agentsLoading: false,
+    agentsError: null as string | null,
+
+    // /conversations/driver/{id} — persisted Q&A + brief/debrief history.
+    historyTurns: [] as ConversationRow[],
+    historyLoading: false,
+    historyError: null as string | null,
   }),
 
   getters: {
@@ -261,6 +290,55 @@ export const useCoachStore = defineStore('coach', {
       this.conversation = []
     },
 
+    // ── Agent registry (for routing override + question discovery) ───────
+
+    /**
+     * Fetch the list of ADK agents the orchestrator can route to. Used by
+     * the Q&A UI to surface (a) "what can I ask?" example questions and
+     * (b) an intent-override picker for when the regex classifier would
+     * misroute. Cached after first call — call again to refresh.
+     */
+    async fetchAgents() {
+      if (this.agents.length > 0) return this.agents
+      this.agentsLoading = true
+      this.agentsError = null
+      try {
+        const res = await bridge.get<{ agents: AgentRegistryEntry[] }>('/coach/agents')
+        this.agents = Array.isArray(res?.agents) ? res.agents : []
+      } catch (e: any) {
+        this.agentsError = e?.message ?? String(e)
+        this.agents = []
+      } finally {
+        this.agentsLoading = false
+      }
+      return this.agents
+    },
+
+    // ── Conversation history (multi-session view of past coach turns) ────
+
+    /**
+     * Load the persisted brief / debrief / Q&A history for a driver from
+     * `/conversations/driver/{driver_id}`. Backend orders by `recorded_at`.
+     */
+    async fetchHistory(driverId: string, opts?: { limit?: number }) {
+      if (!driverId) return []
+      this.historyLoading = true
+      this.historyError = null
+      try {
+        const qs = opts?.limit ? `?limit=${opts.limit}` : ''
+        const res = await bridge.get<{ history: ConversationRow[] }>(
+          `/conversations/driver/${encodeURIComponent(driverId)}${qs}`,
+        )
+        this.historyTurns = Array.isArray(res?.history) ? res.history : []
+      } catch (e: any) {
+        this.historyError = e?.message ?? String(e)
+        this.historyTurns = []
+      } finally {
+        this.historyLoading = false
+      }
+      return this.historyTurns
+    },
+
     /** Clear all coaching state */
     reset() {
       this.brief = null
@@ -270,6 +348,8 @@ export const useCoachStore = defineStore('coach', {
       this.briefError = null
       this.debriefError = null
       this.askError = null
+      this.historyTurns = []
+      this.historyError = null
     },
   }
 })

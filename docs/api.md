@@ -306,6 +306,44 @@ The bridge runs the full `sonic_model` + `coach_engine` pipeline locally. With `
 
 ---
 
+## Paddock path — ADK multi-agent Q&A
+
+Per [ADR-019](adr/019-adk-multi-agent-backend.md) – [ADR-022](adr/022-openai-compatible-backend-selector.md). 18 specialist agents behind one orchestrator, deterministic regex routing, OpenAI-compatible HTTP to LocalLLM on `127.0.0.1:8099/v1` (default since 2026-05-12).
+
+### `POST /coach/ask`
+
+Run a one-shot multi-agent query. Request body:
+
+```json
+{
+  "driver_id":   "taha",
+  "session_id":  "<sid>",
+  "question":    "Why was lap 4 faster than lap 2?",
+  "intent":      "lap_comparison"
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `question` | ✅ | The user's natural-language query. |
+| `driver_id` |  | Defaults to `"driver"`. Used as the ADK `user_id` — persistent sessions per driver let `lit serve` / LocalLLM clone the KV cache across calls. |
+| `session_id` |  | Tagged onto the trace rows; not required for ad-hoc questions. |
+| `intent` |  | **Escape hatch for routing.** When set, bypasses `_classify_intent()` and forces the request to a specific agent. Valid values: `telemetry`, `debrief`, `brief`, `gold_lap`, `weather`, `session_plan`, `incident`, `race_pace`, `goal`, `mental_map`, `voice_script`, `lap_comparison`, `progress`, `setup`, `mindset`, `agent_meta`, `corner`. Use this when the natural-language router would mis-route (e.g., a corner-naming brief). |
+
+### `POST /coach/ask/stream`
+
+Same body, SSE response. Tokens stream as `data: <chunk>\n\n` lines per `RunConfig(streaming_mode=StreamingMode.SSE)`.
+
+### `POST /coach/brief`, `POST /coach/debrief`
+
+Whole-pipeline endpoints — directly invoke `BriefPipeline` / `DebriefPipeline` without going through the intent classifier. Use these when you know you want a pre-session brief or a post-session debrief.
+
+### `GET /coach/agents`
+
+Returns the `AGENT_REGISTRY` — a JSON list of `{name, role, example_questions}` for every QA agent the orchestrator can route to. The PWA uses this to render a "what can I ask?" picker.
+
+---
+
 ## Backwards compatibility
 
 - The `/analyze` response is **additive** — `pace_note` and `coach_source` are new fields; existing Flutter deserializers that ignore unknown keys keep working.

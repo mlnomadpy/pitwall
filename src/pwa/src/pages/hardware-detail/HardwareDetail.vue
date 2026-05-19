@@ -282,9 +282,14 @@ watch(drilling, (n) => {
       <CyberPanel class="flex flex-col text-body overflow-hidden p-2 flex-grow">
         <div class="flex justify-between items-center mb-2 gap-4">
           <div class="text-silver font-bold uppercase shrink-0">Signals</div>
-          <input 
-            v-model="searchQuery" 
-            type="text" 
+          <input
+            v-model="searchQuery"
+            type="search"
+            inputmode="search"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
             placeholder="SEARCH SIGNALS..."
             class="bg-ink border border-slate text-silver px-2 py-1 w-full max-w-xs focus:outline-none focus:border-ui-good"
           />

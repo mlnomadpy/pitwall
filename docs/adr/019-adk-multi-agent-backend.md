@@ -43,7 +43,7 @@ lit serve --port 8001  # start server before launching the bridge
 
 **Constraints:**
 - ADK must not touch the hot path. The in-drive coaching loop stays as `RuleCoach` + `CoachArbiter`. ADK is a paddock-only concern.
-- `PITWALL_LITERT_URL` and `PITWALL_LITERT_MODEL` are environment variables so the model can be swapped without code changes.
+- `PITWALL_LITERT_URL` and `PITWALL_LITERT_MODEL` are environment variables so the model can be swapped without code changes. *(Renamed in 2026-05 to `PITWALL_ADK_OPENAI_URL` / `PITWALL_ADK_OPENAI_MODEL` — see ADR-022 and the rename note below. The legacy names still work with a `DeprecationWarning`.)*
 
 ## Decision
 

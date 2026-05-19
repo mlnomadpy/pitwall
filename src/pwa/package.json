@@ -11,6 +11,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
+    "e2e:debug": "playwright test --headed --workers=1",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint src/ --ext .vue,.ts,.js",
     "lint:fix": "eslint src/ --ext .vue,.ts,.js --fix",
@@ -27,6 +30,7 @@
     "vue-router": "^5.0.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@tailwindcss/vite": "^4.2.4",
     "@types/howler": "^2.2.12",
     "@types/node": "^24.12.2",

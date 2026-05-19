@@ -8,6 +8,9 @@ export default defineConfig({
     environment: 'happy-dom',
     setupFiles: ['./tests/setup.ts'],
     globals: true,
+    // Playwright e2e specs live under tests/e2e/ and are NOT runnable in
+    // vitest — they need a real browser.
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'text-summary'],

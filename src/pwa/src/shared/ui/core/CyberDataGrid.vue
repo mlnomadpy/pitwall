@@ -74,10 +74,13 @@ defineProps<{
   padding-bottom: 4px; /* Room for scrollbar */
 }
 
+/* `minmax(min(Npx, 100%), 1fr)` lets cells collapse below the preferred floor
+   on narrow viewports instead of forcing horizontal overflow. The outer
+   wrapper still allows scroll if content genuinely cannot fit. */
 .cols-1 { grid-template-columns: 1fr; }
-.cols-2 { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
-.cols-3 { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
-.cols-4 { grid-template-columns: repeat(4, minmax(90px, 1fr)); }
+.cols-2 { grid-template-columns: repeat(2, minmax(min(120px, 100%), 1fr)); }
+.cols-3 { grid-template-columns: repeat(3, minmax(min(100px, 100%), 1fr)); }
+.cols-4 { grid-template-columns: repeat(4, minmax(min(90px, 100%), 1fr)); }
 
 .data-cell {
   background: rgba(11, 12, 16, 0.6);

@@ -135,7 +135,18 @@ Three coaching modes share this prompt architecture:
 
 ### Paddock Path: ADK Multi-Agent Backend
 
-For off-track interactions (briefings, debriefs, multi-turn Q&A), the system uses an **18-agent ADK backend** powered by Gemma 4 E4B via `lit serve`. See [ADK Agent Architecture](adk-agent-architecture.md) for the full topology.
+For off-track interactions (briefings, debriefs, multi-turn Q&A), the system uses an **18-agent ADK backend** powered by Gemma 4. The model client is selected at process start by the `PITWALL_ADK_BACKEND` env var ([ADR-022](adr/022-openai-compatible-backend-selector.md)):
+
+- `openai` *(default since 2026-05-12)* — HTTP to **[LocalLLM](https://www.tahabouhsine.com/localllm/)**, a sibling Apache-2.0 Android APK that hosts LiteRT-LM and serves `POST /v1/chat/completions` on `127.0.0.1:8099/v1`. The bridge talks to it from Termux over localhost. Same backend also covers dev workstations running Ollama / LM Studio / llama.cpp / vLLM.
+- `engine` — in-process, shares the warm-path engine (single-process Pixel deployment)
+- `litertlm` — HTTP to `lit serve` via ADK's `Gemini(base_url=...)`; legacy / desktop dev
+
+All three are local — there is no hosted-LLM fallback. **The warm path
+(`LitertCoach.brief()` / `debrief()`) is on the same transport** — its
+constructor reads the same `PITWALL_ADK_OPENAI_URL` env (legacy alias
+`PITWALL_LITERT_URL` is still honoured with a `DeprecationWarning`) and defaults to
+HTTP-to-LocalLLM. Every LLM request pitwall makes goes through `127.0.0.1`.
+See [ADK Agent Architecture → Model backend selector](adk-agent-architecture.md#model-backend-selector) for the full topology and the per-backend startup recipes.
 
 ---
 
