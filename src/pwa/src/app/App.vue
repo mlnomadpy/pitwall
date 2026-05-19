@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch, ref } from 'vue'
+import { onMounted, onUnmounted, watch, computed } from 'vue'
 import { RouterView, useRoute } from 'vue-router'
 import { useSaveStore } from '@/entities/save/model/saveStore'
 import { useAudioStore } from '@/features/audio-playback/model/audioStore'
@@ -13,6 +13,9 @@ import ParticleBackground from '@/shared/ui/ParticleBackground.vue'
 import UpdateToast from '@/widgets/update-toast/UpdateToast.vue'
 import TransitionWipe from '@/widgets/transition-wipe/TransitionWipe.vue'
 import { useTouchNavigation } from '@/shared/lib/useTouchNavigation'
+import { useViewport } from '@/shared/lib/useViewport'
+import { useAppScale } from '@/shared/lib/useAppScale'
+import { useKeyboardAvoidance } from '@/shared/lib/useKeyboardAvoidance'
 
 const saveStore = useSaveStore()
 const audioStore = useAudioStore()
@@ -21,11 +24,14 @@ const pauseStore = usePauseStore()
 const coachSpeaksStore = useCoachSpeaksStore()
 const route = useRoute()
 
-const isPortrait = ref(window.innerHeight > window.innerWidth)
+useAppScale()
+useKeyboardAvoidance()
+const viewport = useViewport()
+const isPortrait = computed(() => viewport.isPortrait)
 
 const handleGlobalKey = (e: KeyboardEvent) => {
   if (isPortrait.value) return // Block input in portrait
-  
+
   // Allow toggling pause with Escape anywhere except Title screen
   if (e.key === 'Escape' && route.path !== '/' && !pauseStore.isVisible) {
     audioStore.playSfx('transition_wipe')
@@ -43,21 +49,14 @@ watch(() => saveStore.activeSlot?.settings?.display?.reducedMotion, (reduce) => 
   }
 }, { immediate: true })
 
-const updateOrientation = () => {
-  isPortrait.value = window.innerHeight > window.innerWidth
-}
-
 onMounted(async () => {
   await saveStore.hydrate()
   bridgeStore.startPolling()
-  
   window.addEventListener('keydown', handleGlobalKey)
-  window.addEventListener('resize', updateOrientation)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKey)
-  window.removeEventListener('resize', updateOrientation)
 })
 </script>
 

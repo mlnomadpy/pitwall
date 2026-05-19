@@ -68,7 +68,8 @@ const handleKeydown = (e: KeyboardEvent) => {
 }
 
 .cyber-tab {
-  padding: var(--space-xs, clamp(2px, 0.5vmin, 4px)) var(--space-sm, clamp(4px, 1vmin, 8px));
+  padding: var(--space-xs, clamp(2px, 0.5vmin, 4px)) var(--space-md, clamp(8px, 2vmin, 16px));
+  min-height: var(--touch-target-min);
   font-size: clamp(10px, 2.3vmin, 20px);
   white-space: nowrap;
   cursor: pointer;

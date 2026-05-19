@@ -156,7 +156,7 @@ function exampleClick(text: string) {
             v-for="a in pickableAgents"
             :key="a.name"
             type="button"
-            class="px-2 py-1 text-small border font-mono"
+            class="intent-chip px-2 py-1 text-small border font-mono"
             :class="selectedIntent === intentForAgent(a.name)
               ? 'border-ui-good text-ui-good bg-charcoal'
               : 'border-slate text-silver hover:border-ui-info'"
@@ -228,7 +228,7 @@ function exampleClick(text: string) {
         <button
           v-if="v.isSpeaking.value"
           type="button"
-          class="px-2 py-1 text-small border border-ui-warn text-ui-warn"
+          class="intent-chip px-2 py-1 text-small border border-ui-warn text-ui-warn"
           title="Stop the coach from speaking"
           @click="v.stopSpeaking()"
         >
@@ -348,6 +348,7 @@ function exampleClick(text: string) {
   font-size: clamp(10px, 1.7vmin, 13px);
   letter-spacing: 0.1em;
   padding: 4px 10px;
+  min-height: var(--touch-target-min);
   cursor: pointer;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
@@ -356,6 +357,12 @@ function exampleClick(text: string) {
   gap: 6px;
   touch-action: manipulation;
   transition: border-color 120ms ease, color 120ms ease;
+}
+
+.intent-chip {
+  min-height: var(--touch-target-min);
+  display: inline-flex;
+  align-items: center;
 }
 .mic-btn:hover { border-color: var(--color-ui-info); color: var(--color-ui-info); }
 .mic-btn:active { transform: translateY(1px); }
