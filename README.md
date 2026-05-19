@@ -11,8 +11,25 @@
 [Field test](#status)
 [License](#license)
 [Explainer](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)
+[Tech stack](docs/stack.md)
 
 > **[→ Project Explainer](https://storage.googleapis.com/pitwall-demo/pitwall-explainer.html)** — architecture, cue distribution, Sonoma corner doctrine, team.
+
+### Built with the Google developer stack
+
+Pitwall is built end-to-end on Google's developer ecosystem — from the IDE that
+authored the bridge to the on-device LLM that coaches in-cabin. See the
+**[Built with Google](docs/stack.md)** landing page for the full marketing brief.
+
+| Layer                        | Tool                       | Where in Pitwall                                                 |
+| ---------------------------- | -------------------------- | ---------------------------------------------------------------- |
+| 🟦 Agentic IDE               | **Antigravity**            | Authored 56 endpoints, 21 ADRs, the ADK refactor                 |
+| 🟥 Developer CLI             | **Gemini CLI**             | Workflow glue: codegen, doc sweeps, design-spec review           |
+| 🟨 Android tooling           | **Android Studio**         | v1 client build, Tensor G5 profiling, Termux service packaging   |
+| 🟩 Android UI                | **Jetpack Compose**        | 42 composables for the in-cabin HUD + coach card (v1)            |
+| 🟦 Multi-agent runtime       | **Google ADK**             | 18-agent paddock backend, 15 SQL-safe tools, KV-cache reuse      |
+| 🟩 On-device inference       | **Gemma 4 + LiteRT-LM**    | E2B in the warm path (<100 ms), E4B in the paddock (2–15 s)      |
+| 🟥 On-phone LLM server       | **[LocalLLM](https://www.tahabouhsine.com/localllm/)** ([repo](https://github.com/mlnomadpy/localllm)) | Sibling Apache-2.0 APK; OpenAI-compatible HTTP server on `:8099/v1`, LiteRT-LM-backed |
 
 A real-time, on-device coaching system for track-day drivers. Runs on a
 Pixel 10 via Termux: ingests CAN telemetry over USB from the car's OBD-II
@@ -182,22 +199,77 @@ litert-lm import \
 # Lands at ~/.litert-lm/models/gemma-4-e2b/model.litertlm
 ```
 
-**ADK multi-agent paddock backend — Gemma 4 E4B (pre-brief, debrief, Q&A):**
+**LLM coach — talks to [LocalLLM](https://www.tahabouhsine.com/localllm/) over local HTTP (default since ADR-022):**
+
+Both the warm path (`LitertCoach.brief()` / `debrief()`) and the ADK paddock
+tier default to HTTP-to-LocalLLM — a sibling Apache-2.0 Android APK
+([github.com/mlnomadpy/localllm](https://github.com/mlnomadpy/localllm))
+that hosts LiteRT-LM in a native Android process and exposes an
+OpenAI-compatible HTTP server on `127.0.0.1:8099/v1`. **Every LLM request
+pitwall makes is a `POST /v1/chat/completions` to LocalLLM on the same phone.**
 
 ```bash
-pip install google-adk
-
-# Download E4B (~4 GB) and start the server:
-lit pull gemma-4-e4b
-lit serve --port 8001   # run in a separate terminal before starting the bridge
+pip install 'google-adk[litellm]'
 ```
 
-Both backends fall back silently when unavailable — the hot-path canonical
-phrase coach always works.
+**A. Default — Pixel + LocalLLM APK (no config needed):**
+
+```bash
+# 1. Install LocalLLM (adb install -r app-debug.apk, or build from
+#    github.com/mlnomadpy/localllm). Open it, download a Gemma 4 .litertlm
+#    from its in-app catalog, copy the bearer token from Settings.
+# 2. From Termux on the same phone:
+PITWALL_LITERT_API_KEY="<paste-LocalLLM-token>" python3 -m src.pitwall
+# Defaults: PITWALL_LITERT_URL=http://localhost:8099/v1
+#           PITWALL_LITERT_MODEL=gemma3n-e2b
+#           PITWALL_ADK_BACKEND=openai
+```
+
+**B. Opt-out — in-process LiteRT (no LocalLLM, no second APK):**
+
+```bash
+PITWALL_LITERT_URL="" \
+PITWALL_ADK_BACKEND=engine \
+PITWALL_LITERTLM_PATH=~/storage/shared/Pitwall/models/gemma-4-E2B-it.litertlm \
+python3 -m src.pitwall
+```
+
+**C. Legacy — `lit serve` on a desktop:**
+
+```bash
+lit pull gemma-4-e4b && lit serve --port 8001   # separate terminal
+PITWALL_LITERT_URL=http://localhost:8001 \
+PITWALL_ADK_BACKEND=litertlm \
+python3 -m src.pitwall
+```
+
+**D. Dev workstation — Ollama / LM Studio / llama.cpp / vLLM:**
+
+```bash
+PITWALL_LITERT_URL=http://localhost:11434/v1 \
+PITWALL_LITERT_MODEL=gemma2:2b \
+python3 -m src.pitwall
+# (Default PITWALL_ADK_BACKEND=openai already routes via LiteLlm.)
+```
+
+| Var                       | Default                        | Purpose                                            |
+| ------------------------- | ------------------------------ | -------------------------------------------------- |
+| `PITWALL_ADK_BACKEND`     | `openai`                       | `engine` \| `litertlm` \| `openai`                 |
+| `PITWALL_LITERT_URL`      | `http://localhost:8099/v1`     | HTTP base for **both** warm path and paddock; empty string falls back to in-process |
+| `PITWALL_LITERT_MODEL`    | `gemma3n-e2b`                  | model id (must match what the server has loaded)   |
+| `PITWALL_LITERT_API_KEY`  | `lit-serve-not-required`       | LocalLLM's signed bearer token                     |
+
+All backends are **local** — no hosted LLM is ever called.
+
+When LocalLLM is unreachable, brief/debrief fall back to templated narratives
+(see `_templated_pre_brief`) and the hot-path canonical phrase coach always
+works — the in-drive < 100 ms loop is LLM-free by design (ADR-017).
 
 > **Note:** earlier docs referenced `mediapipe` + `.task` files. We use
-> `litert-lm` (cross-platform macOS / Linux / Termux) with `.litertlm`
-> format. Per ADR-017.
+> `litert-lm` (cross-platform macOS / Linux / Termux / Android) with the
+> `.litertlm` format. Per ADR-017. ADR-022 routed every LLM request through
+> LocalLLM's OpenAI-compatible HTTP server on the same phone — no hosted
+> model is ever called from any tier.
 
 ### Run the bridge
 
