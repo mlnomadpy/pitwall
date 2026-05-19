@@ -28,6 +28,8 @@ import json
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -897,6 +899,15 @@ class LitertCoach(CoachEngine):
         "models/gemma-4-E2B-it.task",
     ]
 
+    # Default LocalLLM endpoint — Apache-2.0 Android APK at
+    # https://www.tahabouhsine.com/localllm/ exposing OpenAI-compatible
+    # /v1/chat/completions. ADR-022 makes this the default transport for
+    # both warm (brief/debrief) and paddock (ADK) LLM calls. Override with
+    # the PITWALL_LITERT_URL env var; set to empty string to fall back to
+    # in-process litert_lm.Engine on the same machine.
+    DEFAULT_HTTP_URL = "http://localhost:8099/v1"
+    DEFAULT_HTTP_MODEL = "gemma3n-e2b"
+
     def __init__(
         self,
         model_path: str = "",
@@ -916,6 +927,34 @@ class LitertCoach(CoachEngine):
         self._engine_ctx = None       # context-manager handle (for clean close)
         self._init_error: Optional[str] = None
 
+        # HTTP transport (LocalLLM) state. Truthy `_http_url` means HTTP
+        # mode is selected — `_generate` will POST to chat.completions
+        # instead of touching the in-process engine.
+        self._http_url: str = ""
+        self._http_model: str = ""
+        self._http_api_key: str = ""
+        self._http_timeout_s: float = float(
+            os.getenv("PITWALL_LITERT_HTTP_TIMEOUT_S", "30")
+        )
+
+        # ADR-022: prefer HTTP-to-LocalLLM by default. Setting
+        # PITWALL_LITERT_URL to an empty string opts out and falls back to
+        # in-process litert-lm. Anything else (including the default LocalLLM
+        # URL) selects HTTP and skips loading the engine in this process.
+        http_url = os.getenv("PITWALL_LITERT_URL", self.DEFAULT_HTTP_URL).strip()
+        if http_url:
+            self._http_url = http_url.rstrip("/")
+            self._http_model = os.getenv(
+                "PITWALL_LITERT_MODEL", self.DEFAULT_HTTP_MODEL
+            )
+            self._http_api_key = os.getenv(
+                "PITWALL_LITERT_API_KEY", "lit-serve-not-required"
+            )
+            # Truthy sentinel — brief()/debrief() gate on `self._llm is not None`.
+            self._llm = "http"
+            return
+
+        # In-process engine fallback (opt-in via empty PITWALL_LITERT_URL).
         # All heavy imports are lazy + caught — LitertCoach must construct
         # cleanly on machines without litert-lm so make_coach("auto") can
         # probe + fall back without crashing the bridge.
@@ -989,9 +1028,14 @@ class LitertCoach(CoachEngine):
 
     def health(self) -> dict:
         return {
-            "loaded":   self._llm is not None,
-            "error":    self._init_error or "",
-            "fallback": self._fallback.name,
+            "loaded":    self._llm is not None,
+            "transport": "http" if self._http_url else (
+                "engine" if self._engine is not None else "none"
+            ),
+            "http_url":  self._http_url,
+            "http_model": self._http_model,
+            "error":     self._init_error or "",
+            "fallback":  self._fallback.name,
         }
 
     def propose(self, ctx: CoachContext) -> Optional[CoachingMessage]:
@@ -1014,23 +1058,24 @@ class LitertCoach(CoachEngine):
     def _generate(self, system_prompt: str, user_prompt: str,
                   *, session_id: Optional[str] = None,
                   role: str = "", mode: str = "") -> str:
-        """One-shot generation via litert-lm Engine + Conversation.
+        """One-shot generation.
 
-        The .litertlm bundle ships its own chat template; we use the
-        Conversation API's `messages` preface to inject the system prompt
-        and `send_message` for the user turn. The runtime applies Gemma's
-        chat template internally — no manual <start_of_turn> tokens needed.
+        Two transports, picked at construction:
 
-        Response shape: `{'role': 'assistant', 'content': [{'text': '...',
-        'type': 'text'}, …]}` — content is a list of typed parts. We
-        concatenate every part with type=='text'.
+        - **HTTP (default, ADR-022)** — POST to LocalLLM's OpenAI-compatible
+          `/chat/completions`. Stateless one-shot; system + user message in
+          the `messages` array. Response parsed from `choices[0].message.content`.
+        - **In-process (opt-in)** — `litert_lm.Engine.create_conversation()`
+          + `Conversation.send_message()`. The `.litertlm` bundle ships its
+          own chat template; the runtime applies Gemma's chat template
+          internally — no manual `<start_of_turn>` tokens needed.
 
         Every call emits a friction record (success or failure) so the
         bridge's `/diagnostics/llm_friction` endpoint can surface degradation
         before it bites in a session.
         """
         prompt_chars = len(system_prompt) + len(user_prompt)
-        if self._engine is None:
+        if self._llm is None:
             _emit_friction({
                 "session_id": session_id, "role": role, "mode": mode,
                 "backend": self.backend,
@@ -1043,13 +1088,16 @@ class LitertCoach(CoachEngine):
         err = ""
         text = ""
         try:
-            conv = self._engine.create_conversation(
-                messages=[{"role": "system", "content": system_prompt}],
-            )
-            response = conv.send_message(
-                {"role": "user", "content": user_prompt},
-            )
-            text = _extract_assistant_text(response)
+            if self._http_url:
+                text = self._generate_http(system_prompt, user_prompt)
+            else:
+                conv = self._engine.create_conversation(
+                    messages=[{"role": "system", "content": system_prompt}],
+                )
+                response = conv.send_message(
+                    {"role": "user", "content": user_prompt},
+                )
+                text = _extract_assistant_text(response)
         except Exception as e:
             err = f"{type(e).__name__}: {e}"
             text = ""
@@ -1072,6 +1120,62 @@ class LitertCoach(CoachEngine):
             "error": err, "emotion": "",
         })
         return text
+
+    # ---- HTTP transport (LocalLLM / any OpenAI-compatible local server) ----
+
+    def _generate_http(self, system_prompt: str, user_prompt: str) -> str:
+        """POST to LocalLLM's OpenAI-compatible chat.completions endpoint.
+
+        Synchronous; uses urllib.request to avoid an extra HTTP dep. Returns
+        the assistant text or raises — the caller's try/except converts that
+        into a friction record and a templated fallback.
+        """
+        url = self._http_url + "/chat/completions"
+        payload = {
+            "model": self._http_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "temperature": self.temperature,
+            "max_tokens":  self.max_tokens,
+            "stream": False,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type":  "application/json",
+                "Accept":        "application/json",
+                "Authorization": f"Bearer {self._http_api_key}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self._http_timeout_s) as resp:
+                raw = resp.read()
+        except urllib.error.HTTPError as e:
+            detail = e.read()[:512].decode("utf-8", errors="replace")
+            raise RuntimeError(f"localllm HTTP {e.code}: {detail}") from e
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"localllm unreachable at {url}: {e.reason}") from e
+        data = json.loads(raw.decode("utf-8"))
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"localllm: empty choices in response: {data!r}")
+        msg = choices[0].get("message") or {}
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        # Some servers wrap content as a list of parts; concatenate text parts.
+        if isinstance(content, list):
+            parts = [
+                p.get("text", "") for p in content
+                if isinstance(p, dict) and p.get("type") in ("text", None)
+            ]
+            return "\n".join(s for s in parts if s).strip()
+        return ""
 
     # ---- multi-mode entry points (PRE_BRIEF + POST_SESSION) ----------------
 
@@ -1331,12 +1435,16 @@ def make_coach(
 ) -> CoachEngine:
     """Factory.
 
-    kind="auto"     : try litert; fall back to rule if the model doesn't load.
-    kind="litert"   : force on-device LiteRT-LM via MediaPipe Genai —
-                      LitertCoach internally falls back to RuleCoach output
-                      if mediapipe isn't installed or the .task file is
-                      missing, so calling code can always rely on getting
-                      *something* back.
+    kind="auto"     : prefer LitertCoach. Per ADR-022 LitertCoach now
+                      defaults to HTTP transport against LocalLLM
+                      (`http://localhost:8099/v1`) — overridable via
+                      PITWALL_LITERT_URL. Set the env var to an empty
+                      string to fall back to in-process litert-lm; if
+                      neither path produces a loaded LLM, falls through
+                      to RuleCoach.
+    kind="litert"   : force LitertCoach (same HTTP-default behaviour as
+                      "auto"). Internally falls back to templated output
+                      if LocalLLM is unreachable AND no .litertlm is found.
     kind="rule"     : force the zero-dep templated coach.
     """
     model_path = litert_model_path or tflite_model_path

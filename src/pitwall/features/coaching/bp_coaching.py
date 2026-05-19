@@ -285,10 +285,16 @@ def coach_ask():
             recent = history[-6:]
             history_text = "Conversation so far:\n" + "\n".join(f"{'DRIVER' if t['role']=='user' else 'COACH'}: {t['text']}" for t in recent) + "\n\n"
     prompt_lines = [f"Driver: {driver_id or 'unknown'}.", f"Session context: {session_id or 'general'}."]
-    if intent_override: prompt_lines.append(f"[intent_override:{intent_override}]")
     prompt = "\n".join(prompt_lines) + "\n" + history_text + f"Driver question: {question}"
+    # Intent override goes through ADK session state, not the prompt text —
+    # PitwallOrchestrator reads `temp:intent_override` to bypass regex routing.
+    # Embedding it as `[intent_override:X]` in the prompt was a no-op (the
+    # orchestrator never looked at the prompt text). Audit fix 2026-05-13.
+    overrides: dict = {}
+    if intent_override: overrides["temp:intent_override"] = intent_override
     try:
-        answer, _adk_sid = state.run_adk(prompt, user_id=driver_id or "driver")
+        answer, _adk_sid = state.run_adk(prompt, user_id=driver_id or "driver",
+                                         state_overrides=overrides or None)
         _drain_adk_traces(adk_session_id=_adk_sid, pitwall_sid=session_id)
         _em = re.search(r"\[EMOTION:(\w+)\]", answer)
         emotion = _em.group(1) if _em else "neutral"
@@ -331,12 +337,14 @@ def coach_ask_stream():
         recent = history[-6:]
         history_text = "Conversation so far:\n" + "\n".join(f"{'DRIVER' if t['role']=='user' else 'COACH'}: {t['text']}" for t in recent) + "\n\n"
     prompt_lines = [f"Driver: {driver_id or 'unknown'}.", f"Session context: {session_id or 'general'}."]
-    if intent_override: prompt_lines.append(f"[intent_override:{intent_override}]")
     prompt = "\n".join(prompt_lines) + "\n" + history_text + f"Driver question: {question}"
+    overrides: dict = {}
+    if intent_override: overrides["temp:intent_override"] = intent_override
     def generate():
         accum = ""
         try:
-            for chunk in state.stream_adk(prompt, user_id=driver_id or "driver"):
+            for chunk in state.stream_adk(prompt, user_id=driver_id or "driver",
+                                          state_overrides=overrides or None):
                 if not chunk: continue
                 if chunk.startswith(accum) and len(chunk)>len(accum): delta=chunk[len(accum):]; accum=chunk
                 else: delta=chunk; accum+=chunk

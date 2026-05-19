@@ -172,17 +172,32 @@ def session_corners(sid: str):
                     "apex_distance_m": round(float(apex_row[1] or 0), 1),
                 })
             if not passes:
-                out.append({"name": c["name"], "n_passes": 0, "best_pass": None,
-                            "averages": None, "grade": "ungraded", "gold_delta_kmh": None})
+                out.append({
+                    "name": c["name"], "n_passes": 0, "best_pass": None,
+                    "averages": None, "grade": "ungraded",
+                    "gold_delta_kmh":       None,
+                    "gold_delta_entry_kmh": None,
+                    "gold_delta_exit_kmh":  None,
+                    "gold_delta_time_s":    None,
+                })
                 continue
             best_pass = max(passes, key=lambda p: p["apex_speed_kmh"])
             apexes = [p["apex_speed_kmh"] for p in passes]
             ctimes = [p["corner_time_s"] for p in passes]
             averages = {"apex_speed_kmh": round(sum(apexes)/len(apexes), 1),
                         "corner_time_s": round(sum(ctimes)/len(ctimes), 3)}
-            grade = "ungraded"; gold_delta_kmh = None
+            grade = "ungraded"
+            gold_delta_kmh = None
+            gold_delta_entry_kmh = None
+            gold_delta_exit_kmh = None
+            gold_delta_time_s = None
             gold = gold_by_corner.get(c["name"])
             if gold is not None:
+                # Apex delta drives the corner grade — speed-vs-gold is the
+                # canonical metric. The other three deltas are populated
+                # whenever the gold record carries the field (sonoma_gold.json
+                # has all of entry / exit / corner_time for every corner) so
+                # CornerScorecard can render real arrows on every row.
                 gold_apex = float(getattr(gold, "apex_speed_kmh", 0))
                 if gold_apex > 0:
                     delta = best_pass["apex_speed_kmh"] - gold_apex
@@ -192,9 +207,30 @@ def session_corners(sid: str):
                     elif delta >= -5.0: grade = "C"
                     elif delta >= -8.0: grade = "D"
                     else: grade = "F"
-            out.append({"name": c["name"], "n_passes": len(passes), "best_pass": best_pass,
-                        "averages": averages, "grade": grade, "gold_delta_kmh": gold_delta_kmh,
-                        "passes": passes})
+                gold_entry = float(getattr(gold, "entry_speed_kmh", 0))
+                if gold_entry > 0:
+                    gold_delta_entry_kmh = round(best_pass["entry_speed_kmh"] - gold_entry, 1)
+                gold_exit = float(getattr(gold, "exit_speed_kmh", 0))
+                if gold_exit > 0:
+                    gold_delta_exit_kmh = round(best_pass["exit_speed_kmh"] - gold_exit, 1)
+                gold_time = float(getattr(gold, "corner_time_s", 0))
+                if gold_time > 0:
+                    # Time is signed the other way — positive means slower
+                    # than gold (lost time in the corner). CornerScorecard
+                    # flips the colour convention via `kind: 'time'`.
+                    gold_delta_time_s = round(best_pass["corner_time_s"] - gold_time, 3)
+            out.append({
+                "name": c["name"],
+                "n_passes": len(passes),
+                "best_pass": best_pass,
+                "averages": averages,
+                "grade": grade,
+                "gold_delta_kmh":       gold_delta_kmh,
+                "gold_delta_entry_kmh": gold_delta_entry_kmh,
+                "gold_delta_exit_kmh":  gold_delta_exit_kmh,
+                "gold_delta_time_s":    gold_delta_time_s,
+                "passes": passes,
+            })
         conn.close()
     return jsonify({"session_id": sid, "track": track.get("name", "Sonoma Raceway"),
                     "lap_count": len(laps), "corners": out, "gold_available": bool(gold_by_corner)})

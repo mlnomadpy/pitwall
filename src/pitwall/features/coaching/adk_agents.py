@@ -3,22 +3,26 @@ ADK multi-agent topology for pitwall paddock coaching.
 
 Model backends (`PITWALL_ADK_BACKEND`)
 --------------------------------------
-- **`engine`** (recommended on Termux/Pixel): in-process via `litert_lm.Engine`
-  using `LitertLmModel(BaseLlm)`. No second process. Guaranteed Tensor G5 NPU
-  access (same engine `LitertCoach` uses for the hot path). Explicit KV-cache
-  control via per-system-prompt Conversation reuse.
-- **`litertlm`** (default — preserves existing setup): HTTP via ADK's
-  `Gemini(base_url=..., model=...)` against a separately-launched `lit serve`.
-  This is the path documented at https://adk.dev/agents/models/litert-lm/.
-- **`openai`**: HTTP via `LiteLlm` (litellm) against any OpenAI-compatible
-  server (Ollama, llama.cpp, vLLM, litegpt). For dev machines.
+- **`openai`** (default per ADR-022): HTTP via `LiteLlm` (litellm) against
+  any OpenAI-compatible local server. The intended target is
+  [LocalLLM](https://www.tahabouhsine.com/localllm/) — an Apache-2.0 Android
+  APK ([github.com/mlnomadpy/localllm](https://github.com/mlnomadpy/localllm))
+  that hosts LiteRT-LM and exposes `/v1/chat/completions` on port 8099. The
+  same backend also covers Ollama, LM Studio, llama.cpp `--server`, vLLM, etc.
+  on dev machines.
+- **`engine`**: in-process via `litert_lm.Engine` using `LitertLmModel(BaseLlm)`.
+  No second process. Useful when the bridge already loads the engine for the
+  warm path and you don't want a separate model server APK.
+- **`litertlm`**: HTTP via ADK's `Gemini(base_url=..., model=...)` against a
+  separately-launched `lit serve`. The path documented at
+  https://adk.dev/agents/models/litert-lm/. Kept for desktop dev.
 
 Environment overrides
 ---------------------
-    PITWALL_ADK_BACKEND      default: "litertlm"  ({engine | litertlm | openai})
-    PITWALL_LITERT_URL       default: http://localhost:8001  (litertlm/openai)
-    PITWALL_LITERT_MODEL     default: gemma3n-e2b   (litertlm/openai model id)
-    PITWALL_LITERT_API_KEY   default: lit-serve-not-required (openai only)
+    PITWALL_ADK_BACKEND      default: "openai"  ({engine | litertlm | openai})
+    PITWALL_LITERT_URL       default: http://localhost:8099/v1  (LocalLLM)
+    PITWALL_LITERT_MODEL     default: gemma3n-e2b   (must match the loaded model)
+    PITWALL_LITERT_API_KEY   default: lit-serve-not-required (openai bearer token)
     PITWALL_LITERTLM_PATH    .litertlm bundle path (engine backend)
     PITWALL_LITERTLM_BUDGET  KV-cache char budget per agent (default 30000)
     PITWALL_ADK_TIMEOUT_S    default: 45  (raises after this many seconds)
@@ -234,18 +238,25 @@ async def _delete_session_async(user_id: str, sid: str) -> None:
 # ── Intent classifier (always defined — pure-Python regex, no ADK dep) ───────
 
 _INTENT_PATTERNS: list[tuple[str, re.Pattern]] = [
-    # Most specific first; corner before brief so "brief me on T6" hits corner.
-    ("corner",         re.compile(r"\bT\s?\d{1,2}\b|\bturn\s+\d+\b|\bcarousel\b|\bbus\s*stop\b", re.I)),
+    # Order matters — first match wins. Whole-flow intents come BEFORE the
+    # corner pattern so "brief me on T6" / "debrief Turn 5" / "voice script
+    # at T3" route to the appropriate pipeline rather than getting hijacked
+    # by the corner regex (audit finding 2026-05-12).
     ("debrief",        re.compile(r"\b(debrief|how did i do|session summary|review my session)\b", re.I)),
     ("brief",          re.compile(r"\b(pre[- ]?session|today'?s plan|before i go out)\b|^\s*brief(\s+me)?\b", re.I)),
+    ("voice_script",   re.compile(r"\b(voice\s+scripts?|tts|cue\s+scripts?|pace\s+notes?|audio\s+cues?|generate\s+(?:cue|voice|audio)\s+\w+|write\s+(?:cue|voice|audio)\s+\w+)\b", re.I)),
+    # Now the corner pattern — for queries that genuinely target a single corner.
+    ("corner",         re.compile(r"\bT\s?\d{1,2}\b|\bturn\s+\d+\b|\bcarousel\b|\bbus\s*stop\b", re.I)),
     ("gold_lap",       re.compile(r"\b(gold lap|reference lap|gold standard)\b|\bAJ\b", re.I)),
     ("weather",        re.compile(r"\b(weather|fog|greasy|track temp|conditions)\b", re.I)),
     ("session_plan",   re.compile(r"\b(practice plan|how should i structure|laps available)\b|\bi have \d+ laps?\b", re.I)),
     ("incident",       re.compile(r"\b(incident|close call|scary|saved it|nearly off|moment at)\b", re.I)),
     ("race_pace",      re.compile(r"\b(race pace|stint|degradation|tyre drop)\b", re.I)),
     ("goal",           re.compile(r"\b(pb target|lap time goal|what time should|target lap|set me a goal)\b", re.I)),
-    ("mental_map",     re.compile(r"\b(variance|consistent|inconsistent|mental map)\b", re.I)),
-    ("voice_script",   re.compile(r"\b(voice script|tts|cue script|pace notes|audio cue)\b", re.I)),
+    # Widened 2026-05-12 to cover "consistency" (noun), "repeatable/repeatability",
+    # and "stable" — the natural phrasings users reach for when asking about
+    # corner-to-corner repeatability.
+    ("mental_map",     re.compile(r"\b(variance|consistenc(?:y|ies)|consistent|inconsistent|mental\s*map|repeatab(?:le|ility)|stable)\b", re.I)),
     ("lap_comparison", re.compile(r"\blap\s*\d+\s*vs|compare lap|why was lap|fastest vs slowest\b", re.I)),
     ("progress",       re.compile(r"\b(progress|improving|getting faster|over sessions|this month)\b", re.I)),
     ("setup",          re.compile(r"\b(setup|understeer|oversteer|balance|nervous mid|car feel)\b", re.I)),
@@ -293,9 +304,12 @@ else:
     #   litertlm  → HTTP to `lit serve` via Gemini(base_url=...)
     #   openai    → HTTP to any OpenAI-compatible server via LiteLlm
 
-    _BACKEND = os.getenv("PITWALL_ADK_BACKEND", "litertlm").lower()
+    # ADR-022: LocalLLM (Android APK exposing OpenAI-compat HTTP on :8099)
+    # is the default paddock backend. Override with PITWALL_ADK_BACKEND for
+    # legacy lit serve (`litertlm`) or in-process (`engine`) deployments.
+    _BACKEND = os.getenv("PITWALL_ADK_BACKEND", "openai").lower()
     _MODEL_ID = os.getenv("PITWALL_LITERT_MODEL", "gemma3n-e2b")
-    _MODEL_URL = os.getenv("PITWALL_LITERT_URL", "http://localhost:8001")
+    _MODEL_URL = os.getenv("PITWALL_LITERT_URL", "http://localhost:8099/v1")
 
     if _BACKEND == "engine":
         if not HAS_LITERTLM_MODEL:
@@ -308,8 +322,13 @@ else:
             raise RuntimeError(
                 "PITWALL_ADK_BACKEND=openai requires litellm — "
                 "pip install google-adk[litellm]")
+        # litellm routes by provider prefix: `openai/<model>` means
+        # OpenAI-compatible HTTP. Without it, litellm cannot resolve the
+        # provider and raises BadRequestError. We tolerate users who
+        # already provided a prefix (e.g. `ollama/gemma2:2b`).
+        _LITELLM_MODEL = _MODEL_ID if "/" in _MODEL_ID else f"openai/{_MODEL_ID}"
         _model = LiteLlm(
-            model=_MODEL_ID,
+            model=_LITELLM_MODEL,
             api_base=_MODEL_URL,
             api_key=os.getenv("PITWALL_LITERT_API_KEY", "lit-serve-not-required"),
         )
@@ -421,8 +440,10 @@ else:
     voice_script_agent = _qa_agent(
         "VoiceScriptAgent",
         "Generate 2-3 word TTS cue phrases per driving phase per corner; "
-        "write the result to the audio cache via save_voice_scripts.",
-        [get_audio_script_context, save_voice_scripts],
+        "write the result to the audio cache via save_voice_scripts. "
+        "Use query_pitwall_db to validate corner names and adapt script "
+        "tone to the driver's actual performance level on this corner.",
+        [get_audio_script_context, save_voice_scripts, query_pitwall_db],
     )
     pedagogy_agent = _qa_agent(
         "PedagogyAgent",
@@ -764,46 +785,6 @@ else:
             except Exception:
                 pass
             return None
-
-
-    class LoopAgent(BaseAgent):
-        """Self-refining agent wrapper. Runs the sub_agent up to `max_iterations`.
-
-        If the sub_agent output does not satisfy the `satisfaction_check` (optional),
-        it re-runs the agent with the prior error as feedback.
-        """
-
-        def __init__(self, name: str, sub_agent: BaseAgent, max_iterations: int = 3):
-            super().__init__(name=name, sub_agents=[sub_agent])
-            self.sub_agent = sub_agent
-            self.max_iterations = max_iterations
-
-        async def _run_async_impl(self, ctx) -> AsyncGenerator:
-            iteration = 0
-            while iteration < self.max_iterations:
-                iteration += 1
-                ctx.session.state["temp:loop_iteration"] = iteration
-                
-                last_content = None
-                async for event in self.sub_agent.run_async(ctx):
-                    if hasattr(event, "content") and event.content:
-                        last_content = event.content
-                    yield event
-                
-                # Simple satisfaction check: does the response contain "[EMOTION:"?
-                # If it does, we assume it's a valid complete response from our system.
-                text = ""
-                if last_content and last_content.parts:
-                    text = last_content.parts[0].text or ""
-                
-                if "[EMOTION:" in text:
-                    break
-                    
-                # If not satisfied, we could add a "Please refine your answer" prompt here,
-                # but for now we just loop or break.
-                if iteration < self.max_iterations:
-                    # In a real LoopAgent, we'd append a 'Refine' message to ctx.
-                    pass
 
 
     # ── Runner (uses App so plugins ride on the app, not the deprecated arg) ─
